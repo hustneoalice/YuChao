@@ -66,6 +66,7 @@ function renderBackbar(): void {
 }
 
 export function initMarket(): void {
+  initRcolResize();
   document.getElementById("btn-back")!.addEventListener("click", () => {
     if (!mk.from) return;
     document.dispatchEvent(new CustomEvent("yc:goto-page", { detail: mk.from.page }));
@@ -90,10 +91,12 @@ export function initMarket(): void {
       if (document.getElementById("page-market")!.classList.contains("on")) kl?.resize();
     }, 160);
   });
-  // 主题 / 涨跌方向 / 强调色变化 → 图表重上色；右列卡重渲染
+  // 主题 / 涨跌方向 / 强调色变化 → 图表重上色；右列卡重渲染；
+  // 登录态变化 → applyRcolW 按 new user 记忆重放卡片栏宽度
   subscribe(() => {
     kl?.retheme();
     if (mk.cur) { renderKlLegend(); }
+    applyRcolW();
     renderRight();
   });
 }
@@ -332,6 +335,43 @@ function cardHead(def: { id: string; name: string; icon: string }): string {
     `<span class="cbar"><span class="cseg"><button class="cbtn${p.mode === "simple" ? " on" : ""}" data-mode="simple" title="简单模式">${ic("list", 12)}</button><button class="cbtn${p.mode === "detailed" ? " on" : ""}" data-mode="detailed" title="详细模式">${ic("faders-horizontal", 12)}</button></span>` +
     `<button class="cbtn" data-fold title="折叠 / 展开">${ic("caret-up", 12)}</button>` +
     `<span class="drag" draggable="true" title="拖动排序">${ic("dots-six-vertical", 13)}</span></span></div>`;
+}
+
+/* 右列功能卡宽度：默认 366（原 244 × 1.5），拖拽可调，按登录用户分别记忆 */
+const RCOL_MIN = 280, RCOL_MAX = 560;
+const rcolKey = () => `yc_rcol_w:${getState().user?.id || "guest"}`;
+export function applyRcolW(): void {
+  const w = Number(localStorage.getItem(rcolKey()));
+  if (w >= RCOL_MIN && w <= RCOL_MAX)
+    document.documentElement.style.setProperty("--rcol-w", `${w}px`);
+}
+function initRcolResize(): void {
+  applyRcolW();
+  const grip = document.getElementById("rcol-grip")!;
+  grip.addEventListener("mousedown", (e) => {
+    e.preventDefault();
+    grip.classList.add("on");
+    document.body.style.cursor = "col-resize";
+    document.body.style.userSelect = "none";
+    const move = (ev: MouseEvent) => {
+      // 右缘贴窗口右边（页面留白 16px + 余量 2px），指针位置即目标宽度
+      const w = Math.min(RCOL_MAX, Math.max(RCOL_MIN,
+        document.documentElement.clientWidth - ev.clientX - 18));
+      document.documentElement.style.setProperty("--rcol-w", `${w}px`);
+      localStorage.setItem(rcolKey(), String(w));
+      clearTimeout((window as unknown as { _rz?: number })._rz);
+      (window as unknown as { _rz?: number })._rz = window.setTimeout(klResize, 120);
+    };
+    const up = () => {
+      grip.classList.remove("on");
+      document.body.style.cursor = "";
+      document.body.style.userSelect = "";
+      window.removeEventListener("mousemove", move);
+      window.removeEventListener("mouseup", up);
+    };
+    window.addEventListener("mousemove", move);
+    window.addEventListener("mouseup", up);
+  });
 }
 
 export function renderRight(): void {
