@@ -116,7 +116,7 @@ svg{display:block}
 .userchip span{font-size:11.5px;color:var(--dim)}
 
 /* ═══ 图标侧栏（宽度可拖拉调整：--rail-w 由 main.ts 写入并持久化） ═══ */
-.shell{display:grid;grid-template-columns:var(--rail-w, 84px) 1fr;height:calc(100vh - 52px);margin-top:52px}
+.shell{display:grid;grid-template-columns:var(--rail-w, 72px) 1fr;height:calc(100vh - 52px);margin-top:52px}
 .rail{background:var(--panel);border-right:1px solid var(--border);
   display:flex;flex-direction:column;align-items:center;gap:6px;padding:12px 0;position:relative}
 .rail a{width:46px;height:46px;border-radius:13px;display:grid;place-items:center;
