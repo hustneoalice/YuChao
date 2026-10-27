@@ -232,10 +232,14 @@ def fetch_qt_batch(codes: List[str], progress=None, cancel=None) -> Dict[str, Tu
     [39]PE(TTM) [44]流通市值(亿) [45]总市值(亿) [46]PB。市值/成交额换算成元后
     与东财对齐。"""
     out: Dict[str, Tuple] = {}
+    from .http import tx_symbol           # 裸码 → sh/sz/bj 前缀（腾讯丢弃裸码请求）
     total = len(codes)
     for i in range(0, total, _QT_BATCH):
         chunk = codes[i:i + _QT_BATCH]
-        url = f"https://qt.gtimg.cn/q={','.join(c for c in chunk)}"
+        prefixed = [c for c in (tx_symbol(s) for s in chunk) if c]
+        if not prefixed:
+            continue
+        url = f"https://qt.gtimg.cn/q={','.join(prefixed)}"
         resp = _get_text(url)
         for m in re.finditer(r'v_(?:sh|sz|bj)(\d{6})="([^"]*)"', resp):
             sym, payload = m.group(1), m.group(2).split("~")
