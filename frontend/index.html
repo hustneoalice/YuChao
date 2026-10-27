@@ -12,7 +12,7 @@
 <div class="topbar">
   <div class="brand">
     <span class="mark" data-ic="chart-line-up" data-sz="15"></span>
-    <b>驭潮</b><span>YuChao · StrategyLens</span>
+    <b>驭潮</b><span>YuChao</span>
   </div>
   <div class="gsearch">
     <div class="gbox"><span data-ic="magnifying-glass" data-sz="14"></span>
@@ -38,6 +38,7 @@
     <a data-page="cards" data-ic="cards" data-t="功能卡片" data-sz="21"></a>
     <div class="bot"></div>
     <a data-page="settings" data-ic="gear" data-t="设置" data-sz="21"></a>
+    <div class="rail-grip" id="rail-grip" title="拖拽调整侧栏宽度"></div>
   </nav>
 
   <main class="main">
@@ -53,7 +54,7 @@
               </button>
               <div class="sh-name">
                 <b id="s-name">—</b><span class="sh-code num" id="s-code"></span>
-                <div class="tags"><span class="tag acc" id="s-seg" hidden></span><span class="tag flat" id="s-board" hidden></span></div>
+                <span class="tag flat" id="s-board" hidden></span>
               </div>
             </div>
             <div class="sh-price">
@@ -65,8 +66,6 @@
 
           <div class="chartbox" style="flex:1;min-height:0">
             <div class="chartbar">
-              <span class="mono" style="color:var(--faint);font-size:11px">KLINE · <span id="kl-code">—</span></span>
-              <span class="barsep"></span>
               <span class="seg" id="kl-period">
                 <button class="on" data-p="d">日K</button><button data-p="w">周K</button><button data-p="m">月K</button>
               </span>

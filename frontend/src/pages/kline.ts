@@ -133,8 +133,7 @@ export interface KlineChartHandle {
 const MAIN_NAMES: Record<string, string> = {
   ma: "MA", boll: "BOLL", short: "SHORT_TREND_CHANNEL", mid: "MID_TREND_CHANNEL",
 };
-const SUB_NAMES = { vol: "VOL", macd: "MACD", kdj: "KDJ" } as const;
-type SubKey = keyof typeof SUB_NAMES;
+export type SubKey = "vol" | "macd" | "kdj";
 
 function styles() {
   const border = cssv("--border") || "#2B2B2F";
@@ -209,47 +208,54 @@ export function mountKline(el: HTMLElement): KlineChartHandle {
       chart.setDataLoader({ getBars: (params) => { params.callback(list, false); } });
     },
     setMain(ind) {
-      ["MA", "BOLL", "SHORT_TREND_CHANNEL", "MID_TREND_CHANNEL"].forEach((n) =>
-        chart.removeIndicator({ paneId: "candle_pane", name: n }));
+      // 策影同款：按实例逐个移除主图指标，再 isStack=true 叠加创建
+      // （isStack=false 会触发 addIndicator 的 pane replace 语义）
+      chart.getIndicators({ paneId: "candle_pane" }).forEach((i) =>
+        chart.removeIndicator({ id: i.id }));
       if (ind === "ma") {
-        chart.createIndicator({ name: "MA", paneId: "candle_pane", calcParams: [5, 10, 20] } as never);
         // MA 配色与页面图例一致：MA5 琥珀 / MA10 蓝 / MA20 VIP 金
-        chart.overrideIndicator({
-          name: "MA", paneId: "candle_pane",
+        chart.createIndicator({
+          name: "MA", paneId: "candle_pane", calcParams: [5, 10, 20], isStack: true,
           styles: { lines: [{ color: cssv("--accent") || "#FF9F43" }, { color: "#0A84FF" }, { color: cssv("--vip") || "#FFD60A" }] },
-        } as never);
+        } as never, true);
       } else if (ind === "boll") {
         const dim = cssv("--dim") || "#A1A1A6";
-        chart.createIndicator({ name: "BOLL", paneId: "candle_pane" } as never);
-        chart.overrideIndicator({
-          name: "BOLL", paneId: "candle_pane",
+        chart.createIndicator({
+          name: "BOLL", paneId: "candle_pane", isStack: true,
           styles: { lines: [{ color: dim }, { color: dim }, { color: dim }] },
-        } as never);
+        } as never, true);
       } else {
-        chart.createIndicator({ name: MAIN_NAMES[ind], paneId: "candle_pane" } as never);
+        chart.createIndicator({ name: MAIN_NAMES[ind], paneId: "candle_pane", isStack: true } as never, true);
       }
     },
     setSub(ind: SubKey) {
-      (["vol", "macd", "kdj"] as SubKey[]).forEach((k) =>
-        chart.removeIndicator({ name: SUB_NAMES[k] }));
+      // 策影同款：移除所有副图指标（空窗格由 v10 自动回收），再新建单副图
+      chart.getIndicators()
+        .filter((i) => i.paneId !== "candle_pane")
+        .forEach((i) => chart.removeIndicator({ id: i.id }));
       const up = chartUp(), dn = chartDown();
-      // 不带 paneId → 自动新建副图窗格，返回 pane id 后定高
-      const create = (cfg: object): string | null => {
-        const paneId = chart.createIndicator(cfg as never);
-        if (paneId) chart.setPaneOptions({ id: paneId, height: 92 });
-        return paneId;
+      // 注意：createIndicator 返回的是 indicator.id 而非 paneId！
+      // 高度须经 getPaneOptions() 找到新窗格再设置（策影 updateAllPaneHeights 同款）
+      const applySubHeight = () => {
+        const panes = chart.getPaneOptions() as { id: string }[];
+        const subs = panes.filter((p) => p.id !== "candle_pane" && p.id !== "x_axis_pane");
+        subs.forEach((p) => chart.setPaneOptions({ id: p.id, height: 92 }));
       };
       if (ind === "vol") {
-        create({ name: "VOL", shouldFormatBigNumber: false }); // 轴文本走 registerYAxis('normal') 万/亿
-      } else if (ind === "macd") {
-        const paneId = create({ name: "MACD" });
-        if (paneId) chart.overrideIndicator({
-          name: "MACD", paneId,
+        // 策影 createSubIndicatorConfig：禁用大数格式化，轴/图例文本走万/亿
+        chart.createIndicator({
+          name: "VOL", shouldFormatBigNumber: false,
           styles: { bars: [{ upColor: up, downColor: dn, noChangeColor: NEUTRAL }] },
-        } as never);
+        } as never, false);
+      } else if (ind === "macd") {
+        chart.createIndicator({
+          name: "MACD",
+          styles: { bars: [{ upColor: up, downColor: dn, noChangeColor: NEUTRAL }] },
+        } as never, false);
       } else {
-        create({ name: "KDJ" });
+        chart.createIndicator({ name: "KDJ" } as never, false);
       }
+      applySubHeight();
     },
     retheme() { chart.setStyles(styles()); },
     resize() { chart.resize(); },
@@ -257,5 +263,3 @@ export function mountKline(el: HTMLElement): KlineChartHandle {
   };
   return handle;
 }
-
-export type { SubKey };

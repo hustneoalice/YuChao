@@ -78,7 +78,7 @@ export interface Bar {
 }
 export interface Kline { symbol: string; name?: string; period: string; adjust: string; bars: Bar[] }
 export interface Quote {
-  symbol: string; name?: string; market?: string; industry?: string; status?: string;
+  symbol: string; name?: string; market?: string; industry?: string; concept?: string; status?: string;
   date?: string; open?: number; high?: number; low?: number; close?: number;
   pct_chg?: number; volume?: number; amount?: number; turnover_rate?: number;
   valuation?: { date: string; pe_ttm?: number; pb?: number; ps_ttm?: number; total_mv?: number; circ_mv?: number } | null;

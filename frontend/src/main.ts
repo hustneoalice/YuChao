@@ -6,7 +6,7 @@ import { fmtChg } from "./fmt";
 import { applyAppearance, getState, patch, subscribe } from "./store";
 import { toast } from "./ui";
 import { initAuth, refreshVipUI } from "./auth";
-import { initMarket, openStock, renderKline, renderStockHead } from "./pages/market";
+import { initMarket, klResize, openStock, renderKline, renderStockHead } from "./pages/market";
 import { initWatchlist, renderWatchlist } from "./pages/watchlist";
 import { initSectors, loadSectors } from "./pages/sectors";
 import { initCorepicks, renderCorepicks } from "./pages/corepicks";
@@ -117,11 +117,47 @@ function initSearch(): void {
   });
 }
 
+/* ── 侧栏宽度拖拽（--rail-w，localStorage 持久化） ── */
+function initRailResize(): void {
+  const grip = document.getElementById("rail-grip")!;
+  const apply = (w: number) =>
+    document.documentElement.style.setProperty("--rail-w", `${w}px`);
+  const saved = Number(localStorage.getItem("yc_rail_w"));
+  if (saved >= 64 && saved <= 220) apply(saved);
+  grip.addEventListener("mousedown", (e) => {
+    e.preventDefault();
+    grip.classList.add("on");
+    document.body.style.cursor = "col-resize";
+    document.body.style.userSelect = "none";
+    const move = (ev: MouseEvent) => {
+      // 预留拖拽手柄自身 3px 悬出，取指针位置即目标宽度
+      const w = Math.min(220, Math.max(64, ev.clientX));
+      apply(w);
+      localStorage.setItem("yc_rail_w", String(w));
+      // 行情页图表跟随重排
+      clearTimeout((window as unknown as { _rz?: number })._rz);
+      (window as unknown as { _rz?: number })._rz = window.setTimeout(() => {
+        if (document.getElementById("page-market")!.classList.contains("on")) klResize();
+      }, 120);
+    };
+    const up = () => {
+      grip.classList.remove("on");
+      document.body.style.cursor = "";
+      document.body.style.userSelect = "";
+      window.removeEventListener("mousemove", move);
+      window.removeEventListener("mouseup", up);
+    };
+    window.addEventListener("mousemove", move);
+    window.addEventListener("mouseup", up);
+  });
+}
+
 /* ── 启动 ── */
 function boot(): void {
   applyAppearance();
   injectIcons();
   bindNav();
+  initRailResize();
   initSearch();
   initAuth();
   initMarket();

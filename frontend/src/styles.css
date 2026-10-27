@@ -1,4 +1,4 @@
-/* ═══ StrategyLens / YuChao · 设计系统令牌（暗色看盘默认 / 亮色文档模式） ═══ */
+/* ═══ YuChao · 设计系统令牌（暗色看盘默认 / 亮色文档模式） ═══ */
 :root,[data-theme="dark"]{
   --page:#0A0A0B; --panel:#161618; --panel-2:#232326; --panel-3:#2D2D31;
   --border:#2B2B2F; --border-soft:rgba(255,255,255,.06);
@@ -111,19 +111,23 @@ svg{display:block}
   display:grid;place-items:center;color:#fff;font-size:11px;font-weight:700}
 .userchip span{font-size:11.5px;color:var(--dim)}
 
-/* ═══ 图标侧栏 72px ═══ */
-.shell{display:grid;grid-template-columns:72px 1fr;height:calc(100vh - 52px);margin-top:52px}
+/* ═══ 图标侧栏（宽度可拖拉调整：--rail-w 由 main.ts 写入并持久化） ═══ */
+.shell{display:grid;grid-template-columns:var(--rail-w, 84px) 1fr;height:calc(100vh - 52px);margin-top:52px}
 .rail{background:var(--panel);border-right:1px solid var(--border);
-  display:flex;flex-direction:column;align-items:center;gap:6px;padding:12px 0}
+  display:flex;flex-direction:column;align-items:center;gap:6px;padding:12px 0;position:relative}
 .rail a{width:46px;height:46px;border-radius:13px;display:grid;place-items:center;
   color:var(--faint);position:relative;cursor:pointer}
 .rail a:hover{color:var(--text);background:var(--panel-2)}
 .rail a.on{color:var(--accent);background:var(--accent-soft)}
-.rail a::after{content:attr(data-t);position:absolute;left:56px;top:50%;transform:translateY(-50%) translateX(-4px);
+.rail a::after{content:attr(data-t);position:absolute;left:calc(100% + 10px);top:50%;transform:translateY(-50%) translateX(-4px);
   background:var(--panel-3);color:var(--text);font-size:11.5px;padding:4px 10px;border-radius:7px;
   white-space:nowrap;opacity:0;pointer-events:none;transition:.14s;border:1px solid var(--border);z-index:55}
 .rail a:hover::after{opacity:1;transform:translateY(-50%) translateX(0)}
 .rail .bot{margin-top:auto}
+.rail-grip{position:absolute;top:0;right:-3px;width:6px;height:100%;cursor:col-resize;z-index:56}
+.rail-grip::after{content:"";position:absolute;left:2px;top:50%;transform:translateY(-50%);
+  width:2px;height:34px;border-radius:2px;background:var(--axis);transition:.14s}
+.rail-grip:hover::after,.rail-grip.on::after{background:var(--accent);height:52px}
 
 /* ═══ 主区 ═══ */
 .main{flex:1;min-width:0;display:flex;flex-direction:column;overflow:hidden;background:var(--page)}
@@ -276,16 +280,17 @@ td .lnk:hover{text-decoration:underline}
 .stock-head{display:flex;align-items:center;gap:18px;background:var(--panel);
   border:1px solid var(--border);border-radius:14px;padding:9px 16px}
 .sh-l{display:flex;align-items:center;gap:12px;min-width:0}
-.sh-name{display:flex;flex-wrap:wrap;align-items:baseline;column-gap:9px}
-.sh-name .tags{flex-basis:100%}
+.sh-name{display:flex;flex-wrap:wrap;align-items:baseline;column-gap:9px;row-gap:3px}
 .sh-name b{font-size:19px;font-weight:700;letter-spacing:-.01em}
 .sh-name .sh-code{font-family:var(--mono);font-size:12px;color:var(--dim);letter-spacing:.02em}
-.sh-name .tags{display:flex;gap:5px;margin-top:3px}
 .sh-price{display:flex;align-items:baseline;gap:10px}
 .sh-price .p{font-size:30px;font-weight:700;line-height:1;letter-spacing:-.02em}
 .sh-price .c{font-size:14px;font-weight:650}
-.sh-stats{display:grid;grid-template-columns:repeat(6,auto);gap:5px 18px;margin-left:auto;font-size:11px;color:var(--dim);white-space:nowrap}
+.sh-stats{display:flex;flex-direction:column;align-items:flex-end;gap:4px;margin-left:auto;font-size:11px;color:var(--dim);white-space:nowrap}
+.sh-stats .srow{display:grid;grid-template-columns:repeat(6,auto);gap:5px 18px}
+.sh-stats .srow:last-child:nth-child(2){grid-template-columns:repeat(3,auto)}
 .sh-stats b{color:var(--text);font-weight:600;font-size:12px}
+.sh-stats .srow:last-child b{color:var(--dim);font-weight:550}
 .mkt-row{display:flex;gap:12px;flex:1;min-height:0}
 .kl-col{flex:1;min-width:0;display:flex;flex-direction:column;gap:12px}
 .rightcol{width:244px;flex:none;display:flex;flex-direction:column;gap:12px;overflow-y:auto;padding-right:2px}

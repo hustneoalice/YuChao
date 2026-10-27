@@ -152,6 +152,7 @@ export function curBars(): Bar[] {
 }
 
 /* ── 个股头 ── */
+const MKT_CN: Record<string, string> = { sh: "沪", sz: "深", bj: "北" };
 export function renderStockHead(): void {
   const s = mk.cur, q = mk.quote;
   if (!s) return;
@@ -159,11 +160,11 @@ export function renderStockHead(): void {
   const last = bars[bars.length - 1];
   document.getElementById("s-name")!.textContent = q?.name || s.name || s.symbol;
   document.getElementById("s-code")!.textContent = s.symbol;
-  document.getElementById("kl-code")!.textContent = s.symbol;
-  const segTag = document.getElementById("s-seg") as HTMLElement;
-  if (q?.industry) { segTag.hidden = false; segTag.textContent = q.industry; } else segTag.hidden = true;
+  // 交易所放代码后面（SH→沪 / SZ→深 / BJ→北）
   const boardTag = document.getElementById("s-board") as HTMLElement;
-  if (q?.market) { boardTag.hidden = false; boardTag.textContent = q.market; } else boardTag.hidden = true;
+  const mkt = (q?.market || "").toLowerCase();
+  if (mkt) { boardTag.hidden = false; boardTag.textContent = MKT_CN[mkt] || mkt.toUpperCase(); }
+  else boardTag.hidden = true;
 
   const prev = bars.length > 1 ? bars[bars.length - 2].close : last.open;
   const up = last.close >= prev;
@@ -179,16 +180,22 @@ export function renderStockHead(): void {
   const amt = (last.amount ?? (last.volume || 0) * last.close);
   const turn = last.turnover_rate != null ? fmt(last.turnover_rate) : "—";
   const amp = prev ? fmt((last.high - last.low) / prev * 100) : "—";
+  // 两行：第一行价格要素，第二行行业 / 概念（无数据时隐藏对应项）
+  const infoRow = (pairs: [string, string | null][]) =>
+    `<div class="srow">` + pairs.filter((p) => p[1] != null).map(([k, v]) =>
+      `<span>${k} <b class="num">${v}</b></span>`).join("") + `</div>`;
   document.getElementById("s-stats")!.innerHTML =
-    `<span>今开 <b class="num">${fmt(last.open)}</b></span>` +
-    `<span>最高 <b class="num up">${fmt(last.high)}</b></span>` +
-    `<span>最低 <b class="num down">${fmt(last.low)}</b></span>` +
-    `<span>成交额 <b class="num">${fmtYi(amt, 1)}</b></span>` +
-    `<span>换手率 <b class="num">${turn}%</b></span>` +
-    `<span>振幅 <b class="num">${amp}%</b></span>`;
+    infoRow([["今开", fmt(last.open)], ["最高", fmt(last.high)], ["最低", fmt(last.low)],
+      ["成交额", fmtYi(amt, 1)], ["换手率", turn + "%"], ["振幅", amp + "%"]]) +
+    infoRow([["行业", q?.industry ?? null], ["概念", q?.concept ?? null]]);
 }
 /* ── K线（klinecharts 10 · 策影同款配置，见 kline.ts） ── */
 let kl: KlineChartHandle | null = null;
+
+/** 供外部（侧栏拖拽/窗口 resize）触发的图表重排 */
+export function klResize(): void {
+  kl?.resize();
+}
 
 export function renderKline(): void {
   const empty = document.getElementById("kl-empty")!;
@@ -198,11 +205,11 @@ export function renderKline(): void {
     return;
   }
   empty.style.display = "none";
-  if (!kl) {
-    kl = mountKline(document.getElementById("kl-main")!);
-    kl.setMain(mk.mainInd as "ma");
-    kl.setSub(mk.subInd as "vol");
-  }
+  if (!kl) kl = mountKline(document.getElementById("kl-main")!);
+  // 每次都按当前状态应用指标（setMain/setSub 幂等：先移除再创建），
+  // 指标 seg 切换只改状态后调这里即可生效
+  kl.setMain(mk.mainInd as "ma");
+  kl.setSub(mk.subInd as "vol");
   kl.resize();
   kl.setData(curBars());
   renderKlLegend();
