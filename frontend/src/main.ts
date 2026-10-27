@@ -33,28 +33,54 @@ function initSearch(): void {
   let seq = 0;
   let hits: { symbol: string; name?: string }[] = [];
   const chgCache = new Map<string, number | null>(); // symbol → pct_chg（会话级缓存，避免重复请求）
-  const draw = (q: string) => {
-    if (!q) { drop.classList.remove("on"); return; }
-    drop.innerHTML = hits.map((u) => {
-      const chg = chgCache.get(u.symbol);
-      const chgHtml = chg == null ? "" :
-        `<span class="chg num ${chg >= 0 ? "up" : "down"}">${fmtChg(chg)}%</span>`;
-      return `<div class="gitem" data-c="${u.symbol}"><b>${u.name || u.symbol}</b><span class="num">${u.symbol}</span>${chgHtml}</div>`;
-    }).join("") ||
+  // 搜索历史（全局，最近 10 条，新的在前）
+  const HKEY = "yc_search_history";
+  const loadHist = (): { symbol: string; name?: string }[] => {
+    try { return JSON.parse(localStorage.getItem(HKEY) || "[]") as typeof hits; } catch { return []; }
+  };
+  const saveHist = (u: { symbol: string; name?: string }) => {
+    const list = loadHist().filter((x) => x.symbol !== u.symbol);
+    list.unshift({ symbol: u.symbol, name: u.name });
+    localStorage.setItem(HKEY, JSON.stringify(list.slice(0, 10)));
+  };
+  const itemHtml = (u: { symbol: string; name?: string }) => {
+    const chg = chgCache.get(u.symbol);
+    const chgHtml = chg == null ? "" :
+      `<span class="chg num ${chg >= 0 ? "up" : "down"}">${fmtChg(chg)}%</span>`;
+    return `<div class="gitem" data-c="${u.symbol}" data-n="${u.name || ""}"><b>${u.name || u.symbol}</b><span class="num">${u.symbol}</span>${chgHtml}</div>`;
+  };
+  const draw = () => {
+    drop.innerHTML = hits.map(itemHtml).join("") ||
       `<div class="gitem" style="color:var(--faint)">未找到匹配标的</div>`;
     drop.classList.add("on");
   };
-  // 事件委托绑定一次：fetchChg 回填涨跌幅会整体重绘 innerHTML，
-  // 逐项 addEventListener 会把用户正要点击的项替换掉（点击被吞）
+  // 空输入 / 聚焦 → 历史下拉（复用 hits 与涨跌幅回填通道）
+  const drawHist = () => {
+    hits = loadHist();
+    if (!hits.length) { drop.classList.remove("on"); return; }
+    drop.innerHTML = `<div class="ghead">最近搜索<span id="ghist-clear">清空</span></div>` +
+      hits.map(itemHtml).join("");
+    drop.classList.add("on");
+    fetchChg(seq);
+  };
+  // 事件委托绑定一次：fetchChg 回填涨跌幅会就地插入 .chg span，
+  // 绝不整体重绘 innerHTML——mousedown/mouseup 之间 DOM 被替换会让 click 被吞
   drop.addEventListener("click", (e) => {
-    const it = (e.target as HTMLElement).closest<HTMLElement>(".gitem[data-c]");
+    const t = e.target as HTMLElement;
+    if (t.closest("#ghist-clear")) {
+      localStorage.removeItem(HKEY);
+      drop.classList.remove("on");
+      return;
+    }
+    const it = t.closest<HTMLElement>(".gitem[data-c]");
     if (!it) return;
-    const sym = it.dataset.c!;
-    const u = hits.find((x) => x.symbol === sym);
-    void openStock({ symbol: sym, name: u?.name || sym });
+    const sym = it.dataset.c!, name = it.dataset.n || sym;
+    saveHist({ symbol: sym, name });
+    void openStock({ symbol: sym, name });
     input.value = "";
+    input.blur();
     drop.classList.remove("on");
-    toast(`已切换至 ${u?.name || sym}`);
+    toast(`已切换至 ${name}`);
   });
   // 并发补拉涨跌幅（quote 未命中/失败时缓存 null，不阻塞首屏下拉）。
   // 回填时只就地插入 .chg span，绝不整体重绘 innerHTML——
@@ -83,12 +109,12 @@ function initSearch(): void {
   const filter = async () => {
     const q = input.value.trim();
     const mySeq = ++seq;
-    if (!q) { drop.classList.remove("on"); return; }
+    if (!q) { drawHist(); return; }
     try {
       const r = await marketApi.search(q, 10);
       if (mySeq !== seq) return;
       hits = r.items;
-      draw(q);
+      draw();
       fetchChg(mySeq);
     } catch {
       if (mySeq === seq) {
@@ -98,6 +124,7 @@ function initSearch(): void {
     }
   };
   input.addEventListener("input", filter);
+  input.addEventListener("focus", () => { if (!input.value.trim()) drawHist(); });
   input.addEventListener("keydown", (e) => {
     if (e.key === "Enter") {
       const f = drop.querySelector<HTMLElement>(".gitem[data-c]");

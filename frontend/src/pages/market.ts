@@ -5,7 +5,7 @@ import { sma, bollSeries, kdjSeries, atrSeries, sixSegment } from "../indicators
 import { ic } from "../icons";
 import { CARD_DEFS, getState, isVip, setCardPref, subscribe } from "../store";
 import { openModal, toast } from "../ui";
-import { mountKline, type KlineChartHandle } from "./kline";
+import { mountKline, type KlineChartHandle, type MainKey, type SubKey } from "./kline";
 
 const CH_FAST = "#FF9800";
 const CH_SLOW = "#0A84FF";
@@ -19,8 +19,8 @@ export const mk = {
   bars: [] as Bar[],
   quote: null as Quote | null,
   period: "d",
-  mainInd: "ma",
-  subInd: "vol",
+  mainInds: ["ma"] as MainKey[], // 主图多选叠加
+  subInds: ["vol"] as SubKey[],  // 副图多选，每指标一个窗格
   from: null as { page: string; label: string } | null,
 };
 
@@ -79,11 +79,21 @@ export function initMarket(): void {
   });
   document.getElementById("kl-main-ind")!.addEventListener("click", (e) => {
     const b = (e.target as HTMLElement).closest("button") as HTMLElement | null;
-    if (b) { mk.mainInd = b.dataset.mi!; toggleSeg("kl-main-ind", b); renderKline(); }
+    if (b) { // 多选 toggle：主图指标可任意叠加
+      b.classList.toggle("on");
+      mk.mainInds = [...document.querySelectorAll<HTMLElement>("#kl-main-ind button.on")]
+        .map((x) => x.dataset.mi as MainKey);
+      renderKline();
+    }
   });
   document.getElementById("kl-sub-ind")!.addEventListener("click", (e) => {
     const b = (e.target as HTMLElement).closest("button") as HTMLElement | null;
-    if (b) { mk.subInd = b.dataset.si!; toggleSeg("kl-sub-ind", b); renderKline(); }
+    if (b) { // 多选 toggle：副图每指标一个窗格
+      b.classList.toggle("on");
+      mk.subInds = [...document.querySelectorAll<HTMLElement>("#kl-sub-ind button.on")]
+        .map((x) => x.dataset.si as SubKey);
+      renderKline();
+    }
   });
   window.addEventListener("resize", () => {
     clearTimeout((window as unknown as { _rz?: number })._rz);
@@ -211,8 +221,8 @@ export function renderKline(): void {
   if (!kl) kl = mountKline(document.getElementById("kl-main")!);
   // 每次都按当前状态应用指标（setMain/setSub 幂等：先移除再创建），
   // 指标 seg 切换只改状态后调这里即可生效
-  kl.setMain(mk.mainInd as "ma");
-  kl.setSub(mk.subInd as "vol");
+  kl.setMain(mk.mainInds);
+  kl.setSub(mk.subInds);
   kl.resize();
   kl.setData(curBars());
   renderKlLegend();
@@ -222,18 +232,21 @@ function renderKlLegend(): void {
   const accC = cssv("--accent") || "#FF9F43", p1C = "#0A84FF", vipC = cssv("--vip") || "#FFD60A";
   const dimC = cssv("--dim") || "#A1A1A6";
   const el = document.getElementById("kl-legend")!;
-  if (mk.mainInd === "ma") {
-    el.innerHTML = `<span><i style="background:${accC}"></i>MA5</span><span><i style="background:${p1C}"></i>MA10</span><span><i style="background:${vipC}"></i>MA20</span>`;
-  } else if (mk.mainInd === "boll") {
-    el.innerHTML = `<span><i style="background:${dimC}"></i>BOLL(20,2)</span>`;
-  } else {
-    const strong = mk.mainInd === "short"
-      ? (mk.bars.length && mk.bars[mk.bars.length - 1].close > sma(mk.bars, 10)[mk.bars.length - 1]!)
-      : (mk.bars.length && mk.bars[mk.bars.length - 1].close > sma(mk.bars, 45)[mk.bars.length - 1]!);
+  const parts: string[] = [];
+  if (mk.mainInds.includes("ma"))
+    parts.push(`<span><i style="background:${accC}"></i>MA5</span><span><i style="background:${p1C}"></i>MA10</span><span><i style="background:${vipC}"></i>MA20</span>`);
+  if (mk.mainInds.includes("boll"))
+    parts.push(`<span><i style="background:${dimC}"></i>BOLL(20,2)</span>`);
+  for (const k of mk.mainInds) {
+    if (k !== "short" && k !== "mid") continue;
+    const strong = mk.bars.length && mk.bars[mk.bars.length - 1].close >
+      sma(mk.bars, k === "short" ? 10 : 45)[mk.bars.length - 1]!;
     const fill = strong ? "rgba(255,155,87,.82)" : "rgba(90,88,251,.86)";
-    el.innerHTML = `<span><i style="background:${CH_FAST}"></i>快线</span><span><i style="background:${CH_SLOW}"></i>慢线</span>` +
-      `<span><i style="background:${fill}"></i>${strong ? "多头 · 偏强" : "空头 · 偏弱"}</span>`;
+    parts.push(`<span><i style="background:${CH_FAST}"></i>${k === "short" ? "短线" : "中线"}快线</span>` +
+      `<span><i style="background:${CH_SLOW}"></i>慢线</span>` +
+      `<span><i style="background:${fill}"></i>${strong ? "多头 · 偏强" : "空头 · 偏弱"}</span>`);
   }
+  el.innerHTML = parts.join("");
 }
 
 /* ── 右列功能卡 ── */

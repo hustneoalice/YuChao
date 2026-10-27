@@ -120,20 +120,25 @@ function toTs(time: string): number {
   return time.includes("T") ? new Date(time).getTime() : new Date(time + "T00:00:00").getTime();
 }
 
+export type MainKey = "ma" | "boll" | "short" | "mid";
+export type SubKey = "vol" | "macd" | "kdj";
+
 export interface KlineChartHandle {
   chart: Chart;
   setData: (bars: Bar[]) => void;
-  setMain: (ind: "ma" | "boll" | "short" | "mid") => void;
-  setSub: (ind: "vol" | "macd" | "kdj") => void;
+  /** 主图多选叠加：增量增删，不动已叠加的同名指标 */
+  setMain: (inds: MainKey[]) => void;
+  /** 副图多选：每个指标一个窗格，高度均分（策影 autoLayout 同款） */
+  setSub: (inds: SubKey[]) => void;
   retheme: () => void;
   resize: () => void;
   destroy: () => void;
 }
 
-const MAIN_NAMES: Record<string, string> = {
+const MAIN_NAMES: Record<MainKey, string> = {
   ma: "MA", boll: "BOLL", short: "SHORT_TREND_CHANNEL", mid: "MID_TREND_CHANNEL",
 };
-export type SubKey = "vol" | "macd" | "kdj";
+const SUB_NAMES: Record<SubKey, string> = { vol: "VOL", macd: "MACD", kdj: "KDJ" };
 
 function styles() {
   const border = cssv("--border") || "#2B2B2F";
@@ -207,55 +212,62 @@ export function mountKline(el: HTMLElement): KlineChartHandle {
       // v10 无 applyNewData，经 DataLoader 一次性回填（策影同款）
       chart.setDataLoader({ getBars: (params) => { params.callback(list, false); } });
     },
-    setMain(ind) {
-      // 策影同款：按实例逐个移除主图指标，再 isStack=true 叠加创建
-      // （isStack=false 会触发 addIndicator 的 pane replace 语义）
-      chart.getIndicators({ paneId: "candle_pane" }).forEach((i) =>
-        chart.removeIndicator({ id: i.id }));
-      if (ind === "ma") {
-        // MA 配色与页面图例一致：MA5 琥珀 / MA10 蓝 / MA20 VIP 金
-        chart.createIndicator({
-          name: "MA", paneId: "candle_pane", calcParams: [5, 10, 20], isStack: true,
-          styles: { lines: [{ color: cssv("--accent") || "#FF9F43" }, { color: "#0A84FF" }, { color: cssv("--vip") || "#FFD60A" }] },
-        } as never, true);
-      } else if (ind === "boll") {
-        const dim = cssv("--dim") || "#A1A1A6";
-        chart.createIndicator({
-          name: "BOLL", paneId: "candle_pane", isStack: true,
-          styles: { lines: [{ color: dim }, { color: dim }, { color: dim }] },
-        } as never, true);
-      } else {
-        chart.createIndicator({ name: MAIN_NAMES[ind], paneId: "candle_pane", isStack: true } as never, true);
+    setMain(inds: MainKey[]) {
+      // 主图多选叠加（策影同款）：先按实例移除不再选中的，再增量补建缺失的
+      const want = new Set(inds.map((k) => MAIN_NAMES[k]));
+      chart.getIndicators({ paneId: "candle_pane" }).forEach((i) => {
+        if (Object.values(MAIN_NAMES).includes(i.name) && !want.has(i.name))
+          chart.removeIndicator({ id: i.id });
+      });
+      const have = new Set(chart.getIndicators({ paneId: "candle_pane" }).map((i) => i.name));
+      for (const k of inds) {
+        if (have.has(MAIN_NAMES[k])) continue;
+        if (k === "ma") {
+          // MA 配色与页面图例一致：MA5 琥珀 / MA10 蓝 / MA20 VIP 金
+          chart.createIndicator({
+            name: "MA", paneId: "candle_pane", calcParams: [5, 10, 20], isStack: true,
+            styles: { lines: [{ color: cssv("--accent") || "#FF9F43" }, { color: "#0A84FF" }, { color: cssv("--vip") || "#FFD60A" }] },
+          } as never, true);
+        } else if (k === "boll") {
+          const dim = cssv("--dim") || "#A1A1A6";
+          chart.createIndicator({
+            name: "BOLL", paneId: "candle_pane", isStack: true,
+            styles: { lines: [{ color: dim }, { color: dim }, { color: dim }] },
+          } as never, true);
+        } else {
+          chart.createIndicator({ name: MAIN_NAMES[k], paneId: "candle_pane", isStack: true } as never, true);
+        }
       }
     },
-    setSub(ind: SubKey) {
-      // 策影同款：移除所有副图指标（空窗格由 v10 自动回收），再新建单副图
+    setSub(inds: SubKey[]) {
+      // 副图多选：全清后按固定顺序重建，每指标一个窗格
       chart.getIndicators()
         .filter((i) => i.paneId !== "candle_pane")
         .forEach((i) => chart.removeIndicator({ id: i.id }));
       const up = chartUp(), dn = chartDown();
-      // 注意：createIndicator 返回的是 indicator.id 而非 paneId！
-      // 高度须经 getPaneOptions() 找到新窗格再设置（策影 updateAllPaneHeights 同款）
-      const applySubHeight = () => {
-        const panes = chart.getPaneOptions() as { id: string }[];
-        const subs = panes.filter((p) => p.id !== "candle_pane" && p.id !== "x_axis_pane");
-        subs.forEach((p) => chart.setPaneOptions({ id: p.id, height: 92 }));
-      };
-      if (ind === "vol") {
-        // 策影 createSubIndicatorConfig：禁用大数格式化，轴/图例文本走万/亿
-        chart.createIndicator({
-          name: "VOL", shouldFormatBigNumber: false,
-          styles: { bars: [{ upColor: up, downColor: dn, noChangeColor: NEUTRAL }] },
-        } as never, false);
-      } else if (ind === "macd") {
-        chart.createIndicator({
-          name: "MACD",
-          styles: { bars: [{ upColor: up, downColor: dn, noChangeColor: NEUTRAL }] },
-        } as never, false);
-      } else {
-        chart.createIndicator({ name: "KDJ" } as never, false);
+      for (const k of inds) {
+        if (k === "vol") {
+          // 策影 createSubIndicatorConfig：禁用大数格式化，轴/图例文本走万/亿
+          chart.createIndicator({
+            name: "VOL", shouldFormatBigNumber: false,
+            styles: { bars: [{ upColor: up, downColor: dn, noChangeColor: NEUTRAL }] },
+          } as never, false);
+        } else if (k === "macd") {
+          chart.createIndicator({
+            name: "MACD",
+            styles: { bars: [{ upColor: up, downColor: dn, noChangeColor: NEUTRAL }] },
+          } as never, false);
+        } else {
+          chart.createIndicator({ name: "KDJ" } as never, false);
+        }
       }
-      applySubHeight();
+      // 多窗格高度均分：副图合计约占 38%，单窗格 64–110px（策影 updateAllPaneHeights 同款）
+      const panes = (chart.getPaneOptions() as { id: string }[])
+        .filter((p) => p.id !== "candle_pane" && p.id !== "x_axis_pane");
+      if (!panes.length) return;
+      const n = panes.length;
+      const h = Math.max(64, Math.min(110, Math.round(el.clientHeight * 0.38 / n)));
+      panes.forEach((p) => chart.setPaneOptions({ id: p.id, height: h }));
     },
     retheme() { chart.setStyles(styles()); },
     resize() { chart.resize(); },

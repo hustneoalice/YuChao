@@ -89,6 +89,10 @@ svg{display:block}
 .gsearch .gitem b{font-size:12.5px;font-weight:600}
 .gsearch .gitem span{font-size:11px;color:var(--faint)}
 .gsearch .gitem .chg{margin-left:auto;font-size:12px;font-weight:600}
+.gsearch .ghead{display:flex;align-items:center;justify-content:space-between;
+  padding:5px 10px 3px;font-size:10.5px;color:var(--faint);letter-spacing:.04em}
+.gsearch .ghead span{cursor:pointer;font-size:10.5px}
+.gsearch .ghead span:hover{color:var(--accent)}
 .up{color:var(--up)} .down{color:var(--down)}
 .datachip{display:flex;align-items:center;gap:7px;height:30px;padding:0 11px;
   border:1px solid var(--border);border-radius:999px;font-size:11.5px;color:var(--dim);
