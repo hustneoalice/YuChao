@@ -12,7 +12,7 @@ CREATE TABLE IF NOT EXISTS stock_universe (
 );
 CREATE TABLE IF NOT EXISTS daily_ohlcv (
     symbol VARCHAR, date VARCHAR, open DOUBLE, high DOUBLE, low DOUBLE, close DOUBLE,
-    volume DOUBLE, amount DOUBLE, pct_chg DOUBLE, turnover_rate DOUBLE,
+    volume BIGINT, amount DOUBLE, pct_chg DOUBLE, turnover_rate DOUBLE,
     PRIMARY KEY (symbol, date)
 );
 CREATE TABLE IF NOT EXISTS adjust_factor (
@@ -25,8 +25,7 @@ CREATE TABLE IF NOT EXISTS capital_flow (
 );
 CREATE TABLE IF NOT EXISTS financials (
     symbol VARCHAR, report_date VARCHAR, net_profit DOUBLE, net_profit_yoy DOUBLE,
-    roe DOUBLE, debt_ratio DOUBLE, operating_cashflow DOUBLE, audit_opinion VARCHAR,
-    PRIMARY KEY (symbol, report_date)
+    roe DOUBLE, debt_ratio DOUBLE, operating_cashflow DOUBLE, audit_opinion INTEGER
 );
 CREATE TABLE IF NOT EXISTS sector_index (
     industry VARCHAR, trade_date VARCHAR, close DOUBLE, pct_change DOUBLE,
@@ -35,7 +34,12 @@ CREATE TABLE IF NOT EXISTS sector_index (
 );
 CREATE TABLE IF NOT EXISTS daily_valuation (
     symbol VARCHAR, date VARCHAR, pe_ttm DOUBLE, pb DOUBLE, ps_ttm DOUBLE,
-    pcf_ncf_ttm DOUBLE, total_mv DOUBLE, circ_mv DOUBLE, PRIMARY KEY (symbol, date)
+    pcf_ncf_ttm DOUBLE, total_mv DOUBLE, circ_mv DOUBLE, amount DOUBLE,
+    PRIMARY KEY (symbol, date)
+);
+CREATE TABLE IF NOT EXISTS pe_percentile (
+    symbol VARCHAR PRIMARY KEY, pe_ttm DOUBLE, pe_percentile INTEGER,
+    industry_pe_median DOUBLE, updated_at VARCHAR
 );
 """
 
@@ -92,10 +96,10 @@ def duckdb_file(tmp_path):
         ],
     )
     conn.executemany(
-        "INSERT OR REPLACE INTO daily_valuation VALUES (?,?,?,?,?,?,?,?)",
+        "INSERT OR REPLACE INTO daily_valuation VALUES (?,?,?,?,?,?,?,?,?)",
         [
-            ("600519", "2026-10-30", 22.5, 7.8, 15.2, 18.0, 2.1e12, 2.1e12),
-            ("000858", "2026-10-30", 18.1, 4.2, 5.5, 12.0, 5.6e11, 5.6e11),
+            ("600519", "2026-10-30", 22.5, 7.8, 15.2, 18.0, 2.1e12, 2.1e12, 3.0e10),
+            ("000858", "2026-10-30", 18.1, 4.2, 5.5, 12.0, 5.6e11, 5.6e11, 8.0e9),
         ],
     )
     conn.executemany(

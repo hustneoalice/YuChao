@@ -14,4 +14,9 @@ data/*.duckdb.wal
 data/*.wal
 data/*.bak*
 
+# updater 运行时产物（进度快照 / 事件总线 / 控制通道）
+data/update_progress.json
+data/stream_events.jsonl
+data/control_requests.jsonl
+
 .env

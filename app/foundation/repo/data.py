@@ -46,3 +46,30 @@ def file_missing_status(duckdb_path) -> dict:
         "tables": [],
         "generated_at": datetime.now().isoformat(),
     }
+
+
+# ---------------------------------------------------------------------------
+# M2：编排器落账查询（update_log 表由 updater 进程写入，此处只读）
+# ---------------------------------------------------------------------------
+
+def list_update_log(conn, limit: int = 50, data_type: str | None = None,
+                    status: str | None = None) -> list[dict]:
+    sql = ("SELECT id, data_type, trade_date, status, rows, error, detail, "
+           "duration_s, trigger, created_at FROM update_log")
+    conds, params = [], []
+    if data_type:
+        conds.append("data_type = ?")
+        params.append(data_type)
+    if status:
+        conds.append("status = ?")
+        params.append(status)
+    if conds:
+        sql += " WHERE " + " AND ".join(conds)
+    sql += " ORDER BY created_at DESC LIMIT ?"
+    params.append(min(int(limit), 200))
+    rows = conn.execute(sql, params).fetchall()
+    return [{
+        "id": r[0], "data_type": r[1], "trade_date": r[2], "status": r[3],
+        "rows": int(r[4] or 0), "error": r[5], "detail": r[6],
+        "duration_s": r[7], "trigger": r[8], "created_at": str(r[9]),
+    } for r in rows]

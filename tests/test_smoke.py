@@ -122,9 +122,12 @@ def test_data_status(client: TestClient):
     assert tables["stock_profile"]["rows"] == 0
 
 
-def test_data_update_stub_501(client: TestClient):
-    r = client.post("/api/v1/data/update")
-    assert r.status_code == 501 and r.json()["code"] == "not_implemented"
+def test_data_update_trigger_202(client: TestClient, monkeypatch, tmp_path):
+    # M2：501 桩 → 控制通道 202（updater 进程消费）
+    monkeypatch.setattr("app.config.settings.control_requests_path",
+                        tmp_path / "c.jsonl")
+    r = client.post("/api/v1/data/update", json={"kind": "valuation"})
+    assert r.status_code == 202 and r.json()["accepted"] is True
 
 
 def test_data_not_ready_503(tmp_path, monkeypatch):

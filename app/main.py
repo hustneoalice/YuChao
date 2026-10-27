@@ -14,6 +14,7 @@ from .config import settings
 from .errors import ApiError
 from .foundation.db import DataSourceMissing
 from .routers.v1 import corepicks, data, market, sectors
+from .stream.sse import router as stream_router
 
 logger = logging.getLogger("yuchao")
 
@@ -62,6 +63,7 @@ app.include_router(market.router, prefix=v1)
 app.include_router(sectors.router, prefix=v1)
 app.include_router(corepicks.router, prefix=v1)
 app.include_router(data.router, prefix=v1)
+app.include_router(stream_router, prefix=v1)
 
 # Prometheus 可观测性（1.0 资产原样保留）
 app.mount("/metrics", make_asgi_app())

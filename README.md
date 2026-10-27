@@ -22,8 +22,8 @@
 | 板块 | `GET /api/v1/sectors/{id}/members?lookback=5\|10\|20` | 成分股按窗口成交额加权涨幅排序，附窗口主力净流入 |
 | 核心标 | `GET /api/v1/corepicks?date=&pool=chase\|dip` | 名单公开；三因子明细 VIP 校验后返回（M1 桩 403） |
 | 核心标 | `GET /api/v1/corepicks/{symbol}/factors` | 三因子明细（VIP，M1 一律 403） |
-| 底座 | `GET /api/v1/data/status` | 状态机：未初始化→初始化中→已就绪→更新中→更新失败 + 表清单体检 |
-| 底座 | `POST /api/v1/data/update\|init\|export` | updater 职责（M2 桩 501） |
+| 底座 | `GET /api/v1/data/status·tasks·updates` · `POST /api/v1/data/update` | 状态机+表清单体检 · 任务清单/落账 · 触发更新（202 经控制通道交 updater） |
+| 流 | `GET /api/v1/stream/sse?channels=kline:*` | SSE 事件流（频道协议 v1） |
 | 元 | `GET /docs` · `/metrics` · `/healthz` | OpenAPI 文档 · Prometheus · 存活探针 |
 
 **错误规约**：`{"code": "...", "message": "...", "detail": ...}`；已知 code：`not_found` / `invalid_param` / `vip_required` / `not_implemented` / `data_not_ready`。
@@ -39,12 +39,27 @@ pip install -e ".[dev]"
 # 放到 data/stock_research.duckdb 后，补齐 2.0 新表与复权视图：
 python scripts/ensure_schema.py
 
-# 启动（只读挂载）
+# 终端 1：updater 进程（唯一写者：编排/采集/调度）
+python -m app.updater
+
+# 终端 2：API 进程（只读挂载）
 uvicorn app.main:app --port 8800
 open http://127.0.0.1:8800/docs
 ```
 
 自定义路径：`YUCHAO_DUCKDB_PATH=/path/to/stock_research.duckdb`。
+
+### 更新机制（M2）
+
+- **调度链**（北京时间，节假日自动跳过）：15:35 板块 → 16:00 行情 → 16:20 估值
+  → 16:30 资金流 → 16:50 PE 分位 → 17:00 K 线增量 → 17:30 财务；周六 09:00 复权因子。
+- **手动触发**：`curl -XPOST :8800/api/v1/data/update -d '{"kind":"valuation"}'` ——
+  API 进程只读，落控制请求由 updater 消费；执行结果以 `GET /data/updates` 落账为准。
+- **SSE 频道**：`data:update`（任务进度）· `kline:{symbol}:1d`（K 线增量）·
+  `corepicks:daily`。帧内 seq 跳号 → 客户端回退 REST 重拉（06.2 协议）。
+- **多源降级**：估值 东财→腾讯；K 线 腾讯↔东财；财务/资金流/复权因子为唯一源，
+  兜底靠落账告警 + 次日重试。
+- 进程模型：DuckDB 写连接排他，updater 只在任务执行窗口持锁，空闲期让位 API。
 
 ## 架构（M1 → M2 路线）
 
@@ -76,10 +91,10 @@ open http://127.0.0.1:8800/docs
 ## 开发
 
 ```bash
-pytest -q          # 15 项冒烟：契约 + 三页端点 + 错误规约
+pytest -q          # 41 项测试：M1 冒烟（契约+三页端点）+ M2（编排器语义/采集幂等/SSE 总线）
 ```
 
-目录：`app/contracts/`（Pydantic 契约）· `app/foundation/`（db / indicators / repo）· `app/routers/v1/`（端点）· `scripts/ensure_schema.py`（幂等初始化）。
+目录：`app/contracts/`（Pydantic 契约）· `app/foundation/`（db / indicators / repo）· `app/routers/v1/`（端点）· `app/updater/`（编排器/采集器/调度链，唯一写者）· `app/stream/`（事件总线 + SSE 网关）· `scripts/ensure_schema.py`（幂等初始化）。
 
 ## License
 
