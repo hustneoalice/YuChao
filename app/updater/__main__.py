@@ -38,7 +38,9 @@ def main() -> None:
     writer.reset()          # 立即释放写锁：DuckDB 写连接排他，空闲期让位给 API 只读连接
     logger.info("schema 就绪")
 
-    # 2. 注册任务 → 启动编排器工作线程
+    # 2. 注册任务 → 启动编排器工作线程（backplane：Redis 优先，缺省文件总线）
+    from ..stream.bus import make_publisher
+    orchestrator.bus = make_publisher()
     for spec in TASKS:
         orchestrator.register(spec["kind"], spec["label"], resolve_fn(spec),
                               description=spec["description"])
@@ -80,7 +82,8 @@ def main() -> None:
                 logger.info("[Control] 收到触发请求 %s (id=%s force=%s)",
                             kind, r.get("id"), r.get("force"))
                 res = orchestrator.submit(kind, trigger="manual",
-                                          force=bool(r.get("force")))
+                                          force=bool(r.get("force")),
+                                          params=r.get("params") or {})
                 if not res.get("ok"):
                     logger.warning("[Control] %s 拒绝：%s", kind,
                                    res.get("message") or res.get("error"))

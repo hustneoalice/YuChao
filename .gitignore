@@ -19,4 +19,9 @@ data/update_progress.json
 data/stream_events.jsonl
 data/control_requests.jsonl
 
+# M3 用户态（SQLite）与数据包导出产物
+data/users.sqlite3*
+data/exports/
+data/scratch_*/
+
 .env

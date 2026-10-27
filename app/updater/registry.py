@@ -32,6 +32,15 @@ TASKS: tuple[dict, ...] = (
     {"kind": "corepicks", "label": "核心标推送",
      "fn": "app.updater.collectors.corepicks:update_corepicks",
      "description": "21:00 核心标引擎占位（应用层迁移后接入）"},
+    {"kind": "package_export", "label": "导出数据包",
+     "fn": "app.updater.packaging:run_export",
+     "description": "底座全量快照 → 离线数据包 + SHA256 manifest（F14，与更新互斥）"},
+    {"kind": "package_import", "label": "导入数据包",
+     "fn": "app.updater.packaging:run_import",
+     "description": "校验（SHA256→行数→抽样）→ 换库（原库 .bak）→ 重建 schema"},
+    {"kind": "backfill", "label": "历史回补",
+     "fn": "app.updater.packaging:run_backfill",
+     "description": "行情→估值→资金流→K线 串行回补（多源降级，init mode=backfill）"},
 )
 
 _KINDS = {t["kind"] for t in TASKS}

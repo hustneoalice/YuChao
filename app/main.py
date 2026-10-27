@@ -13,7 +13,7 @@ from . import __version__
 from .config import settings
 from .errors import ApiError
 from .foundation.db import DataSourceMissing
-from .routers.v1 import corepicks, data, market, sectors
+from .routers.v1 import auth, corepicks, data, market, sectors
 from .stream.sse import router as stream_router
 
 logger = logging.getLogger("yuchao")
@@ -59,6 +59,7 @@ def healthz():
 
 
 v1 = settings.api_v1_prefix
+app.include_router(auth.router, prefix=v1)
 app.include_router(market.router, prefix=v1)
 app.include_router(sectors.router, prefix=v1)
 app.include_router(corepicks.router, prefix=v1)

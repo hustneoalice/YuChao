@@ -73,7 +73,8 @@ def get_factors(conn, symbol: str, date: Optional[str] = None,
         conn,
         f"""
         SELECT r.date, r.pool, r.sector, r.symbol, r.rank, r.fund_score, r.seg, r.factors_json
-        FROM corepicks_result r WHERE {where}
+        FROM corepicks_result r
+        WHERE {' AND '.join(conds)}
         ORDER BY r.date DESC
         LIMIT 1
         """,

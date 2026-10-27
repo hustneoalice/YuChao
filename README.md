@@ -20,13 +20,16 @@
 | 行情 | `GET /api/v1/market/search?q=` | 代码 / 名称检索（`{items,total,cursor}` 分页信封） |
 | 板块 | `GET /api/v1/sectors?type=industry\|concept` | 板块指数按当日涨跌排序（concept 为 2.0 增补，M1 空集） |
 | 板块 | `GET /api/v1/sectors/{id}/members?lookback=5\|10\|20` | 成分股按窗口成交额加权涨幅排序，附窗口主力净流入 |
-| 核心标 | `GET /api/v1/corepicks?date=&pool=chase\|dip` | 名单公开；三因子明细 VIP 校验后返回（M1 桩 403） |
-| 核心标 | `GET /api/v1/corepicks/{symbol}/factors` | 三因子明细（VIP，M1 一律 403） |
+| 核心标 | `GET /api/v1/corepicks?date=&pool=chase\|dip` | 名单公开；三因子明细 VIP 校验后返回 |
+| 核心标 | `GET /api/v1/corepicks/{symbol}/factors` | 三因子明细（VIP：tier 实时判定，未授权 403 不返回数据） |
+| 账户 | `POST /api/v1/auth/register·login` · `GET /api/v1/auth/me` | 邮箱+密码（PBKDF2）· JWT 30 天 · tier 实时判定 |
+| license | `POST /api/v1/license/redeem` · `GET\|POST /api/v1/license/codes` | 激活码兑换 VIP（一码一用原子兑换）· 码管理（admin） |
 | 底座 | `GET /api/v1/data/status·tasks·updates` · `POST /api/v1/data/update` | 状态机+表清单体检 · 任务清单/落账 · 触发更新（202 经控制通道交 updater） |
-| 流 | `GET /api/v1/stream/sse?channels=kline:*` | SSE 事件流（频道协议 v1） |
+| 底座 | `POST /api/v1/data/init` · `POST /api/v1/data/export` | 初始化：数据包导入（SHA256→行数→抽样校验）或多源回补 · 导出离线数据包（F14） |
+| 流 | `GET /api/v1/stream/sse?channels=kline:*` | SSE 事件流（频道协议 v1；`license:{user_id}` 频道需本人 `?token=`） |
 | 元 | `GET /docs` · `/metrics` · `/healthz` | OpenAPI 文档 · Prometheus · 存活探针 |
 
-**错误规约**：`{"code": "...", "message": "...", "detail": ...}`；已知 code：`not_found` / `invalid_param` / `vip_required` / `not_implemented` / `data_not_ready`。
+**错误规约**：`{"code": "...", "message": "...", "detail": ...}`；已知 code：`not_found` / `invalid_param` / `vip_required` / `unauthorized` / `forbidden` / `data_not_ready`。
 
 ## Quickstart
 
@@ -61,7 +64,22 @@ open http://127.0.0.1:8800/docs
   兜底靠落账告警 + 次日重试。
 - 进程模型：DuckDB 写连接排他，updater 只在任务执行窗口持锁，空闲期让位 API。
 
-## 架构（M1 → M2 路线）
+## 多用户（M3）
+
+- **用户态**：SQLite（`data/users.sqlite3`，自动建库）按账户隔离，与行情底座分库——
+  行情全用户共享只读，用户态可平滑迁 PG。注册即用；`YUCHAO_JWT_SECRET` 生产必设。
+- **VIP 脱敏**：tier 以 SQLite 实时判定（令牌只是快照），过期即刻回落 free；
+  VIP 端点未授权 **403 不返回数据**（服务端脱敏，不靠前端隐藏）。
+- **数据包（F14）**：`POST /data/export` 导出全量快照（`.duckdb` + SHA256 manifest），
+  `POST /data/init {"mode":"import","package":…}` 三级校验后换库（原库留 `.bak`），
+  `{"mode":"backfill"}` 多源回补冷启动——弱网/内网可离线传递数据包。
+- **多 worker / 多机**：`YUCHAO_REDIS_URL=redis://…` 时事件走 Redis pub/sub
+  backplane（seq 由 INCR 保证跨进程单调）；缺省文件总线（同机双进程零依赖）。
+  双 worker 下 SSE 广播全量可达（已验证）。
+- **TS 客户端**：`bash scripts/gen_ts_client.sh` —— OpenAPI 契约 →
+  [clients/ts/yuchao.d.ts](clients/ts/yuchao.d.ts)（openapi-typescript）。
+
+## 架构（M1 → M3 路线）
 
 ```
 ┌ 前端 SPA（官方或第三方，可整体替换）──────────────────────┐
@@ -91,14 +109,14 @@ open http://127.0.0.1:8800/docs
 ## 开发
 
 ```bash
-pytest -q          # 41 项测试：M1 冒烟（契约+三页端点）+ M2（编排器语义/采集幂等/SSE 总线）
+pytest -q          # 51 项测试：M1 冒烟 + M2（编排/采集/SSE 总线）+ M3（账户/VIP 穿透/数据包/Redis fanout）
 ```
 
-目录：`app/contracts/`（Pydantic 契约）· `app/foundation/`（db / indicators / repo）· `app/routers/v1/`（端点）· `app/updater/`（编排器/采集器/调度链，唯一写者）· `app/stream/`（事件总线 + SSE 网关）· `scripts/ensure_schema.py`（幂等初始化）。
+目录：`app/contracts/`（Pydantic 契约）· `app/foundation/`（db / indicators / repo）· `app/routers/v1/`（端点）· `app/auth/`（用户态/license 服务）· `app/updater/`（编排器/采集器/调度链/数据包，唯一写者）· `app/stream/`（事件总线 FileBus/RedisBus + SSE 网关）· `scripts/`（ensure_schema · openapi 导出 · TS 客户端生成）。
 
 ## License
 
-[AGPL-3.0](LICENSE)（open-core）：本仓库（契约、存储口径、标准指标）开源；VIP 闭源包（短线/中线操盘通道、核心标打分、license 中间件）另行发布。
+[AGPL-3.0](LICENSE)（open-core）：本仓库（契约、存储口径、标准指标、账户与 license 中间件）开源；VIP 闭源包（短线/中线操盘通道、核心标打分算法）另行发布。
 
 ---
 

@@ -142,6 +142,20 @@ def make_sse_frame(rec: dict) -> str:
             f"data: {payload}\n\n")
 
 
+def make_publisher():
+    """发布侧工厂：按配置返回 RedisBus 或 FileBus 的 StreamBus。
+
+    updater 主链路与 API 进程（vip.changed 等）共用。发布方向上事件源互不
+    重叠（data:update/kline:* 只出自 updater，license:* 只出自 API），
+    文件总线的频道内 seq 不会互相踩踏；Redis 总线 seq 由 INCR 保证单调。
+    """
+    from ..config import settings
+    if settings.redis_url:
+        from .redis_bus import RedisBus
+        return RedisBus(settings.redis_url)
+    return StreamBus(settings.stream_events_path)
+
+
 def tail_events(events_path: str | Path, offset: int,
                 matcher: Callable[[str], bool]) -> tuple[int, list[dict]]:
     """SSE 网关侧：读新事件并按频道过滤。返回 (新偏移, 命中事件)。"""

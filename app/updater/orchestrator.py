@@ -52,6 +52,11 @@ KIND_DATASETS: Dict[str, List[str]] = {
     "quotes": ["daily_ohlcv"],
     "sector_index": ["sector_index"],
     "corepicks": ["corepicks_result"],
+    "package_import": ["daily_ohlcv", "adjust_factor", "capital_flow", "financials",
+                       "stock_universe", "sector_index", "daily_valuation",
+                       "corepicks_result", "stock_profile"],
+    "package_export": [],                    # 只读导出，底座数据未变
+    "backfill": ["daily_ohlcv", "daily_valuation", "capital_flow"],
 }
 
 
@@ -261,6 +266,12 @@ class UpdateOrchestrator:
                     tid = self._queue.pop(0)
                     if tid not in self._tasks:
                         tid = None
+                    else:
+                        # 状态置位与出队必须原子：否则「已出队、还没标 running」
+                        # 的空窗里再 submit 同 kind，去重会漏（测试踩中的真实缝隙）
+                        t = self._tasks[tid]
+                        t.status = "running"
+                        t.started_ts = time.time()
             if tid is None:
                 # 空队列：等待唤醒（带超时兜底，避免事件丢失导致线程永不退出）
                 self._wake.wait(timeout=5)

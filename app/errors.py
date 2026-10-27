@@ -25,6 +25,14 @@ def vip_required(message: str = "VIP 通道未授权，不返回数据", detail:
     return ApiError("vip_required", message, 403, detail)
 
 
+def unauthorized(message: str = "未登录或令牌无效", detail: Any = None) -> ApiError:
+    return ApiError("unauthorized", message, 401, detail)
+
+
+def forbidden(message: str = "无权限执行该操作", detail: Any = None) -> ApiError:
+    return ApiError("forbidden", message, 403, detail)
+
+
 def not_implemented(message: str, detail: Any = None) -> ApiError:
     return ApiError("not_implemented", message, 501, detail)
 
