@@ -18,6 +18,7 @@ dependencies = [
     "holidays>=0.50",
     "pyjwt>=2.8",
     "redis>=5.0",
+    "pypinyin>=0.53",
 ]
 
 [project.optional-dependencies]

@@ -25,3 +25,6 @@ data/exports/
 data/scratch_*/
 
 .env
+
+# 启停脚本运行时产物（日志 / PID 文件）
+.logs/

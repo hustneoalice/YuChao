@@ -124,7 +124,7 @@ def get_quote(conn, symbol: str) -> dict:
 
 
 def search(conn, q: str, limit: int = 10) -> list[dict]:
-    """代码 / 名称 / 拼音检索（M1：代码与名称前缀+包含；拼音 M2 接入）。"""
+    """代码 / 名称 / 拼音检索（代码与名称 SQL LIKE；纯字母查询叠加拼音缩写/全拼匹配）。"""
     like = f"%{q.upper()}%"
     rows = conn.execute(
         f"""
@@ -138,4 +138,41 @@ def search(conn, q: str, limit: int = 10) -> list[dict]:
         [like, like, q.upper(), q.upper(), limit],
     ).fetchall()
     keys = _UNIVERSE_COLS.replace(", ", ",").split(",")
-    return [dict(zip(keys, r)) for r in rows]
+    hits = [dict(zip(keys, r)) for r in rows]
+    if len(hits) >= limit or not q.isascii():
+        return hits
+
+    # 纯字母且 SQL 未取满：叠加拼音缩写（东山精密→dsjm）与全拼（dongshan）匹配。
+    # 全表 ~5千行，进程内一次性构建缓存，universe 变更由重启/更新任务兜底。
+    seen = {h["symbol"] for h in hits}
+    for row in conn.execute(f"SELECT {_UNIVERSE_COLS} FROM stock_universe").fetchall():
+        item = dict(zip(keys, row))
+        if item["symbol"] in seen:
+            continue
+        py = _pinyin_variants(item["name"])
+        if q.lower() in py["abbr"] or q.lower() in py["full"]:
+            hits.append(item)
+            seen.add(item["symbol"])
+            if len(hits) >= limit:
+                break
+    return hits
+
+
+_PY_CACHE: dict[str, dict[str, str]] = {}
+
+
+def _pinyin_variants(name: str) -> dict[str, str]:
+    """名称 → {abbr: 首字母缩写, full: 无分隔全拼}；首调后缓存。"""
+    cached = _PY_CACHE.get(name)
+    if cached is not None:
+        return cached
+    try:
+        from pypinyin import Style, lazy_pinyin
+        pys = lazy_pinyin(name, style=Style.NORMAL, errors="ignore")
+        abbr = "".join(lazy_pinyin(name, style=Style.FIRST_LETTER, errors="ignore"))
+        full = "".join(pys)
+    except Exception:  # pypinyin 缺失时优雅降级：仅代码/名称检索
+        abbr, full = "", ""
+    out = {"abbr": abbr.lower(), "full": full.lower()}
+    _PY_CACHE[name] = out
+    return out
