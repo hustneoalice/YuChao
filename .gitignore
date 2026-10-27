@@ -1,0 +1,17 @@
+__pycache__/
+*.py[cod]
+.venv/
+venv/
+.pytest_cache/
+dist/
+build/
+*.egg-info/
+.DS_Store
+
+# 数据底座文件（体积大、含行情数据）不入 git：clone 后用初始数据包或自行初始化
+data/*.duckdb
+data/*.duckdb.wal
+data/*.wal
+data/*.bak*
+
+.env
