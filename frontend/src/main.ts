@@ -2,10 +2,11 @@
 import "./styles.css";
 import { ic, injectIcons } from "./icons";
 import { marketApi } from "./api";
+import { fmtChg } from "./fmt";
 import { applyAppearance, getState, patch, subscribe } from "./store";
 import { toast } from "./ui";
 import { initAuth, refreshVipUI } from "./auth";
-import { initMarket, openStock, renderKline, renderRight, renderStockHead } from "./pages/market";
+import { initMarket, openStock, renderKline, renderStockHead } from "./pages/market";
 import { initWatchlist, renderWatchlist } from "./pages/watchlist";
 import { initSectors, loadSectors } from "./pages/sectors";
 import { initCorepicks, renderCorepicks } from "./pages/corepicks";
@@ -31,20 +32,53 @@ function initSearch(): void {
   const drop = document.getElementById("gdrop")!;
   let seq = 0;
   let hits: { symbol: string; name?: string }[] = [];
+  const chgCache = new Map<string, number | null>(); // symbol → pct_chg（会话级缓存，避免重复请求）
   const draw = (q: string) => {
     if (!q) { drop.classList.remove("on"); return; }
-    drop.innerHTML = hits.map((u) =>
-      `<div class="gitem" data-c="${u.symbol}"><b>${u.name || u.symbol}</b><span class="num">${u.symbol}</span></div>`).join("") ||
+    drop.innerHTML = hits.map((u) => {
+      const chg = chgCache.get(u.symbol);
+      const chgHtml = chg == null ? "" :
+        `<span class="chg num ${chg >= 0 ? "up" : "down"}">${fmtChg(chg)}%</span>`;
+      return `<div class="gitem" data-c="${u.symbol}"><b>${u.name || u.symbol}</b><span class="num">${u.symbol}</span>${chgHtml}</div>`;
+    }).join("") ||
       `<div class="gitem" style="color:var(--faint)">未找到匹配标的</div>`;
     drop.classList.add("on");
-    drop.querySelectorAll<HTMLElement>(".gitem[data-c]").forEach((it) =>
-      it.addEventListener("click", () => {
-        const u = hits.find((x) => x.symbol === it.dataset.c);
-        void openStock({ symbol: it.dataset.c!, name: u?.name || it.dataset.c! });
-        input.value = "";
-        drop.classList.remove("on");
-        toast(`已切换至 ${u?.name || it.dataset.c}`);
-      }));
+  };
+  // 事件委托绑定一次：fetchChg 回填涨跌幅会整体重绘 innerHTML，
+  // 逐项 addEventListener 会把用户正要点击的项替换掉（点击被吞）
+  drop.addEventListener("click", (e) => {
+    const it = (e.target as HTMLElement).closest<HTMLElement>(".gitem[data-c]");
+    if (!it) return;
+    const sym = it.dataset.c!;
+    const u = hits.find((x) => x.symbol === sym);
+    void openStock({ symbol: sym, name: u?.name || sym });
+    input.value = "";
+    drop.classList.remove("on");
+    toast(`已切换至 ${u?.name || sym}`);
+  });
+  // 并发补拉涨跌幅（quote 未命中/失败时缓存 null，不阻塞首屏下拉）。
+  // 回填时只就地插入 .chg span，绝不整体重绘 innerHTML——
+  // mousedown/mouseup 之间 DOM 被替换会让 click 落到容器上被丢弃（点击被吞）
+  const fetchChg = (mySeq: number) => {
+    void Promise.allSettled(
+      hits.map(async (u) => {
+        if (chgCache.has(u.symbol)) return;
+        try {
+          const qt = await marketApi.quote(u.symbol);
+          chgCache.set(u.symbol, qt.pct_chg ?? null);
+        } catch { chgCache.set(u.symbol, null); }
+      })
+    ).then(() => {
+      if (mySeq !== seq) return;
+      hits.forEach((u) => {
+        const chg = chgCache.get(u.symbol);
+        if (chg == null) return;
+        const el = drop.querySelector<HTMLElement>(`.gitem[data-c="${u.symbol}"]`);
+        if (!el || el.querySelector(".chg")) return;
+        el.insertAdjacentHTML("beforeend",
+          `<span class="chg num ${chg >= 0 ? "up" : "down"}">${fmtChg(chg)}%</span>`);
+      });
+    });
   };
   const filter = async () => {
     const q = input.value.trim();
@@ -55,6 +89,7 @@ function initSearch(): void {
       if (mySeq !== seq) return;
       hits = r.items;
       draw(q);
+      fetchChg(mySeq);
     } catch {
       if (mySeq === seq) {
         drop.innerHTML = `<div class="gitem" style="color:var(--faint)">搜索服务不可达</div>`;
@@ -121,7 +156,6 @@ function boot(): void {
     if (document.getElementById("page-market")!.classList.contains("on")) {
       renderStockHead();
       renderKline();
-      renderRight();
     }
   });
 

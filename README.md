@@ -124,7 +124,7 @@ npm run dev        # http://localhost:5173 ，/api 代理至 127.0.0.1:8031（YU
 npm run build      # tsc --noEmit + vite build → dist/
 ```
 
-页面：**行情**（搜索选标 → SVG K线 MA/BOLL + VOL/MACD/KDJ 副图 · 十字光标 · 右列功能卡：信号面板（VIP 锁定层）/ 资金流 / 技术指标 / 估值 / 核心标档案，卡开关/折叠/双模式/拖拽排序实时生效）；**自选**（localStorage 分组，F04 后端就绪后切换）；**板块**（行业/概念热力 + 成分股窗口涨幅）；**核心标**（公开名单 + 资金分，三因子明细走 `/corepicks/{symbol}/factors`，403 → VIP 解锁层）；**功能卡片**；**设置**（数据底座真实状态/更新任务触发/更新日志 · 外观 · VIP 兑换 · 账户）。
+页面：**行情**（搜索选标（下拉带实时涨跌幅）→ klinecharts 10 K线：策影同款配置（candle_up_stroke 阳线空心 · 无网格 · 轴万/亿），滚轮缩放/拖拽平移，主图 MA/BOLL + 短线/中线趋势通道（MA7/10、MA35/45 逐柱填充），副图 VOL/MACD/KDJ · 右列功能卡：信号面板（VIP 锁定层）/ 资金流 / 技术指标 / 估值 / 核心标档案，卡开关/折叠/双模式/拖拽排序实时生效）；**自选**（localStorage 分组，F04 后端就绪后切换）；**板块**（行业/概念热力 + 成分股窗口涨幅）；**核心标**（公开名单 + 资金分，三因子明细走 `/corepicks/{symbol}/factors`，403 → VIP 解锁层）；**功能卡片**；**设置**（数据底座真实状态/更新任务触发/更新日志 · 外观 · VIP 兑换 · 账户）。
 
 身份与实时：JWT（localStorage）登录/注册；顶栏数据状态 chip 轮询 `/data/status`；SSE（`/stream/sse?token=`）订阅 `data:update`、`corepicks:daily` 频道，seq 跳号自动回退 REST。指标口径：开源指标（MA/BOLL/MACD/KDJ/ATR/六分段）前端计算；VIP 三因子明细仅由服务端计算并脱敏返回，前端只渲染不计算。
 

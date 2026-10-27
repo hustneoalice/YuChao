@@ -1,10 +1,14 @@
-/* 行情页：个股头 + K线（SVG）+ 副图 + 右列功能卡 + 十字光标 */
+/* 行情页：个股头 + klinecharts K线 + 右列功能卡 */
 import { marketApi, type Bar, type Quote } from "../api";
-import { cssv, fmt, fmtChg, fmtVol, fmtYi, dlab } from "../fmt";
-import { sma, bollSeries, macdSeries, kdjSeries, atrSeries, sixSegment } from "../indicators";
+import { cssv, fmt, fmtChg, fmtYi } from "../fmt";
+import { sma, bollSeries, kdjSeries, atrSeries, sixSegment } from "../indicators";
 import { ic } from "../icons";
 import { CARD_DEFS, getState, isVip, setCardPref, subscribe } from "../store";
 import { openModal, toast } from "../ui";
+import { mountKline, type KlineChartHandle } from "./kline";
+
+const CH_FAST = "#FF9800";
+const CH_SLOW = "#0A84FF";
 
 export const SEG6 = ["超卖", "低位", "弱势", "回升", "强势", "超买"];
 export const SEGNAME = ["", "超卖", "低位", "弱势", "回升", "强势", "超买"];
@@ -80,14 +84,18 @@ export function initMarket(): void {
     const b = (e.target as HTMLElement).closest("button") as HTMLElement | null;
     if (b) { mk.subInd = b.dataset.si!; toggleSeg("kl-sub-ind", b); renderKline(); }
   });
-  initCrosshair();
   window.addEventListener("resize", () => {
     clearTimeout((window as unknown as { _rz?: number })._rz);
     (window as unknown as { _rz?: number })._rz = window.setTimeout(() => {
-      if (document.getElementById("page-market")!.classList.contains("on")) renderKline();
+      if (document.getElementById("page-market")!.classList.contains("on")) kl?.resize();
     }, 160);
   });
-  subscribe(() => renderRight());
+  // 主题 / 涨跌方向 / 强调色变化 → 图表重上色；右列卡重渲染
+  subscribe(() => {
+    kl?.retheme();
+    if (mk.cur) { renderKlLegend(); }
+    renderRight();
+  });
 }
 
 function toggleSeg(id: string, btn: HTMLElement): void {
@@ -138,9 +146,9 @@ export function aggDaily(daily: Bar[], n: number): Bar[] {
 }
 
 export function curBars(): Bar[] {
-  if (mk.period === "w") return aggDaily(mk.bars, 5).slice(-80);
-  if (mk.period === "m") return aggDaily(mk.bars, 20).slice(-40);
-  return mk.bars.slice(-90);
+  if (mk.period === "w") return aggDaily(mk.bars, 5);
+  if (mk.period === "m") return aggDaily(mk.bars, 20);
+  return mk.bars; // 日K 全量：klinecharts 滚轮缩放 / 拖拽平移浏览历史
 }
 
 /* ── 个股头 ── */
@@ -179,180 +187,43 @@ export function renderStockHead(): void {
     `<span>换手率 <b class="num">${turn}%</b></span>` +
     `<span>振幅 <b class="num">${amp}%</b></span>`;
 }
-/* ── K线主图 ── */
+/* ── K线（klinecharts 10 · 策影同款配置，见 kline.ts） ── */
+let kl: KlineChartHandle | null = null;
+
 export function renderKline(): void {
-  const stage = document.getElementById("kl-main")!;
   const empty = document.getElementById("kl-empty")!;
   if (!mk.cur || !mk.bars.length) {
-    stage.innerHTML = "";
-    document.getElementById("kl-sub")!.innerHTML = "";
-    document.getElementById("kl-legend")!.innerHTML = "";
     empty.style.display = "grid";
+    kl?.setData([]);
     return;
   }
   empty.style.display = "none";
-  if (!stage.clientWidth) return;
-  const bars = curBars();
-  const closes = bars.map((b) => b.close);
-  const ma5 = sma(bars, 5), ma10 = sma(bars, 10), ma20 = sma(bars, 20);
-  const bl = bollSeries(bars, 20, 2);
-  const W = stage.clientWidth, H = stage.clientHeight;
-  const pad = { l: 58, r: 14, t: 12, b: 20 };
-  const pw = W - pad.l - pad.r, ph = H - pad.t - pad.b;
-  let lo = Infinity, hi = -Infinity;
-  bars.forEach((b, i) => {
-    hi = Math.max(hi, b.high, ma5[i] || 0, ma10[i] || 0, ma20[i] || 0, bl.up[i] || 0);
-    lo = Math.min(lo, b.low, bl.low[i] ?? Infinity);
-  });
-  const rng = (hi - lo) || 1;
-  hi += rng * .07; lo -= rng * .07;
-  const y = (v: number) => pad.t + ph - (v - lo) / (hi - lo) * ph;
-  const bw = pw / bars.length, cw = Math.max(2, bw * .66);
-  const x = (i: number) => pad.l + bw * i + bw / 2;
-  const upC = cssv("--up"), dnC = cssv("--down"), gridC = cssv("--grid"),
-    accC = cssv("--accent"), p1C = cssv("--p1"), vipC = cssv("--vip"),
-    dimC = cssv("--dim"), faintC = cssv("--faint");
-
-  let svg = `<svg width="${W}" height="${H}" style="width:100%;height:100%;display:block">`;
-  for (let g = 0; g <= 4; g++) {
-    const gy = pad.t + ph * g / 4;
-    svg += `<line x1="${pad.l}" y1="${gy}" x2="${W - pad.r}" y2="${gy}" stroke="${gridC}"/>`;
-    const val = hi - (hi - lo) * g / 4;
-    svg += `<text x="${pad.l - 8}" y="${gy + 3}" text-anchor="end" font-size="10" fill="${faintC}">${fmt(val, 1)}</text>`;
+  if (!kl) {
+    kl = mountKline(document.getElementById("kl-main")!);
+    kl.setMain(mk.mainInd as "ma");
+    kl.setSub(mk.subInd as "vol");
   }
-  const nlab = 6;
-  for (let i = 0; i < nlab; i++) {
-    const bi = Math.round(i * (bars.length - 1) / (nlab - 1));
-    svg += `<text x="${x(bi)}" y="${H - 5}" text-anchor="middle" font-size="10" fill="${faintC}">${dlab(bars[bi].date)}</text>`;
-  }
-  bars.forEach((b, i) => {
-    const up = b.close >= b.open, col = up ? upC : dnC;
-    svg += `<line x1="${x(i).toFixed(1)}" y1="${y(b.high).toFixed(1)}" x2="${x(i).toFixed(1)}" y2="${y(b.low).toFixed(1)}" stroke="${col}" stroke-width="1"/>`;
-    const yc = y(Math.max(b.open, b.close)), yh = y(Math.min(b.open, b.close));
-    svg += `<rect x="${(x(i) - cw / 2).toFixed(1)}" y="${yc.toFixed(1)}" width="${cw.toFixed(1)}" height="${Math.max(1, yh - yc).toFixed(1)}" fill="${col}" rx="${cw > 4 ? 1 : 0}"/>`;
-  });
-  const line = (arr: (number | null)[], color: string, wd: number) => {
-    let d = "", started = false;
-    arr.forEach((v, i) => {
-      if (v == null) return;
-      d += (started ? "L" : "M") + x(i).toFixed(1) + "," + y(v).toFixed(1) + " ";
-      started = true;
-    });
-    return d ? `<path d="${d}" fill="none" stroke="${color}" stroke-width="${wd}" opacity=".9"/>` : "";
-  };
-  if (mk.mainInd === "ma") svg += line(ma5, accC, 1.4) + line(ma10, p1C, 1.4) + line(ma20, vipC, 1.4);
-  else svg += line(bl.up, dimC, 1) + line(bl.mid, dimC, 1) + line(bl.low, dimC, 1);
-  svg += "</svg>";
-  stage.innerHTML = svg;
-  document.getElementById("kl-legend")!.innerHTML = mk.mainInd === "ma"
-    ? `<span><i style="background:${accC}"></i>MA5</span><span><i style="background:${p1C}"></i>MA10</span><span><i style="background:${vipC}"></i>MA20</span>`
-    : `<span><i style="background:${dimC}"></i>BOLL(20,2)</span>`;
-  renderSub(bars);
+  kl.resize();
+  kl.setData(curBars());
+  renderKlLegend();
 }
 
-/* ── 副图 ── */
-function renderSub(bars: Bar[]): void {
-  const el = document.getElementById("kl-sub")!;
-  if (!el.clientWidth) return;
-  const W = el.clientWidth, H = 112;
-  const pad = { l: 58, r: 14, t: 10, b: 14 };
-  const pw = W - pad.l - pad.r, ph = H - pad.t - pad.b;
-  const upC = cssv("--up"), dnC = cssv("--down"), gridC = cssv("--grid"),
-    faintC = cssv("--faint"), accC = cssv("--accent"), vipC = cssv("--vip");
-  const bw = pw / bars.length, cw = Math.max(2, bw * .66);
-  const x = (i: number) => pad.l + bw * i + bw / 2;
-  let y = (v: number) => v;
-  let svg = `<svg width="${W}" height="${H}" style="width:100%;height:100%;display:block">`;
-  const pLine = (arr: (number | null)[], col: string) => {
-    let d = "";
-    arr.forEach((v, i) => {
-      if (v == null) return;
-      d += (d ? "L" : "M") + x(i).toFixed(1) + "," + y(v).toFixed(1) + " ";
-    });
-    return d ? `<path d="${d}" fill="none" stroke="${col}" stroke-width="1.2"/>` : "";
-  };
-  if (mk.subInd === "vol") {
-    const vols = bars.map((b) => b.volume || 0);
-    const maxv = Math.max(...vols) || 1;
-    bars.forEach((b, i) => {
-      const h = Math.max(1, ph * (b.volume || 0) / maxv);
-      const up = b.close >= b.open;
-      svg += `<rect x="${(x(i) - cw / 2).toFixed(1)}" y="${(H - pad.b - h).toFixed(1)}" width="${cw.toFixed(1)}" height="${h.toFixed(1)}" fill="${up ? upC : dnC}" opacity=".55" rx="${cw > 4 ? 1 : 0}"/>`;
-    });
-    const vma = sma(bars.map((b, i) => ({ ...b, close: vols[i] })), 5);
-    let d = "";
-    vma.forEach((v, i) => {
-      if (v == null) return;
-      d += (d ? "L" : "M") + x(i).toFixed(1) + "," + (H - pad.b - ph * v / maxv).toFixed(1) + " ";
-    });
-    if (d) svg += `<path d="${d}" fill="none" stroke="${accC}" stroke-width="1.1"/>`;
-    svg += `<text x="${pad.l - 8}" y="14" text-anchor="end" font-size="10" fill="${faintC}">VOL</text>`;
-  } else if (mk.subInd === "macd") {
-    const { dif, dea, hist } = macdSeries(bars);
-    let mx = 0;
-    hist.forEach((v) => mx = Math.max(mx, Math.abs(v || 0)));
-    mx = mx || 1;
-    const zero = pad.t + ph / 2;
-    y = (v: number) => zero - (v / mx) * (ph / 2 - 6);
-    hist.forEach((v, i) => {
-      if (v == null) return;
-      const h = Math.max(1, Math.abs(v) / mx * (ph / 2 - 6));
-      const col = v >= 0 ? upC : dnC;
-      svg += `<rect x="${(x(i) - cw / 2).toFixed(1)}" y="${(v >= 0 ? zero - h : zero).toFixed(1)}" width="${cw.toFixed(1)}" height="${h.toFixed(1)}" fill="${col}" opacity=".5" rx="${cw > 4 ? 1 : 0}"/>`;
-    });
-    svg += `<line x1="${pad.l}" y1="${zero}" x2="${W - pad.r}" y2="${zero}" stroke="${gridC}"/>`;
-    svg += pLine(dif, upC) + pLine(dea, accC);
-    svg += `<text x="${pad.l - 8}" y="14" text-anchor="end" font-size="10" fill="${faintC}">MACD</text>`;
+function renderKlLegend(): void {
+  const accC = cssv("--accent") || "#FF9F43", p1C = "#0A84FF", vipC = cssv("--vip") || "#FFD60A";
+  const dimC = cssv("--dim") || "#A1A1A6";
+  const el = document.getElementById("kl-legend")!;
+  if (mk.mainInd === "ma") {
+    el.innerHTML = `<span><i style="background:${accC}"></i>MA5</span><span><i style="background:${p1C}"></i>MA10</span><span><i style="background:${vipC}"></i>MA20</span>`;
+  } else if (mk.mainInd === "boll") {
+    el.innerHTML = `<span><i style="background:${dimC}"></i>BOLL(20,2)</span>`;
   } else {
-    const { k, d, j } = kdjSeries(bars);
-    let lo = 1e9, hi = -1e9;
-    [...k, ...d, ...j].forEach((v) => { if (v != null) { lo = Math.min(lo, v); hi = Math.max(hi, v); } });
-    const rng = (hi - lo) || 1;
-    hi += rng * .1; lo -= rng * .1;
-    y = (v: number) => pad.t + (1 - (v - lo) / (hi - lo)) * ph;
-    svg += pLine(k, vipC) + pLine(d, accC) + pLine(j, upC);
-    svg += `<text x="${pad.l - 8}" y="14" text-anchor="end" font-size="10" fill="${faintC}">KDJ</text>`;
+    const strong = mk.mainInd === "short"
+      ? (mk.bars.length && mk.bars[mk.bars.length - 1].close > sma(mk.bars, 10)[mk.bars.length - 1]!)
+      : (mk.bars.length && mk.bars[mk.bars.length - 1].close > sma(mk.bars, 45)[mk.bars.length - 1]!);
+    const fill = strong ? "rgba(255,155,87,.82)" : "rgba(90,88,251,.86)";
+    el.innerHTML = `<span><i style="background:${CH_FAST}"></i>快线</span><span><i style="background:${CH_SLOW}"></i>慢线</span>` +
+      `<span><i style="background:${fill}"></i>${strong ? "多头 · 偏强" : "空头 · 偏弱"}</span>`;
   }
-  svg += "</svg>";
-  el.innerHTML = svg;
-}
-
-/* ── 十字光标 ── */
-function initCrosshair(): void {
-  const stage = document.getElementById("kl-stage")!;
-  const xhair = document.getElementById("xhair")!, tip = document.getElementById("xtip")!;
-  stage.addEventListener("mousemove", (e) => {
-    const s = document.getElementById("kl-main")!;
-    if (!mk.cur || !mk.bars.length || !s.clientWidth) return;
-    const bars = curBars();
-    const r = s.getBoundingClientRect();
-    const W = r.width, padL = 58, pw = W - 58 - 14, bw = pw / bars.length;
-    const mx = e.clientX - r.left;
-    const idx = Math.max(0, Math.min(bars.length - 1, Math.floor((mx - padL) / bw)));
-    const x = padL + bw * idx + bw / 2;
-    xhair.style.left = x + "px";
-    xhair.style.display = "block";
-    const b = bars[idx];
-    const up = b.close >= b.open, cl = up ? "up" : "down";
-    tip.innerHTML = `<div class="t-date num">${dlab(b.date)} · ${mk.cur.name} ${mk.cur.symbol}</div>` +
-      `<div class="t-grid"><span class="k">开</span><span class="v num">${fmt(b.open)}</span>` +
-      `<span class="k">高</span><span class="v num up">${fmt(b.high)}</span>` +
-      `<span class="k">低</span><span class="v num down">${fmt(b.low)}</span>` +
-      `<span class="k">收</span><span class="v num ${cl}">${fmt(b.close)}</span>` +
-      `<span class="k">量</span><span class="v num">${fmtVol(b.volume)}</span></div>`;
-    tip.style.display = "block";
-    const tw = tip.offsetWidth, th = tip.offsetHeight;
-    let tx = x + 14;
-    if (tx + tw > r.width - 8) tx = x - tw - 14;
-    let ty = 14;
-    if (ty + th > r.height - 8) ty = r.height - th - 8;
-    tip.style.left = tx + "px";
-    tip.style.top = ty + "px";
-  });
-  stage.addEventListener("mouseleave", () => {
-    xhair.style.display = "none";
-    tip.style.display = "none";
-  });
 }
 
 /* ── 右列功能卡 ── */
