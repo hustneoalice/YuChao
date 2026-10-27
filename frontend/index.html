@@ -1,0 +1,327 @@
+<!DOCTYPE html>
+<html lang="zh-CN" data-theme="dark" data-dir="cn" data-accent="amber">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<link rel="icon" href="data:image/svg+xml,%3Csvg xmlns=%27http://www.w3.org/2000/svg%27 viewBox=%270 0 16 16%27%3E%3Crect width=%2716%27 height=%2716%27 rx=%274%27 fill=%27%230a0a0b%27/%3E%3Cpath d=%27M3 10 L6 7 L8 9 L13 4%27 stroke=%27%23ff9f43%27 stroke-width=%271.6%27 fill=%27none%27 stroke-linecap=%27round%27/%3E%3C/svg%3E">
+<title>驭潮 YuChao · 看盘分析工作台</title>
+<script type="module" src="/src/main.ts"></script>
+</head>
+
+<body>
+<div class="topbar">
+  <div class="brand">
+    <span class="mark" data-ic="chart-line-up" data-sz="15"></span>
+    <b>驭潮</b><span>YuChao · StrategyLens</span>
+  </div>
+  <div class="gsearch">
+    <div class="gbox"><span data-ic="magnifying-glass" data-sz="14"></span>
+      <input id="ginput" placeholder="搜索代码 / 名称" autocomplete="off">
+      <span class="mono" style="color:var(--faint)">⌘K</span></div>
+    <div class="gdrop" id="gdrop"></div>
+  </div>
+  <div class="datachip" id="datachip"><i></i><span id="datachip-t">行情底座 · 检测中</span></div>
+  <span class="sp"></span>
+  <button class="icbtn" id="btn-theme" title="切换深浅主题" data-ic="moon" data-sz="16"></button>
+  <button class="vipbadge off" id="vipbadge" data-ic="crown-simple" data-sz="13"><span id="vipbadge-t">未登录</span></button>
+  <div class="userchip" id="userchip" title="点击登录 / 管理账户">
+    <span class="ava" id="user-ava">?</span><span id="user-name">未登录</span>
+  </div>
+</div>
+
+<div class="shell">
+  <nav class="rail" id="rail">
+    <a class="on" data-page="market" data-ic="chart-line-up" data-t="行情" data-sz="21"></a>
+    <a data-page="watchlist" data-ic="star" data-t="自选" data-sz="21"></a>
+    <a data-page="sectors" data-ic="squares-four" data-t="板块" data-sz="21"></a>
+    <a data-page="corepicks" data-ic="target" data-t="核心标" data-sz="21"></a>
+    <a data-page="cards" data-ic="cards" data-t="功能卡片" data-sz="21"></a>
+    <div class="bot"></div>
+    <a data-page="settings" data-ic="gear" data-t="设置" data-sz="21"></a>
+  </nav>
+
+  <main class="main">
+
+    <!-- ═══════════ 行情 ═══════════ -->
+    <section class="page on" id="page-market">
+      <div class="mkt-row">
+        <div class="kl-col">
+          <div class="stock-head">
+            <div class="sh-l">
+              <button class="backbtn" id="btn-back" hidden>
+                <span data-ic="arrow-left" data-sz="14"></span><span id="back-label">返回</span>
+              </button>
+              <div class="sh-name">
+                <b id="s-name">—</b><span class="sh-code num" id="s-code"></span>
+                <div class="tags"><span class="tag acc" id="s-seg" hidden></span><span class="tag flat" id="s-board" hidden></span></div>
+              </div>
+            </div>
+            <div class="sh-price">
+              <span class="p num" id="s-price">—</span>
+              <span class="c" id="s-chg"></span>
+            </div>
+            <div class="sh-stats" id="s-stats"></div>
+          </div>
+
+          <div class="chartbox" style="flex:1;min-height:0">
+            <div class="chartbar">
+              <span class="mono" style="color:var(--faint);font-size:11px">KLINE · <span id="kl-code">—</span></span>
+              <span class="barsep"></span>
+              <span class="seg" id="kl-period">
+                <button class="on" data-p="d">日K</button><button data-p="w">周K</button><button data-p="m">月K</button>
+              </span>
+              <span class="barsep"></span>
+              <span class="seg" id="kl-main-ind">
+                <button class="on" data-mi="ma">MA</button><button data-mi="boll">BOLL</button>
+              </span>
+              <span class="barsep"></span>
+              <span class="seg" id="kl-sub-ind">
+                <button class="on" data-si="vol">成交量</button><button data-si="macd">MACD</button><button data-si="kdj">KDJ</button>
+              </span>
+              <span class="sp"></span>
+              <div class="legend" id="kl-legend"></div>
+            </div>
+            <div class="kl-stage" id="kl-stage">
+              <div class="kl-main" id="kl-main"></div>
+              <div class="kl-sub" id="kl-sub"></div>
+              <div class="xhair" id="xhair"></div>
+              <div class="xtip" id="xtip"></div>
+              <div class="empty" id="kl-empty" style="display:none">
+                <span data-ic="chart-line" data-sz="30" style="color:var(--faint)"></span>
+                <b>选择一个标的开始看盘</b>
+                <span>在顶栏搜索代码或名称，或从自选 / 板块 / 核心标页进入。</span>
+              </div>
+            </div>
+          </div>
+        </div>
+
+        <aside class="rightcol" id="rightcol"></aside>
+      </div>
+    </section>
+
+    <!-- ═══════════ 自选 ═══════════ -->
+    <section class="page" id="page-watchlist">
+      <div class="phead">
+        <span class="crumb">自选 /</span><h1>自选股</h1>
+        <span class="sp"></span>
+        <button class="hbtn primary" id="wl-add" data-ic="plus" data-sz="14">添加自选</button>
+      </div>
+      <div style="display:flex;gap:8px;align-items:center;flex-wrap:wrap" id="wl-groups"></div>
+      <div class="panel" style="flex:1;min-height:0;display:flex;flex-direction:column">
+        <div class="phead2">
+          <h3 id="wl-title">全部自选</h3>
+          <span class="sub" id="wl-count">共 0 只</span>
+          <span class="sp"></span>
+          <span class="seg" id="wl-filter">
+            <button class="on" data-f="all">全部</button><button data-f="up">上涨</button><button data-f="down">下跌</button>
+          </span>
+        </div>
+        <div class="tblwrap" style="flex:1">
+          <table>
+            <thead><tr><th style="width:30px"></th><th>代码</th><th>名称</th>
+              <th class="n">现价</th><th class="n">涨跌幅</th><th class="n">成交额</th>
+              <th>信号</th><th>分组</th><th style="width:52px"></th></tr></thead>
+            <tbody id="wl-body"></tbody>
+          </table>
+        </div>
+        <div class="empty" id="wl-empty" style="display:none;padding:44px 20px">
+          <span data-ic="star" data-sz="30" style="color:var(--faint)"></span>
+          <b>这个分组还没有自选股</b>
+          <span>搜索添加你关注的标的，或从行情页直接加入。</span>
+          <button class="hbtn primary" id="wl-empty-add" data-ic="plus" data-sz="13">添加自选</button>
+        </div>
+      </div>
+    </section>
+
+    <!-- ═══════════ 板块 ═══════════ -->
+    <section class="page" id="page-sectors">
+      <div class="phead">
+        <span class="crumb">板块 /</span><h1>板块热力</h1>
+        <span class="sp"></span>
+        <span class="seg" id="sec-type">
+          <button class="on" data-t="industry">行业</button><button data-t="concept">概念</button>
+        </span>
+        <span class="seg" id="sec-look">
+          <button data-l="5">5日</button><button data-l="10">10日</button><button class="on" data-l="20">20日</button>
+        </span>
+      </div>
+      <div style="display:flex;gap:12px;flex:1;min-height:0">
+        <div class="panel" style="flex:1.4;min-height:0;display:flex;flex-direction:column">
+          <div class="phead2"><h3 id="sec-title">行业热力</h3><span class="sub">色深 = 涨跌幅强度 · 点击查看成分股</span></div>
+          <div class="tblwrap" style="flex:1;padding:14px"><div class="heat" id="heat"></div></div>
+        </div>
+        <div class="panel" style="flex:1;min-width:0;display:flex;flex-direction:column" id="sec-members">
+          <div class="phead2">
+            <h3 id="mem-title">成分股</h3>
+            <span class="sub" id="mem-date"></span>
+          </div>
+          <div class="tblwrap" style="flex:1">
+            <table>
+              <thead><tr><th style="width:30px"></th><th>代码</th><th>名称</th>
+                <th class="n">现价</th><th class="n">窗口涨幅</th><th class="n">主力净流入</th></tr></thead>
+              <tbody id="mem-body"></tbody>
+            </table>
+          </div>
+        </div>
+      </div>
+    </section>
+
+    <!-- ═══════════ 核心标 ═══════════ -->
+    <section class="page" id="page-corepicks">
+      <div class="phead">
+        <span class="crumb">核心标 /</span><h1>核心标 · 追涨 / 低吸</h1>
+      </div>
+      <div style="display:flex;gap:8px;align-items:center;flex-wrap:wrap">
+        <span class="chip on num" id="cp-date">—</span>
+        <span class="chip" id="cp-follow" data-ic="star" data-sz="11" style="cursor:default">仅看自选</span>
+        <span class="seg" id="cp-tabs">
+          <button class="on" data-t="chase">追涨池</button><button data-t="dip">低吸池</button><button data-t="all">全部</button>
+        </span>
+        <span class="sp" style="flex:1"></span>
+        <span style="font-size:11px;color:var(--faint)">仅提供基于公开数据的规则化分析，不构成投资建议</span>
+      </div>
+      <div class="panel" style="flex:1;min-height:0;display:flex;flex-direction:column">
+        <section data-core-state="data" class="on">
+          <div class="tblwrap" style="flex:1">
+            <table>
+              <thead><tr><th style="width:34px"></th><th>代码</th><th>名称</th>
+                <th class="n">现价</th><th class="n">涨跌幅</th><th>板块</th>
+                <th>资金分</th><th>三因子明细</th><th style="width:74px">操作</th></tr></thead>
+              <tbody id="cp-body"></tbody>
+            </table>
+          </div>
+          <div style="padding:10px 14px;border-top:1px solid var(--border);display:flex;gap:16px;align-items:center;font-size:11px;color:var(--faint)">
+            <span>资金分公开展示 · 趋势 / 位置 / 六分段属 VIP 三因子明细（服务端计算）</span>
+            <span class="sp" style="flex:1"></span>
+            <span>共 <b class="num" id="cp-total">0</b> 只</span>
+          </div>
+        </section>
+        <section data-core-state="empty"><div class="empty">
+          <span data-ic="target" data-sz="34" style="color:var(--faint)"></span>
+          <b>所选日期没有核心标</b>
+          <span>当日未触发任何「追涨 / 低吸」信号，换个池范围或稍后再看。</span>
+        </div></section>
+        <section data-core-state="loading"><div class="loading">
+          <div style="width:100%"><div class="skel"></div><div class="skel"></div><div class="skel" style="width:64%"></div></div>
+          <span>正在读取核心标信号</span>
+        </div></section>
+        <section data-core-state="error"><div class="error">
+          <span data-ic="warning" data-sz="34" style="color:var(--up)"></span>
+          <b>核心标服务无响应</b>
+          <span id="cp-err-msg">请求失败，点击重试。</span>
+          <button class="hbtn" id="cp-retry" data-ic="arrows-clockwise" data-sz="12">重试</button>
+        </div></section>
+      </div>
+    </section>
+
+    <!-- ═══════════ 功能卡片 ═══════════ -->
+    <section class="page" id="page-cards">
+      <div class="phead">
+        <span class="crumb">卡片 /</span><h1>功能卡片系统</h1>
+        <span class="sub" style="font-size:12px;color:var(--faint)">开关实时生效于「行情」页右侧功能卡列</span>
+        <span class="sp"></span>
+        <button class="hbtn" id="cards-reset" data-ic="arrows-clockwise" data-sz="13">恢复默认</button>
+      </div>
+      <div class="cardgrid" id="cardgrid"></div>
+      <div class="panel" style="padding:13px 15px;display:flex;gap:12px;align-items:center;background:var(--panel)">
+        <span data-ic="info" data-sz="15" style="color:var(--accent);flex:none"></span>
+        <span style="font-size:12px;color:var(--dim)">开关实时生效于「行情」页右列；每张卡支持 <b style="color:var(--text)">折叠</b>、<b style="color:var(--text)">简单 / 详细</b> 双模式；按住卡片标题右侧 <b style="color:var(--text)">⠿</b> 拖拽可直接调整右列顺序。配置按浏览器持久化。</span>
+      </div>
+    </section>
+
+    <!-- ═══════════ 设置 ═══════════ -->
+    <section class="page" id="page-settings">
+      <div class="phead">
+        <span class="crumb">设置 /</span><h1>设置</h1>
+      </div>
+      <div class="setwrap">
+        <nav class="setnav" id="setnav"></nav>
+        <div class="setbody" id="setbody"></div>
+      </div>
+    </section>
+
+  </main>
+</div>
+
+<!-- ═══ 弹窗层 ═══ -->
+<div class="scrim" id="scrim"></div>
+
+<div class="modal" id="modal-auth">
+  <div class="mhead"><h3 id="auth-title">登录</h3>
+    <span class="sp"></span>
+    <button class="mclose" data-close><span data-ic="x" data-sz="13"></span></button></div>
+  <p class="mdesc" id="auth-desc">登录后同步自选与 VIP 权益；行情数据无需登录即可浏览。</p>
+  <div class="auth-tabs">
+    <span class="seg" id="auth-tabs">
+      <button class="on" data-t="login">登录</button><button data-t="register">注册</button>
+    </span>
+  </div>
+  <div style="display:flex;flex-direction:column;gap:8px">
+    <input class="field" id="auth-id" placeholder="邮箱（注册后可用用户名登录）" autocomplete="username">
+    <input class="field" id="auth-user" placeholder="用户名（可选，3-20 位字母数字）" style="display:none" autocomplete="off">
+    <input class="field" id="auth-pwd" type="password" placeholder="密码（≥ 8 位）" autocomplete="current-password">
+    <button class="hbtn primary" id="auth-go" style="justify-content:center;height:34px">登录</button>
+    <span id="auth-err" style="font-size:11.5px;color:var(--up);display:none"></span>
+  </div>
+</div>
+
+<div class="modal" id="modal-vip">
+  <div class="mhead"><h3>开通 VIP · 解锁完整指标</h3>
+    <span class="sp"></span>
+    <span class="tag warn" id="vip-state-tag">未登录</span>
+    <button class="mclose" data-close><span data-ic="x" data-sz="13"></span></button></div>
+  <p class="mdesc">VIP 指标在服务端计算并脱敏返回：<b>三因子明细（趋势 / 位置）</b> 与 <b>六分段判定</b>。未授权不返回数据，前端只渲染不计算。</p>
+  <div style="margin-top:6px;display:flex;flex-direction:column;gap:8px;border-top:1px solid var(--border-soft);padding-top:12px">
+    <span style="font-size:12px;color:var(--dim)">兑换码（YC-XXXX-XXXX，一码一用）</span>
+    <div style="display:flex;gap:8px;align-items:center">
+      <input class="field" id="redeem-input" placeholder="YC-XXXX-XXXX" style="flex:1">
+      <button class="hbtn primary" id="redeem-btn" data-ic="check" data-sz="12">兑换</button>
+    </div>
+    <span style="font-size:10.5px;color:var(--faint)">支付回调核销 → license 自动签发 / 续期；兑换后立即生效，VIP 徽章与指标即时解锁。</span>
+  </div>
+  <div class="acts"><button class="hbtn" data-close>暂不</button></div>
+</div>
+
+<div class="modal" id="modal-detail">
+  <div class="mhead"><h3 id="dt-name">标的明细</h3>
+    <span class="sp"></span>
+    <span class="tag acc" id="dt-pool-tag">追涨池</span>
+    <button class="mclose" data-close><span data-ic="x" data-sz="13"></span></button></div>
+  <p class="mdesc"><span class="num" id="dt-code"></span> · 三因子与六分段判定（VIP 指标）</p>
+  <div class="factorgrid" id="dt-factors"></div>
+  <div style="margin-top:14px;background:var(--panel-2);border-radius:12px;padding:12px 14px">
+    <div style="display:flex;align-items:center;gap:8px;font-size:12px;color:var(--dim);margin-bottom:2px">
+      <span>六分段位置</span><span class="sp" style="flex:1"></span><b class="num" style="color:var(--text)" id="dt-seg-v"></b></div>
+    <div class="sixseg" id="dt-sixseg"></div>
+    <div class="sixlab"><span>超卖</span><span>低位</span><span>弱势</span><span>回升</span><span>强势</span><span>超买</span></div>
+  </div>
+  <div class="kv" id="dt-kv"></div>
+  <div class="acts">
+    <button class="hbtn" data-close>关闭</button>
+    <button class="hbtn primary" id="dt-watch" data-ic="star" data-sz="12">加入自选</button>
+  </div>
+</div>
+
+<div class="modal" id="modal-add">
+  <div class="mhead"><h3>添加自选</h3><span class="sp"></span>
+    <button class="mclose" data-close><span data-ic="x" data-sz="13"></span></button></div>
+  <p class="mdesc">搜索代码或名称，从行情底座加入自选。</p>
+  <input class="field" id="add-search" placeholder="代码 / 名称" style="width:100%">
+  <div style="margin-top:10px;max-height:300px;overflow:auto" id="add-list"></div>
+  <div class="acts"><button class="hbtn" data-close>完成</button></div>
+</div>
+
+<div class="modal" id="modal-pay-ok" style="width:min(380px,92vw);text-align:center">
+  <div class="mhead" style="justify-content:center"><h3>VIP 已开通</h3></div>
+  <div style="display:grid;place-items:center;gap:8px;padding:10px 0">
+    <span data-ic="check-circle" data-sz="44" style="color:var(--down)"></span>
+    <p style="font-size:13px;color:var(--dim)">license 已签发 · <b class="num" id="pay-until" style="color:var(--text)"></b> 到期</p>
+    <p style="font-size:11px;color:var(--faint)">VIP 指标序列已由服务端解锁，信号面板即时生效</p>
+  </div>
+  <div class="acts" style="justify-content:center"><button class="hbtn primary" data-close>开始使用</button></div>
+</div>
+
+<div class="toast" id="toast"><span data-ic="check" data-sz="14"></span><span id="toast-t">已保存</span></div>
+
+</body>
+</html>

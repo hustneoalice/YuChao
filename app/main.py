@@ -6,6 +6,7 @@ import logging
 from contextlib import asynccontextmanager
 
 from fastapi import FastAPI, Request
+from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
 from prometheus_client import make_asgi_app
 
@@ -33,6 +34,17 @@ app = FastAPI(
         "仅依赖本 OpenAPI 契约。错误规约 `{code,message,detail?}`；分页信封 `{items,total,cursor?}`。"
     ),
     lifespan=lifespan,
+)
+
+# M4 前端跨域：dev server（vite 5173 等）直连 API；鉴权走 Bearer header（不用 cookie），
+# 无需 allow_credentials。生产同源部署时由反向代理消化，此处保持开放即可。
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins=["*"],
+    allow_credentials=False,
+    allow_methods=["*"],
+    allow_headers=["*"],
+    expose_headers=["*"],
 )
 
 

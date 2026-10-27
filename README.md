@@ -109,10 +109,24 @@ open http://127.0.0.1:8800/docs
 ## 开发
 
 ```bash
-pytest -q          # 51 项测试：M1 冒烟 + M2（编排/采集/SSE 总线）+ M3（账户/VIP 穿透/数据包/Redis fanout）
+pytest -q          # 53 项测试：M1 冒烟 + M2（编排/采集/SSE 总线）+ M3（账户/VIP 穿透/数据包/Redis fanout）
 ```
 
 目录：`app/contracts/`（Pydantic 契约）· `app/foundation/`（db / indicators / repo）· `app/routers/v1/`（端点）· `app/auth/`（用户态/license 服务）· `app/updater/`（编排器/采集器/调度链/数据包，唯一写者）· `app/stream/`（事件总线 FileBus/RedisBus + SSE 网关）· `scripts/`（ensure_schema · openapi 导出 · TS 客户端生成）。
+
+## 前端工作台（M4）
+
+`frontend/` —— Vite + vanilla TypeScript 单页应用，零运行时框架；视觉与交互 1:1 复刻设计原型（暗色看盘默认 #0A0A0B · 琥珀强调 · 红涨绿跌，主题/涨跌方向/强调色可切换）。
+
+```bash
+cd frontend && npm install
+npm run dev        # http://localhost:5173 ，/api 代理至 127.0.0.1:8031（YUCHAO_API 可覆盖）
+npm run build      # tsc --noEmit + vite build → dist/
+```
+
+页面：**行情**（搜索选标 → SVG K线 MA/BOLL + VOL/MACD/KDJ 副图 · 十字光标 · 右列功能卡：信号面板（VIP 锁定层）/ 资金流 / 技术指标 / 估值 / 核心标档案，卡开关/折叠/双模式/拖拽排序实时生效）；**自选**（localStorage 分组，F04 后端就绪后切换）；**板块**（行业/概念热力 + 成分股窗口涨幅）；**核心标**（公开名单 + 资金分，三因子明细走 `/corepicks/{symbol}/factors`，403 → VIP 解锁层）；**功能卡片**；**设置**（数据底座真实状态/更新任务触发/更新日志 · 外观 · VIP 兑换 · 账户）。
+
+身份与实时：JWT（localStorage）登录/注册；顶栏数据状态 chip 轮询 `/data/status`；SSE（`/stream/sse?token=`）订阅 `data:update`、`corepicks:daily` 频道，seq 跳号自动回退 REST。指标口径：开源指标（MA/BOLL/MACD/KDJ/ATR/六分段）前端计算；VIP 三因子明细仅由服务端计算并脱敏返回，前端只渲染不计算。
 
 ## License
 
