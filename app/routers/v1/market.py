@@ -1,4 +1,5 @@
 """行情端点：GET /market/kline · /market/quote · /market/search · 资讯/研报。"""
+from datetime import date
 from typing import Optional
 
 from fastapi import APIRouter, Depends, Query
@@ -34,9 +35,27 @@ def kline(
     return TypeAdapter(Kline).validate_python(data)
 
 
-@router.get("/market/quote", response_model=Quote, summary="个股快照（最新日线+估值+资金流）")
+@router.get("/market/quote", response_model=Quote, summary="个股快照（最新日线+估值+资金流，盘中叠实时价）")
 def quote(symbol: str, conn=Depends(get_conn)):
-    return repo.market.get_quote(conn, symbol)
+    q = repo.market.get_quote(conn, symbol)
+    try:                                    # 实时兜底：成功则带 rt_* 字段，失败静默降级
+        rt = live.realtime_quote(symbol)
+        if rt:
+            q["rt_price"] = rt["price"]
+            q["rt_time"] = rt["ts"]
+            # 盘中（快照为今日）时用实时值覆盖价格字段，尾部日线日期改标实时时间
+            if rt["ts"] and rt["ts"][:10] == date.today().isoformat():
+                q["date"] = rt["ts"]
+                if rt.get("open") is not None: q["open"] = rt["open"]
+                if rt.get("high") is not None: q["high"] = rt["high"]
+                if rt.get("low") is not None: q["low"] = rt["low"]
+                if rt.get("price") is not None: q["close"] = rt["price"]
+                if rt.get("pct") is not None: q["pct_chg"] = rt["pct"]
+                if rt.get("volume") is not None: q["volume"] = rt["volume"]
+                if rt.get("amount") is not None: q["amount"] = rt["amount"]
+    except Exception:
+        pass
+    return q
 
 
 @router.get("/market/search", response_model=Page[SearchHit], summary="代码/名称搜索")

@@ -81,6 +81,8 @@ export interface Quote {
   symbol: string; name?: string; market?: string; industry?: string; concept?: string; status?: string;
   date?: string; open?: number; high?: number; low?: number; close?: number;
   pct_chg?: number; volume?: number; amount?: number; turnover_rate?: number;
+  /* 盘中实时兜底（后端东财 push2 快照，10s 缓存；非盘中/失败时缺省） */
+  rt_price?: number; rt_time?: string;
   valuation?: { date: string; pe_ttm?: number; pb?: number; ps_ttm?: number; total_mv?: number; circ_mv?: number } | null;
   capital_flow?: { date: string; net_main?: number; net_super?: number; net_large?: number; net_medium?: number; net_small?: number } | null;
 }

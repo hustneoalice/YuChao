@@ -73,6 +73,9 @@ class Quote(BaseModel):
     turnover_rate: Optional[float] = None
     valuation: Optional[Valuation] = None
     capital_flow: Optional[CapitalFlowDay] = None
+    # 盘中实时兜底（东财 push2 快照，非盘中/拉取失败时为 None，价格仍为日线收盘）
+    rt_price: Optional[float] = None
+    rt_time: Optional[str] = None          # "YYYY-MM-DD HH:MM" 快照时间（东财 f86）
 
 
 class SearchHit(BaseModel):

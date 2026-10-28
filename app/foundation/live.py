@@ -87,6 +87,42 @@ def stock_news(symbol: str, limit: int = 12) -> List[Dict[str, str]]:
 
 
 # ---------------------------------------------------------------------------
+# 实时行情快照（东财 push2）：盘中价兜底，10s 缓存
+# ---------------------------------------------------------------------------
+
+_RT_FIELDS = "f43,f44,f45,f46,f47,f48,f60,f86,f169,f170,f57,f58"
+
+
+@_cached("live:rt", 10)
+def realtime_quote(symbol: str) -> Optional[Dict[str, Any]]:
+    """东财实时快照。返回 {price, high, low, open, prev_close, pct, amount,
+    volume, ts}；secid 映射：sh→1. / sz·bj→0.（北交所 secid 亦走 0）。"""
+    code = pure_of(symbol)
+    secid = f"1.{code}" if code.startswith(("6", "9", "5")) else f"0.{code}"
+    r = client.get("https://push2.eastmoney.com/api/qt/stock/get",
+                   params={"secid": secid, "fields": _RT_FIELDS, "invt": "2"},
+                   timeout=8, headers={"User-Agent": _UA, "Referer": _EM_REFERER})
+    r.raise_for_status()
+    d = (r.json().get("data") or {})
+    if not d.get("f43") or d.get("f43") == "-":
+        return None
+    scale = 10 ** int(d.get("f59") or 2)     # 价格精度（北交所 3 位）
+    amt = d.get("f48")
+    vol = d.get("f47")
+    return {
+        "price": d["f43"] / scale,
+        "high": d["f44"] / scale if isinstance(d.get("f44"), (int, float)) else None,
+        "low": d["f45"] / scale if isinstance(d.get("f45"), (int, float)) else None,
+        "open": d["f46"] / scale if isinstance(d.get("f46"), (int, float)) else None,
+        "prev_close": d["f60"] / scale if isinstance(d.get("f60"), (int, float)) else None,
+        "pct": d["f170"] / 100 if isinstance(d.get("f170"), (int, float)) else None,
+        "amount": amt * 10 if isinstance(amt, (int, float)) else None,   # f48 单位十元 → 元
+        "volume": vol * 100 if isinstance(vol, (int, float)) else None,  # f47 单位手 → 股
+        "ts": time.strftime("%Y-%m-%d %H:%M", time.localtime(d["f86"])) if d.get("f86") else None,
+    }
+
+
+# ---------------------------------------------------------------------------
 # 研报（个股 qType=0 / 行业 qType=1，东财 reportapi）
 # ---------------------------------------------------------------------------
 

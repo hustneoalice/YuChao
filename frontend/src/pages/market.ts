@@ -143,6 +143,16 @@ function renderBackbar(): void {
 
 export function initMarket(): void {
   initRcolResize();
+  // 实时价轮询：行情页可见时每 20s 静默刷新当前股 quote（后端 10s 缓存兜东财限流）
+  window.setInterval(async () => {
+    if (!mk.cur || !document.getElementById("page-market")!.classList.contains("on")) return;
+    try {
+      const q = await marketApi.quote(mk.cur.symbol);
+      if (mk.cur?.symbol !== q.symbol) return;
+      mk.quote = q;
+      renderStockHead();
+    } catch { /* 静默，下轮再试 */ }
+  }, 20000);
   // 资讯/研报 tab 切换（点击已选 tab 不重复请求，走缓存）
   document.getElementById("brief-panel")!.addEventListener("click", (e) => {
     const b = (e.target as HTMLElement).closest<HTMLButtonElement>("button[data-bt]");
@@ -267,26 +277,33 @@ export function renderStockHead(): void {
   else boardTag.hidden = true;
 
   const prev = bars.length > 1 ? bars[bars.length - 2].close : last.open;
-  const up = last.close >= prev;
-  const cls = up ? "up" : "down";
   const chgPct = q?.pct_chg ?? (prev ? (last.close - prev) / prev * 100 : 0);
+  const cls = chgPct >= 0 ? "up" : "down";
+  // 实时兜底：quote 带 rt_price（后端东财快照，可能比库内日线新一个交易日）时
+  // 价格要素整体切换为实时值，尾根日线仅作回落
+  const rtLive = q?.rt_price != null;
+  const opV = rtLive ? (q!.open ?? last.open) : last.open;
+  const hiV = rtLive ? (q!.high ?? last.high) : last.high;
+  const loV = rtLive ? (q!.low ?? last.low) : last.low;
   const price = document.getElementById("s-price")!;
-  price.textContent = fmt(last.close);
+  price.textContent = fmt(rtLive ? q!.rt_price! : last.close);
   price.className = "p num " + cls;
   const chgEl = document.getElementById("s-chg")!;
   chgEl.textContent = fmtChg(chgPct) + "%";
   chgEl.className = "c " + cls;
 
-  const amt = (last.amount ?? (last.volume || 0) * last.close);
+  const amt = rtLive ? (q!.amount ?? (q!.volume ?? last.volume ?? 0) * q!.rt_price!)
+    : (last.amount ?? (last.volume || 0) * last.close);
   const turn = last.turnover_rate != null ? fmt(last.turnover_rate) : "—";
-  const amp = prev ? fmt((last.high - last.low) / prev * 100) : "—";
+  const amp = prev ? fmt((hiV - loV) / prev * 100) : "—";
   // 两行：第一行价格要素，第二行行业 / 概念（无数据时隐藏对应项）
   const infoRow = (pairs: [string, string | null][]) =>
     `<div class="srow">` + pairs.filter((p) => p[1] != null).map(([k, v]) =>
       `<span>${k} <b class="num">${v}</b></span>`).join("") + `</div>`;
   document.getElementById("s-stats")!.innerHTML =
-    infoRow([["今开", fmt(last.open)], ["最高", fmt(last.high)], ["最低", fmt(last.low)],
-      ["成交额", fmtYi(amt, 1)], ["换手率", turn + "%"], ["振幅", amp + "%"]]) +
+    infoRow([["今开", fmt(opV)], ["最高", fmt(hiV)], ["最低", fmt(loV)],
+      ["成交额", fmtYi(amt, 1)], ["换手率", turn + "%"], ["振幅", amp + "%"],
+      ...(rtLive && q!.rt_time ? [["快照", q!.rt_time!.slice(11)] as [string, string]] : [])]) +
     infoRow([["行业", q?.industry ?? null], ["概念", q?.concept ?? null]]);
 }
 /* ── K线（klinecharts 10 · 策影同款配置，见 kline.ts） ── */
