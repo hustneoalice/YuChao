@@ -1,6 +1,6 @@
 /* 行情页：个股头 + klinecharts K线 + 右列功能卡 */
 import { marketApi, type Bar, type IndexQuote, type Quote } from "../api";
-import { cssv, fmt, fmtChg, fmtYi } from "../fmt";
+import { cssv, esc, fmt, fmtChg, fmtYi } from "../fmt";
 import { sma, bollSeries, kdjSeries, atrSeries, sixSegment } from "../indicators";
 import { ic } from "../icons";
 import { CARD_DEFS, getState, isVip, setCardPref, subscribe } from "../store";
@@ -49,15 +49,13 @@ export async function openStock(s: CurStock, from?: { page: string; label: strin
   localStorage.setItem("yc_last_symbol", `${s.symbol}|${s.name}`);
   renderBackbar();
   document.dispatchEvent(new CustomEvent("yc:goto-page", { detail: "market" }));
-  renderHeadLoading();
-  // K线先渲染不等 quote（东财实时快照慢/被掐时不再拖住首屏），
-  // quote 到达后单独补头部（涨跌胶囊/今开最高最低/实时价）
+  // K线先渲染不等 quote（实时快照慢/被掐时不再拖住首屏），
+  // quote 到达后单独刷新右列（基本信息卡/资金流/估值等）
   try {
     const k = await marketApi.kline({ symbol: s.symbol, limit: 2000 });
     if (mk.cur?.symbol !== s.symbol) return;   // 用户已切到别的标的，丢弃过期回包
     mk.bars = k.bars;
     mk.quote = null;
-    renderStockHead();
     renderKline();
     renderRight();
     showBriefing();
@@ -69,7 +67,7 @@ export async function openStock(s: CurStock, from?: { page: string; label: strin
     const q = await marketApi.quote(s.symbol);
     if (mk.cur?.symbol !== s.symbol || !q) return;
     mk.quote = q;
-    renderStockHead();
+    renderRight();
   } catch { /* 实时兜底失败：保持日线数据展示 */ }
 }
 
@@ -152,12 +150,6 @@ export function refreshCur(): void {
   if (mk.cur && document.getElementById("page-market")!.classList.contains("on")) void openStock(mk.cur, mk.from);
 }
 
-function renderHeadLoading(): void {
-  document.getElementById("s-name")!.textContent = mk.cur?.name || mk.cur?.symbol || "—";
-  document.getElementById("s-code")!.textContent = mk.cur?.symbol || "";
-  document.getElementById("s-price")!.textContent = "…";
-}
-
 function renderBackbar(): void {
   const b = document.getElementById("btn-back") as HTMLElement;
   if (mk.from) { b.hidden = false; document.getElementById("back-label")!.textContent = mk.from.label; }
@@ -174,7 +166,7 @@ export function initMarket(): void {
       const q = await marketApi.quote(mk.cur.symbol);
       if (mk.cur?.symbol !== q.symbol) return;
       mk.quote = q;
-      renderStockHead();
+      renderRight();
     } catch { /* 静默，下轮再试 */ }
   }, 20000);
   // 资讯/研报 tab 切换（点击已选 tab 不重复请求，走缓存）
@@ -274,6 +266,15 @@ export function initMarket(): void {
   document.getElementById("kl-vreset")!.addEventListener("click", () => {
     document.querySelectorAll("#kl-view button").forEach((x) => x.classList.remove("on"));
     activeKl()?.resetView();
+  });
+  // 智能高度开关（策影同款）：主图/副图 3.6:1 自适应分配，持久化
+  const autoBtn = document.getElementById("kl-auto")!;
+  if (localStorage.getItem("yc_autoh") === "0") autoBtn.classList.remove("on");
+  autoBtn.addEventListener("click", () => {
+    const on = !autoBtn.classList.contains("on");
+    autoBtn.classList.toggle("on", on);
+    localStorage.setItem("yc_autoh", on ? "1" : "0");
+    kls.forEach((k) => k?.applyHeights());
   });
   // 指标管理面板：开关 + 分组多选（与 chartbar seg 同源互通）+ 预设方案
   const ipanel = document.getElementById("kl-ipanel")!;
@@ -434,67 +435,6 @@ export function barsFor(p: PKey): Bar[] {
   return n === 1 ? mk.bars : aggDaily(mk.bars, n);
 }
 
-/* ── 个股头（主流看盘式：市场徽章 · 行业/概念 chips · 涨跌额+幅胶囊） ── */
-export function renderStockHead(): void {
-  const s = mk.cur, q = mk.quote;
-  if (!s) return;
-  const bars = mk.bars;                    // 统计基准固定日线，不随面板周期漂移
-  const last = bars[bars.length - 1];
-  if (!last) return;
-  document.getElementById("s-name")!.textContent = q?.name || s.name || s.symbol;
-  document.getElementById("s-code")!.textContent = s.symbol;
-  // 市场徽章：SH/SZ/BJ 实色小方块（指数带后缀同样生效）
-  const badge = document.getElementById("s-badge") as HTMLElement;
-  const mkt = (q?.market || (s.symbol.includes(".") ? s.symbol.split(".")[1] : "")).toLowerCase();
-  if (mkt) {
-    badge.hidden = false;
-    badge.textContent = mkt.toUpperCase();
-    badge.className = `sh-badge b-${mkt}`;
-  } else badge.hidden = true;
-  // 行业 chip（强调色）+ 概念 chips（灰底，最多 3 个 + 溢出数）
-  const indEl = document.getElementById("s-industry") as HTMLElement;
-  if (q?.industry) { indEl.hidden = false; indEl.textContent = q.industry; }
-  else indEl.hidden = true;
-  const cons = (q?.concept ?? "").split(/[,，、;；\s]+/).map((x) => x.trim()).filter(Boolean);
-  document.getElementById("s-concepts")!.innerHTML =
-    cons.slice(0, 3).map((c) => `<span class="sh-con">${c}</span>`).join("") +
-    (cons.length > 3 ? `<span class="sh-con more" title="${cons.slice(3).join("、")}">+${cons.length - 3}</span>` : "");
-
-  const prev = bars.length > 1 ? bars[bars.length - 2].close : last.open;
-  const chgPct = q?.pct_chg ?? (prev ? (last.close - prev) / prev * 100 : 0);
-  const cls = chgPct >= 0 ? "up" : "down";
-  // 实时兜底：quote 带 rt_price（后端东财快照，可能比库内日线新一个交易日）时
-  // 价格要素整体切换为实时值，尾根日线仅作回落
-  const rtLive = q?.rt_price != null;
-  const rtPrice = rtLive ? q!.rt_price! : last.close;
-  const opV = rtLive ? (q!.open ?? last.open) : last.open;
-  const hiV = rtLive ? (q!.high ?? last.high) : last.high;
-  const loV = rtLive ? (q!.low ?? last.low) : last.low;
-  const price = document.getElementById("s-price")!;
-  price.textContent = fmt(rtPrice);
-  price.className = "p num " + cls;
-  // 涨跌胶囊：左额右幅，色块半实底（主流 App 式）；涨跌额优先东财昨收
-  // （库内日线尾根与实时跨源时「实时价-库内前收」会错位，如指数）
-  const rtPrev = q?.rt_prev_close;
-  const chgBase = rtLive && rtPrev != null ? rtPrev : prev;
-  const chgAbs = chgBase ? rtPrice - chgBase : 0;
-  const cap = document.getElementById("s-chg") as HTMLElement;
-  cap.innerHTML = `<i>${fmtChg(chgAbs)}</i><b>${fmtChg(chgPct)}%</b>`;
-  cap.className = "sh-pcaps " + cls;
-
-  const amt = rtLive ? (q!.amount ?? (q!.volume ?? last.volume ?? 0) * rtPrice)
-    : (last.amount ?? (last.volume || 0) * last.close);
-  // 统计行：行业/概念已上 chips；指数无换手 → 按值有无显示
-  const infoRow = (pairs: [string, string | null][]) =>
-    `<div class="srow">` + pairs.filter((p) => p[1] != null).map(([k, v]) =>
-      `<span>${k} <b class="num">${v}</b></span>`).join("") + `</div>`;
-  document.getElementById("s-stats")!.innerHTML =
-    infoRow([["今开", fmt(opV)], ["最高", fmt(hiV)], ["最低", fmt(loV)],
-      ["成交额", fmtYi(amt, 1)],
-      last.turnover_rate != null ? ["换手率", fmt(last.turnover_rate) + "%"] as [string, string] : ["换手率", null],
-      prev ? ["振幅", fmt((hiV - loV) / chgBase * 100) + "%"] as [string, string] : ["振幅", null],
-      ...(rtLive && q!.rt_time ? [["快照", q!.rt_time!.slice(11)] as [string, string]] : [])]);
-}
 /* ── K线（klinecharts 10 · 策影同款配置，见 kline.ts）——多周期面板引擎 ── */
 let kls: (KlineChartHandle | null)[] = [];
 
@@ -597,6 +537,43 @@ function cardBody(cid: string, mode: string): string {
   const closes = mk.bars.map((b) => b.close);
   const shortSeq = closes.slice(-10), midSeq = closes.slice(-30);
   const chg = q?.pct_chg ?? 0;
+  if (cid === "info") {
+    // 策影 BasicInfoCard 同款：名称代码 + 3 列字段网格（缺值整格不渲染）+ 概念 chips
+    const last = bars[bars.length - 1];
+    if (!last) return `<div class="bempty">暂无基本信息</div>`;
+    const prev = bars.length > 1 ? bars[bars.length - 2].close : last.open;
+    const rtLive = q?.rt_price != null;
+    const price = rtLive ? q!.rt_price! : last.close;
+    const chgPct = q?.pct_chg ?? (prev ? (last.close - prev) / prev * 100 : 0);
+    const chgBase = rtLive && q?.rt_prev_close != null ? q!.rt_prev_close! : prev;
+    const chgAbs = chgBase ? price - chgBase : 0;
+    const cls = chgPct >= 0 ? "up" : "down";
+    const val = q?.valuation;
+    const fmtCap = (v?: number | null): string | null =>
+      v == null || !isFinite(v) ? null : v >= 1e12 ? fmt(v / 1e12, 2) + "万亿" : fmtYi(v, 0);
+    const shares = val?.total_mv && price ? val.total_mv / price : null;   // 总股本 = 总市值 ÷ 价
+    const amt = rtLive ? (q!.amount ?? (q!.volume ?? last.volume ?? 0) * price)
+      : (last.amount ?? (last.volume || 0) * last.close);
+    const cell = (l: string, v: string | null, vc = "") =>
+      v == null ? "" : `<div class="bi-i"><span>${l}</span><b class="num ${vc}">${v}</b></div>`;
+    const cells = [
+      cell("最新价", fmt(price), cls),
+      cell("涨跌幅", `${fmtChg(chgAbs)} <i>${fmtChg(chgPct)}%</i>`, cls),
+      cell("行业", q?.industry || (s.symbol.includes(".") ? "指数" : null)),
+      cell("换手", q?.turnover_rate != null ? fmt(q.turnover_rate) + "%" : null),
+      cell("总市值", fmtCap(val?.total_mv)), cell("流通市值", fmtCap(val?.circ_mv)),
+      cell("PE(TTM)", val?.pe_ttm != null ? (val.pe_ttm > 0 ? fmt(val.pe_ttm) : "亏损") : null),
+      cell("PB", val?.pb != null && val.pb > 0 ? fmt(val.pb) : null),
+      cell("总股本", shares ? fmt(shares / 1e8, 2) + "亿股" : null),
+      cell("成交额", fmtYi(amt, 1)),
+      cell("振幅", chgBase ? fmt((last.high - last.low) / chgBase * 100) + "%" : null),
+    ].join("");
+    const cons = (q?.concept ?? "").split(/[,，、;；\s]+/).map((x) => x.trim()).filter(Boolean);
+    return `<div class="bi-name"><b>${esc(q?.name || s.name)}</b><span class="num">${s.symbol}</span></div>` +
+      `<div class="bi-grid">${cells}</div>` +
+      (cons.length ? `<div class="bi-cons">${cons.slice(0, 6).map((c) => `<span class="sh-con">${esc(c)}</span>`).join("")}` +
+        (cons.length > 6 ? `<span class="sh-con more" title="${esc(cons.slice(6).join("、"))}">+${cons.length - 6}</span>` : "") + `</div>` : "");
+  }
   if (cid === "signals") {
     const segI = sixSegment(mk.bars, mk.bars.length - 1);
     if (!isVip()) {

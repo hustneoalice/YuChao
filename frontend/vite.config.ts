@@ -5,7 +5,7 @@ const API = (globalThis as { process?: { env?: Record<string, string | undefined
 
 export default defineConfig({
   server: {
-    port: 5173,
+    port: 5178,
     proxy: {
       "/api": { target: API, changeOrigin: true },
     },

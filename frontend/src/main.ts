@@ -6,7 +6,7 @@ import { fmtChg } from "./fmt";
 import { applyAppearance, getState, patch, subscribe } from "./store";
 import { toast } from "./ui";
 import { initAuth, refreshVipUI } from "./auth";
-import { initMarket, klResize, openStock, renderKline, renderStockHead } from "./pages/market";
+import { initMarket, klResize, openStock, renderKline, renderRight } from "./pages/market";
 import { initWatchlist, renderWatchlist } from "./pages/watchlist";
 import { initSectors, loadSectors } from "./pages/sectors";
 import { initCorepicks, renderCorepicks } from "./pages/corepicks";
@@ -246,7 +246,7 @@ function boot(): void {
     applyAppearance();          // 主题/涨跌方向/强调色 → data-* 属性（缺此行切换不生效）
     refreshVipUI();
     if (document.getElementById("page-market")!.classList.contains("on")) {
-      renderStockHead();
+      renderRight();
       renderKline();
     }
   });

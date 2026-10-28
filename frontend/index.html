@@ -53,28 +53,12 @@
           <div class="tickerbar" id="tickerbar" title="常用指数实时 · 点击查看K线 · 悬停暂停滚动">
             <div class="tk-track" id="tk-track"></div>
           </div>
-          <div class="stock-head">
-            <div class="sh-l">
-              <button class="backbtn" id="btn-back" hidden>
-                <span data-ic="arrow-left" data-sz="14"></span><span id="back-label">返回</span>
-              </button>
-              <div class="sh-name">
-                <b id="s-name">—</b>
-                <span class="sh-badge b-sh" id="s-badge" hidden>SH</span>
-                <span class="sh-code num" id="s-code"></span>
-                <span class="sh-chip" id="s-industry" hidden></span>
-                <span class="sh-cons" id="s-concepts"></span>
-              </div>
-            </div>
-            <div class="sh-price">
-              <span class="p num" id="s-price">—</span>
-              <span class="sh-pcaps up" id="s-chg"><i>—</i><b>—</b></span>
-            </div>
-            <div class="sh-stats" id="s-stats"></div>
-          </div>
 
           <div class="chartbox" style="flex:1;min-height:0">
             <div class="chartbar">
+              <button class="backbtn" id="btn-back" hidden>
+                <span data-ic="arrow-left" data-sz="14"></span><span id="back-label">返回</span>
+              </button>
               <span class="seg" id="kl-period">
                 <button class="on" data-p="d">日K</button><button data-p="w">周K</button><button data-p="m">月K</button>
               </span>
@@ -88,6 +72,7 @@
               <button class="cbtn" id="kl-zin" title="放大（K 线变宽）">＋</button>
               <button class="cbtn" id="kl-zout" title="缩小（看更长周期）">－</button>
               <button class="cbtn" id="kl-vreset" title="重置视图">⟲</button>
+              <button class="cbtn on" id="kl-auto" title="智能高度：主图/副图按 3.6 : 1 自适应分配（策影同款）">⤢</button>
               <span class="barsep"></span>
               <span class="seg" id="kl-main-ind">
                 <button class="on" data-mi="ma">MA</button><button data-mi="boll">BOLL</button><button data-mi="short">短线通道</button><button data-mi="mid">中线通道</button>

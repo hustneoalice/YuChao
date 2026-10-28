@@ -55,6 +55,17 @@ def quote(symbol: str, conn=Depends(get_conn)):
                 if rt.get("pct") is not None: q["pct_chg"] = rt["pct"]
                 if rt.get("volume") is not None: q["volume"] = rt["volume"]
                 if rt.get("amount") is not None: q["amount"] = rt["amount"]
+                # 基本信息卡兜底：daily_valuation 未落库时用腾讯扩展位
+                # （38=换手% 39=PE(TTM) 44/45=流通/总市值(亿) 46=PB；指数行为空不触发）
+                if rt.get("turnover") and not q.get("turnover_rate"):
+                    q["turnover_rate"] = rt["turnover"]
+                if rt.get("total_mv_yi") and not q.get("valuation"):
+                    q["valuation"] = {
+                        "date": date.today().isoformat(),
+                        "pe_ttm": rt.get("pe_ttm"), "pb": rt.get("pb"),
+                        "total_mv": rt["total_mv_yi"] * 1e8,
+                        "circ_mv": (rt.get("circ_mv_yi") or rt["total_mv_yi"]) * 1e8,
+                    }
     except Exception:
         pass
     return q

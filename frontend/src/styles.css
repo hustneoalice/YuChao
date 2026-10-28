@@ -280,34 +280,20 @@ td .lnk:hover{text-decoration:underline}
 .mbl .mbt i{display:block;height:100%;border-radius:3px;opacity:.85}
 .mbl b{font-size:10px;min-width:32px;text-align:right}
 .minirow .spk{flex:none;margin-left:2px}
-.stock-head{display:flex;align-items:center;gap:18px;background:var(--panel);
-  border:1px solid var(--border);border-radius:14px;padding:7px 16px;flex:none}
-.sh-l{display:flex;align-items:center;gap:12px;min-width:0}
-.sh-name{display:flex;flex-wrap:wrap;align-items:baseline;column-gap:9px;row-gap:3px}
-.sh-name b{font-size:19px;font-weight:700;letter-spacing:-.01em;flex:none;white-space:nowrap}
-.sh-name .sh-code{font-family:var(--mono);font-size:12px;color:var(--dim);letter-spacing:.02em}
-.sh-price{display:flex;align-items:center;gap:10px}
-.sh-price .p{font-size:30px;font-weight:700;line-height:1;letter-spacing:-.02em}
-/* 市场徽章：SH 红 / SZ 蓝 / BJ 金（实色小方块，一眼分市场） */
-.sh-badge{font-size:9.5px;font-weight:800;padding:2.5px 5.5px;border-radius:5px;letter-spacing:.05em;line-height:1;color:#fff}
-.b-sh{background:#E64545}
-.b-sz{background:#2E7CF6}
-.b-bj{background:#C08A00}
-/* 行业 chip（强调色）+ 概念 chips（灰底） */
-.sh-chip{font-size:11px;font-weight:600;padding:2.5px 9px;border-radius:6px;
-  background:color-mix(in srgb,var(--accent) 15%,transparent);color:var(--accent)}
-.sh-cons{display:inline-flex;gap:4px;flex-wrap:wrap}
+/* 基本信息卡（策影 BasicInfoCard 同款：名称行 + 3列字段网格 + 概念 chips） */
+.bi-name{display:flex;align-items:baseline;gap:8px;margin-bottom:8px;min-width:0}
+.bi-name b{font-size:15px;font-weight:700;flex:none}
+.bi-name .num{font-size:11.5px;color:var(--dim);font-family:var(--mono);letter-spacing:.02em}
+.bi-grid{display:grid;grid-template-columns:repeat(3,1fr);gap:1px;background:var(--border);
+  border:1px solid var(--border);border-radius:9px;overflow:hidden}
+.bi-i{background:var(--panel-2);padding:6px 8px;display:flex;flex-direction:column;gap:2px;min-width:0}
+.bi-i span{font-size:10px;color:var(--faint)}
+.bi-i b{font-size:12px;font-weight:650;font-family:var(--mono);
+  white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.bi-i b i{font-style:normal;font-size:10.5px}
+.bi-cons{display:flex;gap:4px;flex-wrap:wrap;margin-top:8px}
 .sh-con{font-size:11px;padding:2.5px 8px;border-radius:6px;background:var(--panel-3);color:var(--dim)}
 .sh-con.more{color:var(--faint)}
-/* 涨跌胶囊：左额（灰底）右幅（实色块），主流 App 式 */
-.sh-pcaps{display:inline-flex;align-items:stretch;border-radius:8px;overflow:hidden;
-  font-size:13px;font-weight:650;line-height:1.4}
-.sh-pcaps i,.sh-pcaps b{padding:3px 9px;font-style:normal}
-.sh-pcaps i{background:var(--panel-3)}
-.sh-pcaps.up i{color:var(--up)}
-.sh-pcaps.up b{background:var(--up);color:#fff}
-.sh-pcaps.down i{color:var(--down)}
-.sh-pcaps.down b{background:var(--down);color:#fff}
 
 /* 指数 ticker 滚动条 */
 .tickerbar{height:34px;flex:none;overflow:hidden;border:1px solid var(--border);border-radius:10px;
@@ -393,10 +379,12 @@ td .lnk:hover{text-decoration:underline}
 .kl-stage{position:relative;flex:1;min-height:0;display:flex;flex-direction:column;padding:8px 0 0}
 .kl-main{flex:1;min-height:0;position:relative}
 
-/* ── 控制条小圆钮（放大/缩小/重置） ── */
+/* ── 控制条小圆钮（放大/缩小/重置/智能高度开关） ── */
 .cbtn{min-width:24px;height:24px;padding:0 5px;border-radius:7px;font-size:12.5px;
   color:var(--dim);border:1px solid transparent;line-height:1}
 .cbtn:hover{color:var(--text);background:var(--panel-2)}
+.cbtn.on{color:var(--accent);border-color:color-mix(in srgb,var(--accent) 35%,transparent);
+  background:color-mix(in srgb,var(--accent) 12%,transparent)}
 
 /* ── 指标管理面板（预设 / 主图 / 副图 分组显影） ── */
 .kl-ipanel{position:absolute;top:34px;right:10px;z-index:20;background:var(--panel);
@@ -597,9 +585,7 @@ body.mobile .kl-col{flex:none}
 body.mobile .chartbox{flex:none!important;height:58vh}
 body.mobile .rcol-grip{display:none}
 body.mobile .rightcol{width:auto;min-width:0;display:flex}
-body.mobile .sh-stats{display:none}
-body.mobile .stock-head{flex-wrap:wrap;gap:8px}
-body.mobile .sh-price .p{font-size:24px}
+body.mobile .chartbox{min-height:60vh}
 body.mobile .chartbar{overflow-x:auto;scrollbar-width:none}
 body.mobile .chartbar::-webkit-scrollbar{display:none}
 body.mobile .kl-stage .legend{display:none}

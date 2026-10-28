@@ -135,6 +135,8 @@ export interface KlineChartHandle {
   setSub: (inds: SubKey[]) => void;
   /** 当前周期（d/w/m）：决定十字光标卡片的标题形态 */
   setPeriod: (p: "d" | "w" | "m") => void;
+  /** 智能高度：按容器高重分主/副图（3.6:1，策影同款；开关关时副图固定 100px） */
+  applyHeights: () => void;
   /** 缩放：factor>1 放大（K 线变宽），等价策影工具条 ±（barSpace ×1.25 / ×0.8） */
   zoom: (factor: number) => void;
   /** 观察档位：一键显示最近 n 根（纯视图缩放，不重载数据，策影同款） */
@@ -152,6 +154,27 @@ const MAIN_NAMES: Record<MainKey, string> = {
   ma: "MA", boll: "BOLL", short: "SHORT_TREND_CHANNEL", mid: "MID_TREND_CHANNEL",
 };
 const SUB_NAMES: Record<SubKey, string> = { vol: "VOL", macd: "MACD", kdj: "KDJ", rsi: "RSI", obv: "OBV" };
+
+/* ── 智能高度（策影 computeAutoPaneHeights 同款） ──
+ * 主图:单个副图 = 3.6:1（1 副图 → 主图 78%，2 → 64%，3 → 55%）；
+ * 副图夹在 44~132px；主图硬约束 ≥ 3×副图且 ≥160px，空间不足时副图退让。 */
+const X_AXIS_H = 24, MAIN_SUB_RATIO = 3.6,
+  SUB_MIN = 44, SUB_MAX = 132, MAIN_MIN = 160, MAIN_MIN_RATIO = 3;
+
+function smartHeights(total: number, n: number): { main: number; sub: number } {
+  const avail = Math.max(160, Math.round(total - X_AXIS_H));
+  if (n <= 0) return { main: avail, sub: 0 };
+  let sub = Math.min(SUB_MAX, Math.round(avail / (MAIN_SUB_RATIO + n)));
+  const ratioCap = Math.floor(avail / (MAIN_MIN_RATIO + n));
+  if (sub > ratioCap) sub = ratioCap;
+  sub = Math.max(SUB_MIN, sub);
+  let main = avail - sub * n;
+  if (main < MAIN_MIN) {
+    sub = Math.max(SUB_MIN, Math.floor((avail - MAIN_MIN) / n));
+    main = avail - sub * n;
+  }
+  return { main, sub };
+}
 
 function styles() {
   const border = cssv("--border") || "#2B2B2F";
@@ -414,6 +437,18 @@ export function mountKline(el: HTMLElement): KlineChartHandle {
     try { chart.scrollToRealTime(0); } catch { /* 忽略 */ }
   });
 
+  // 智能高度（闭包函数：setSub 与 resize 内部也复用）
+  const applyHeights = () => {
+    const auto = localStorage.getItem("yc_autoh") !== "0";
+    const panes = (chart.getPaneOptions() as { id: string }[])
+      .filter((p) => p.id !== "candle_pane" && p.id !== "x_axis_pane");
+    const { main, sub } = smartHeights(el.clientHeight, panes.length);
+    try {
+      chart.setPaneOptions({ id: "candle_pane", height: auto ? main : Math.max(200, el.clientHeight - panes.length * 100 - X_AXIS_H) });
+      panes.forEach((p) => chart.setPaneOptions({ id: p.id, height: auto ? sub : 100 }));
+    } catch { /* 忽略 */ }
+  };
+
   const handle: KlineChartHandle = {
     chart,
     setData: (bars: Bar[]) => {
@@ -479,15 +514,11 @@ export function mountKline(el: HTMLElement): KlineChartHandle {
           chart.createIndicator({ name: "KDJ" } as never, false);
         }
       }
-      // 多窗格高度均分：副图合计约占 38%，单窗格 64–110px（策影 updateAllPaneHeights 同款）
-      const panes = (chart.getPaneOptions() as { id: string }[])
-        .filter((p) => p.id !== "candle_pane" && p.id !== "x_axis_pane");
-      if (!panes.length) return;
-      const n = panes.length;
-      const h = Math.max(64, Math.min(110, Math.round(el.clientHeight * 0.38 / n)));
-      panes.forEach((p) => chart.setPaneOptions({ id: p.id, height: h }));
+      // 窗格高度交给智能高度统一分配（含 candle_pane）
+      applyHeights();
     },
     setPeriod(p: "d" | "w" | "m") { period = p; },
+    applyHeights,
     zoom(factor: number) {
       const bs = chart.getBarSpace?.() as { bar: number } | undefined;
       if (!bs?.bar) return;
@@ -510,7 +541,10 @@ export function mountKline(el: HTMLElement): KlineChartHandle {
     navRefresh() { requestAnimationFrame(navDraw); },
     drawLegend,
     retheme() { chart.setStyles(styles()); requestAnimationFrame(navDraw); },
-    resize() { chart.resize(); requestAnimationFrame(navDraw); },
+    resize() {
+      chart.resize();
+      requestAnimationFrame(() => { applyHeights(); navDraw(); });
+    },
     destroy() {
       try { chart.unsubscribeAction("onCrosshairChange", onCross as never); } catch { /* 忽略 */ }
       tip.remove();

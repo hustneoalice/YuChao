@@ -110,6 +110,7 @@ def stock_news(symbol: str, limit: int = 12) -> List[Dict[str, str]]:
 _TX_API = "https://qt.gtimg.cn/q="
 # 腾讯批量行情字段位（策影同款解析）：
 # 1=名称 3=现价 4=昨收 5=今开 31=涨跌额 32=涨跌幅% 33=最高 34=最低 36=成交量(手) 37=成交额(万元)
+# 扩展位（个股才有，指数为空）：38=换手% 39=PE(TTM) 43=振幅% 44=流通市值(亿) 45=总市值(亿) 46=PB
 
 
 def _tx_symbol(symbol: str) -> str:
@@ -155,12 +156,19 @@ def _tx_quotes(symbols: List[str]) -> Dict[str, Dict[str, Any]]:
             num = lambda k: float(p[k]) if p[k] else None    # noqa: E731
             # p[0] 形如 v_sh000001 → 'sh000001' 反查；再以 p[2] 6位码兜底
             sym = by_tx.get(p[0].split("_", 1)[-1]) or by_code.get(p[2]) or p[2]
+            ext = len(p) > 46
             out[sym] = {
                 "name": p[1], "price": num(3), "prev_close": num(4),
                 "open": num(5), "high": num(33), "low": num(34),
                 "chg": num(31), "pct": num(32),
                 "amount": num(37) * 1e4 if num(37) is not None else None,   # 万元 → 元
                 "volume": num(36) * 100 if num(36) is not None else None,   # 手 → 股
+                # 扩展位（基本信息卡用；指数行这些位为空 → None）
+                "turnover": num(38) if ext else None,      # 换手率%
+                "pe_ttm": num(39) if ext else None,        # 市盈率 TTM
+                "circ_mv_yi": num(44) if ext else None,    # 流通市值（亿）
+                "total_mv_yi": num(45) if ext else None,   # 总市值（亿）
+                "pb": num(46) if ext else None,            # 市净率
             }
     return out
 
@@ -179,6 +187,8 @@ def realtime_quote(symbol: str) -> Optional[Dict[str, Any]]:
         "prev_close": d["prev_close"],
         "pct": d["pct"],                                     # 腾讯已是百分数
         "amount": d["amount"], "volume": d["volume"],
+        "turnover": d.get("turnover"), "pe_ttm": d.get("pe_ttm"), "pb": d.get("pb"),
+        "total_mv_yi": d.get("total_mv_yi"), "circ_mv_yi": d.get("circ_mv_yi"),
         "ts": time.strftime("%Y-%m-%d %H:%M"),
     }
 
