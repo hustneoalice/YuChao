@@ -122,7 +122,7 @@ function toTs(time: string): number {
 }
 
 export type MainKey = "ma" | "boll" | "short" | "mid";
-export type SubKey = "vol" | "macd" | "kdj";
+export type SubKey = "vol" | "macd" | "kdj" | "rsi" | "obv";
 
 export interface KlineChartHandle {
   chart: Chart;
@@ -133,6 +133,14 @@ export interface KlineChartHandle {
   setSub: (inds: SubKey[]) => void;
   /** 当前周期（d/w/m）：决定十字光标卡片的标题形态 */
   setPeriod: (p: "d" | "w" | "m") => void;
+  /** 缩放：factor>1 放大（K 线变宽），等价策影工具条 ±（barSpace ×1.25 / ×0.8） */
+  zoom: (factor: number) => void;
+  /** 观察档位：一键显示最近 n 根（纯视图缩放，不重载数据，策影同款） */
+  viewBars: (n: number) => void;
+  /** 重置视图：默认档位（宽度/16）并回到最新 */
+  resetView: () => void;
+  /** 数据/主题变化后重画底部导航条缩略图 */
+  navRefresh: () => void;
   retheme: () => void;
   resize: () => void;
   destroy: () => void;
@@ -141,7 +149,7 @@ export interface KlineChartHandle {
 const MAIN_NAMES: Record<MainKey, string> = {
   ma: "MA", boll: "BOLL", short: "SHORT_TREND_CHANNEL", mid: "MID_TREND_CHANNEL",
 };
-const SUB_NAMES: Record<SubKey, string> = { vol: "VOL", macd: "MACD", kdj: "KDJ" };
+const SUB_NAMES: Record<SubKey, string> = { vol: "VOL", macd: "MACD", kdj: "KDJ", rsi: "RSI", obv: "OBV" };
 
 function styles() {
   const border = cssv("--border") || "#2B2B2F";
@@ -277,6 +285,81 @@ export function mountKline(el: HTMLElement): KlineChartHandle {
   };
   try { chart.subscribeAction("onCrosshairChange", onCross as never); } catch { /* 忽略 */ }
 
+  /* ── 底部导航条（策影同款：缩略图 + 拖拽窗口平移 + 回到最新） ── */
+  const nav = document.createElement("div");
+  nav.className = "kl-nav";
+  nav.innerHTML =
+    `<canvas class="kl-nav-cv"></canvas>` +
+    `<div class="kl-nav-win" title="拖动调整可见范围"><i></i><b></b></div>` +
+    `<button class="kl-nav-latest" title="回到最新">最新 ›</button>`;
+  el.appendChild(nav);
+  const navCv = nav.querySelector("canvas")!;
+  const navWin = nav.querySelector(".kl-nav-win") as HTMLElement;
+
+  /** 画全量 close 缩略线（涨跌分段染色），并按可见区间刷新窗口位置 */
+  const navDraw = () => {
+    const list = chart.getDataList() as { close: number }[];
+    const w = navCv.clientWidth || 1, h = navCv.clientHeight || 1;
+    const dpr = window.devicePixelRatio || 1;
+    navCv.width = Math.round(w * dpr); navCv.height = Math.round(h * dpr);
+    const ctx = navCv.getContext("2d")!;
+    ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
+    ctx.clearRect(0, 0, w, h);
+    navCv.style.display = list.length > 1 ? "block" : "none";
+    if (list.length > 1) {
+      let mn = Infinity, mx = -Infinity;
+      for (const x of list) { if (x.close < mn) mn = x.close; if (x.close > mx) mx = x.close; }
+      const X = (i: number) => (i / (list.length - 1)) * w;
+      const Y = (v: number) => h - 5 - ((v - mn) / (mx - mn || 1)) * (h - 10);
+      ctx.lineWidth = 1;
+      const up = chartUp(), dn = chartDown();
+      for (let i = 1; i < list.length; i++) {
+        ctx.strokeStyle = list[i].close >= list[i - 1].close ? up : dn;
+        ctx.beginPath(); ctx.moveTo(X(i - 1), Y(list[i - 1].close)); ctx.lineTo(X(i), Y(list[i].close)); ctx.stroke();
+      }
+    }
+    navUpdateWin();
+  };
+  const navUpdateWin = () => {
+    const list = chart.getDataList();
+    const r = chart.getVisibleRange?.() as { from: number; to: number } | undefined;
+    if (!list.length || !r) return;
+    const L = list.length;
+    const from = Math.max(0, Math.floor(r.from)), to = Math.min(L, Math.ceil(r.to));
+    navWin.style.left = (from / L) * 100 + "%";
+    navWin.style.width = Math.max(1.5, ((to - from) / L) * 100) + "%";
+  };
+  const onVisChange = () => { requestAnimationFrame(navUpdateWin); };
+  try { chart.subscribeAction("onVisibleRangeChange", onVisChange as never); } catch { /* 忽略 */ }
+
+  // 窗口拖拽：只平移不缩放（策影同款），pointer capture 跟手
+  const navDrag = { x: 0, from: 0, count: 0 };
+  navWin.addEventListener("pointerdown", (e) => {
+    const r = chart.getVisibleRange?.() as { from: number; to: number } | undefined;
+    if (!r) return;
+    navDrag.x = e.clientX; navDrag.from = r.from; navDrag.count = r.to - r.from;
+    navWin.setPointerCapture(e.pointerId);
+    navWin.style.cursor = "grabbing";
+  });
+  navWin.addEventListener("pointermove", (e) => {
+    if (!navWin.hasPointerCapture?.(e.pointerId)) return;
+    const L = chart.getDataList().length;
+    if (!L || !nav.clientWidth) return;
+    const nf = Math.max(0, Math.min(L - navDrag.count,
+      navDrag.from + ((e.clientX - navDrag.x) / nav.clientWidth) * L));
+    try { chart.scrollToDataIndex(Math.round(nf), 0); } catch { /* 忽略 */ }
+    navUpdateWin();
+  });
+  const navDragEnd = (e: PointerEvent) => {
+    if (navWin.hasPointerCapture?.(e.pointerId)) navWin.releasePointerCapture(e.pointerId);
+    navWin.style.cursor = "";
+  };
+  navWin.addEventListener("pointerup", navDragEnd);
+  navWin.addEventListener("pointercancel", navDragEnd);
+  nav.querySelector(".kl-nav-latest")!.addEventListener("click", () => {
+    try { chart.scrollToRealTime(0); } catch { /* 忽略 */ }
+  });
+
   const handle: KlineChartHandle = {
     chart,
     setData(bars: Bar[]) {
@@ -288,6 +371,7 @@ export function mountKline(el: HTMLElement): KlineChartHandle {
       tip.style.display = "none";                          // 数据重载时收起旧卡片
       // v10 无 applyNewData，经 DataLoader 一次性回填（策影同款）
       chart.setDataLoader({ getBars: (params) => { params.callback(list, false); } });
+      requestAnimationFrame(() => { navDraw(); try { chart.scrollToRealTime(0); } catch { /* 忽略 */ } });
     },
     setMain(inds: MainKey[]) {
       // 主图多选叠加（策影同款）：先按实例移除不再选中的，再增量补建缺失的
@@ -334,6 +418,8 @@ export function mountKline(el: HTMLElement): KlineChartHandle {
             name: "MACD",
             styles: { bars: [{ upColor: up, downColor: dn, noChangeColor: NEUTRAL }] },
           } as never, false);
+        } else if (k === "rsi" || k === "obv") {
+          chart.createIndicator({ name: SUB_NAMES[k] } as never, false);
         } else {
           chart.createIndicator({ name: "KDJ" } as never, false);
         }
@@ -347,11 +433,32 @@ export function mountKline(el: HTMLElement): KlineChartHandle {
       panes.forEach((p) => chart.setPaneOptions({ id: p.id, height: h }));
     },
     setPeriod(p: "d" | "w" | "m") { period = p; },
-    retheme() { chart.setStyles(styles()); },
-    resize() { chart.resize(); },
+    zoom(factor: number) {
+      const bs = chart.getBarSpace?.() as { bar: number } | undefined;
+      if (!bs?.bar) return;
+      try { chart.setBarSpace(Math.min(50, Math.max(1, bs.bar * factor))); } catch { /* 忽略 */ }
+    },
+    viewBars(n: number) {
+      const w = el.clientWidth;
+      if (!w) return;
+      try {
+        chart.setBarSpace(Math.min(50, Math.max(1, w / n)));
+        chart.scrollToRealTime(0);
+      } catch { /* 忽略 */ }
+    },
+    resetView() {
+      try {
+        chart.setBarSpace(Math.min(50, Math.max(1, el.clientWidth / 16)));
+        chart.scrollToRealTime(0);
+      } catch { /* 忽略 */ }
+    },
+    navRefresh() { requestAnimationFrame(navDraw); },
+    retheme() { chart.setStyles(styles()); requestAnimationFrame(navDraw); },
+    resize() { chart.resize(); requestAnimationFrame(navDraw); },
     destroy() {
       try { chart.unsubscribeAction("onCrosshairChange", onCross as never); } catch { /* 忽略 */ }
       tip.remove();
+      nav.remove();
       dispose(el);
     },
   };

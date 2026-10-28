@@ -70,14 +70,22 @@
                 <button class="on" data-p="d">日K</button><button data-p="w">周K</button><button data-p="m">月K</button>
               </span>
               <span class="barsep"></span>
+              <span class="seg" id="kl-view" title="观察档位：一键显示最近 N 根">
+                <button data-v="20">20</button><button data-v="40">40</button><button data-v="60">60</button>
+              </span>
+              <button class="cbtn" id="kl-zin" title="放大（K 线变宽）">＋</button>
+              <button class="cbtn" id="kl-zout" title="缩小（看更长周期）">－</button>
+              <button class="cbtn" id="kl-vreset" title="重置视图">⟲</button>
+              <span class="barsep"></span>
               <span class="seg" id="kl-main-ind">
                 <button class="on" data-mi="ma">MA</button><button data-mi="boll">BOLL</button><button data-mi="short">短线通道</button><button data-mi="mid">中线通道</button>
               </span>
               <span class="barsep"></span>
               <span class="seg" id="kl-sub-ind">
-                <button class="on" data-si="vol">成交量</button><button data-si="macd">MACD</button><button data-si="kdj">KDJ</button>
+                <button class="on" data-si="vol">成交量</button><button data-si="macd">MACD</button><button data-si="kdj">KDJ</button><button data-si="rsi">RSI</button><button data-si="obv">OBV</button>
               </span>
               <span class="sp"></span>
+              <button class="hbtn" id="kl-ipanel-btn" title="指标管理：预设方案 · 分组显影">指标</button>
               <div class="legend" id="kl-legend"></div>
             </div>
             <div class="kl-stage" id="kl-stage">
@@ -86,6 +94,17 @@
                 <span data-ic="chart-line" data-sz="30" style="color:var(--faint)"></span>
                 <b>选择一个标的开始看盘</b>
                 <span>在顶栏搜索代码或名称，或从自选 / 板块 / 核心标页进入。</span>
+              </div>
+            </div>
+            <div class="kl-ipanel" id="kl-ipanel" hidden>
+              <div class="iprow"><span class="ipk">预设</span>
+                <button data-pre="default">标准</button><button data-pre="trend">趋势</button><button data-pre="bare">极简</button>
+              </div>
+              <div class="iprow"><span class="ipk">主图</span>
+                <button data-mi="ma">MA</button><button data-mi="boll">BOLL</button><button data-mi="short">短线通道</button><button data-mi="mid">中线通道</button>
+              </div>
+              <div class="iprow"><span class="ipk">副图</span>
+                <button data-si="vol">成交量</button><button data-si="macd">MACD</button><button data-si="kdj">KDJ</button><button data-si="rsi">RSI</button><button data-si="obv">OBV</button>
               </div>
             </div>
           </div>

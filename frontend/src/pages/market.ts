@@ -180,6 +180,7 @@ export function initMarket(): void {
       b.classList.toggle("on");
       mk.mainInds = [...document.querySelectorAll<HTMLElement>("#kl-main-ind button.on")]
         .map((x) => x.dataset.mi as MainKey);
+      syncIndUI();
       renderKline();
     }
   });
@@ -189,8 +190,56 @@ export function initMarket(): void {
       b.classList.toggle("on");
       mk.subInds = [...document.querySelectorAll<HTMLElement>("#kl-sub-ind button.on")]
         .map((x) => x.dataset.si as SubKey);
+      syncIndUI();
       renderKline();
     }
+  });
+  // 观察档位 / 缩放 / 重置（策影工具条同款：纯视图操作，不重载数据）
+  document.getElementById("kl-view")!.addEventListener("click", (e) => {
+    const b = (e.target as HTMLElement).closest("button") as HTMLElement | null;
+    if (!b) return;
+    const n = Number(b.dataset.v);
+    toggleSeg("kl-view", b);
+    kl?.viewBars(n);
+  });
+  document.getElementById("kl-zin")!.addEventListener("click", () => kl?.zoom(1.25));
+  document.getElementById("kl-zout")!.addEventListener("click", () => kl?.zoom(0.8));
+  document.getElementById("kl-vreset")!.addEventListener("click", () => {
+    document.querySelectorAll("#kl-view button").forEach((x) => x.classList.remove("on"));
+    kl?.resetView();
+  });
+  // 指标管理面板：开关 + 分组多选（与 chartbar seg 同源互通）+ 预设方案
+  const ipanel = document.getElementById("kl-ipanel")!;
+  document.getElementById("kl-ipanel-btn")!.addEventListener("click", (e) => {
+    e.stopPropagation();
+    ipanel.hidden = !ipanel.hidden;
+  });
+  document.addEventListener("click", (e) => {
+    if (!ipanel.hidden && !(e.target as HTMLElement).closest("#kl-ipanel,#kl-ipanel-btn")) ipanel.hidden = true;
+  });
+  ipanel.addEventListener("click", (e) => {
+    const b = (e.target as HTMLElement).closest("button") as HTMLElement | null;
+    if (!b) return;
+    if (b.dataset.pre) {                                   // 预设：标准 / 趋势 / 极简
+      const pre: Record<string, { m: MainKey[]; s: SubKey[] }> = {
+        default: { m: ["ma"], s: ["vol", "macd"] },
+        trend: { m: ["ma", "short", "mid"], s: ["vol"] },
+        bare: { m: [], s: ["vol"] },
+      };
+      const p = pre[b.dataset.pre];
+      mk.mainInds = [...p.m]; mk.subInds = [...p.s];
+      syncIndUI();
+      renderKline();
+      return;
+    }
+    const group = b.dataset.mi ? "main" : "sub";
+    b.classList.toggle("on");
+    if (group === "main")
+      mk.mainInds = [...ipanel.querySelectorAll<HTMLElement>(".iprow button[data-mi].on")].map((x) => x.dataset.mi as MainKey);
+    else
+      mk.subInds = [...ipanel.querySelectorAll<HTMLElement>(".iprow button[data-si].on")].map((x) => x.dataset.si as SubKey);
+    syncIndUI();
+    renderKline();
   });
   window.addEventListener("resize", () => {
     clearTimeout((window as unknown as { _rz?: number })._rz);
@@ -210,6 +259,19 @@ export function initMarket(): void {
 
 function toggleSeg(id: string, btn: HTMLElement): void {
   document.querySelectorAll(`#${id} button`).forEach((x) => x.classList.toggle("on", x === btn));
+}
+
+/** 指标显影双源同步：mk.mainInds/subInds → chartbar seg 与指标面板 chips 的 on 态 */
+function syncIndUI(): void {
+  const mset = new Set(mk.mainInds), sset = new Set(mk.subInds);
+  document.querySelectorAll<HTMLElement>("#kl-main-ind button").forEach((x) =>
+    x.classList.toggle("on", mset.has(x.dataset.mi as MainKey)));
+  document.querySelectorAll<HTMLElement>("#kl-sub-ind button").forEach((x) =>
+    x.classList.toggle("on", sset.has(x.dataset.si as SubKey)));
+  document.querySelectorAll<HTMLElement>("#kl-ipanel button[data-mi]").forEach((x) =>
+    x.classList.toggle("on", mset.has(x.dataset.mi as MainKey)));
+  document.querySelectorAll<HTMLElement>("#kl-ipanel button[data-si]").forEach((x) =>
+    x.classList.toggle("on", sset.has(x.dataset.si as SubKey)));
 }
 
 async function reloadPeriod(): Promise<void> {
