@@ -1,5 +1,5 @@
 /* 设置页：数据底座（真实 API）· 外观 · VIP · 账户 · 规划中页签 */
-import { authApi, dataApi, type DataStatus, type UpdateLogItem } from "../api";
+import { authApi, dataApi, type DataStatus, type UpdateLogItem, type UpdateSnapshot } from "../api";
 import { esc, fmt } from "../fmt";
 import { ic } from "../icons";
 import { getState, patch, setUser, isVip } from "../store";
@@ -45,7 +45,85 @@ async function render(): Promise<void> {
 }
 
 /* ── 数据底座 ── */
+/* 表名 → 中文标签（与后端 _INVENTORY 对齐，仅展示用） */
+const TABLE_ZH: Record<string, string> = {
+  daily_ohlcv: "日线 K 线", adjust_factor: "复权因子", capital_flow: "个股资金流",
+  financials: "财务数据", stock_universe: "证券清单", sector_index: "行业板块",
+  daily_valuation: "全市场估值", corepicks_result: "核心标结果", stock_profile: "个股档案",
+};
+
+const daysAgo = (d?: string | null): number | null => {
+  if (!d) return null;
+  const t = Date.parse(d);
+  return Number.isNaN(t) ? null : Math.max(0, Math.floor((Date.now() - t) / 86400000));
+};
+const freshCls = (n: number | null): "ok" | "warn" | "bad" =>
+  n == null ? "bad" : n <= 2 ? "ok" : n <= 5 ? "warn" : "bad";
+const freshLabel = (n: number | null): string =>
+  n == null ? "无数据" : n === 0 ? "今日" : `${n} 天前`;
+
+const STATUS_TEXT: Record<string, [string, string]> = {
+  queued: ["排队中", "warn"], running: ["执行中", "p1"],
+  completed: ["成功", ""], skipped: ["无新增", "flat"], cancelled: ["已停止", "flat"],
+  interrupted: ["被中断", "bad"], failed: ["失败", "bad"],
+};
+
+let upTimer: ReturnType<typeof setInterval> | null = null;
+const stopUpState = (): void => { if (upTimer) { clearInterval(upTimer); upTimer = null; } };
+
+/** 更新进度卡：只刷新 #up-progress，不重绘整页（保住滚动位置与按钮事件） */
+async function refreshUpState(): Promise<void> {
+  const box = document.getElementById("up-progress");
+  if (!box) { stopUpState(); return; }
+  let snap: UpdateSnapshot | null = null;
+  try { snap = await dataApi.state(); } catch { /* 快照不可达，保持原样 */ }
+  const saved = document.getElementById("up-saved");
+  if (saved) saved.textContent = snap?.saved_at ? `快照 ${snap.saved_at.replace("T", " ").slice(5, 19)}` : "";
+  if (!snap) return;
+  const parts: string[] = [];
+  const r = snap.running;
+  if (r) {
+    const pct = Math.max(r.percent ?? 0, 1.5);
+    parts.push(
+      `<div class="uprow"><i class="logdot" style="background:var(--p1);animation:pulse 1.2s infinite"></i>` +
+      `<b style="font-size:12.5px">${esc(r.label)}</b><span class="tag p1">执行中</span>` +
+      `<span style="flex:1"></span><b class="num">${(r.percent ?? 0).toFixed(1)}%</b></div>`,
+      `<div class="upbar"><i style="width:${pct}%"></i></div>`,
+      `<div style="font-size:11px;color:var(--faint)">${esc(r.stage || "")}` +
+      (r.total ? ` · <b class="num" style="color:var(--text)">${fmt(r.done ?? 0, 0)}</b>/${fmt(r.total, 0)}` : "") +
+      (r.rows ? ` · 已写 ${fmt(r.rows, 0)} 行` : "") +
+      (r.elapsed_s != null ? ` · 已用 ${r.elapsed_s}s` : "") + `</div>`);
+    const logs = (r.logs ?? []).slice(-5).reverse();
+    if (logs.length)
+      parts.push(`<div class="uplogs">${logs.map((l) =>
+        `<div>${esc(l.time || "")} ${esc(l.message || "")}</div>`).join("")}</div>`);
+  } else if (snap.queued?.length) {
+    parts.push(`<div class="uprow"><i class="logdot warn"></i>` +
+      `<span>排队中：<b style="color:var(--text)">${snap.queued.map((q) => esc(q.label)).join("、")}</b></span></div>`);
+  } else {
+    parts.push(`<div style="font-size:12px;color:var(--dim)">暂无进行中的更新任务 · 调度链按北京时间自动执行，也可在下方手动触发</div>`);
+  }
+  const recent = (snap.recent ?? []).filter((t) => t.status !== "running").slice(0, 6);
+  if (recent.length) {
+    parts.push(`<div style="margin-top:6px;font-size:10.5px;color:var(--faint);letter-spacing:.02em">最近任务</div>`);
+    parts.push(recent.map((t) => {
+      const [txt, cls] = STATUS_TEXT[t.status] ?? [t.status || "—", "flat"];
+      const dot = t.status === "failed" || t.status === "interrupted" ? "bad" :
+        t.status === "completed" ? "ok" : "warn";
+      const tm = (t.finished_at || t.started_at || "").replace("T", " ").slice(5, 16);
+      return `<div class="uprec"><i class="logdot ${dot}"></i>` +
+        `<span class="num" style="color:var(--faint)">${esc(tm || "—")}</span>` +
+        `<span style="color:var(--text)">${esc(t.label || t.kind)}</span>` +
+        `<span class="tag ${cls}">${esc(txt)}</span>` +
+        `<span class="num" style="margin-left:auto">${t.rows ? fmt(t.rows, 0) + " 行" : ""}</span></div>`;
+    }).join(""));
+  }
+  if (snap.error) parts.push(`<div style="font-size:10.5px;color:var(--up)">进度快照不可读（${esc(snap.error)}）</div>`);
+  box.innerHTML = parts.join("");
+}
+
 async function renderData(body: HTMLElement): Promise<void> {
+  stopUpState();
   let st: DataStatus | null = null;
   let tasksR: Awaited<ReturnType<typeof dataApi.tasks>> | null = null;
   let logs: UpdateLogItem[] = [];
@@ -57,32 +135,48 @@ async function renderData(body: HTMLElement): Promise<void> {
     logs = (await dataApi.updates(30)).items;
   } catch { logs = []; }
   const stage = STAGE_TEXT[st?.stage ?? "uninitialized"] ?? ["未知", "bad"];
-  const totalRows = (st?.tables ?? []).reduce((s, t) => s + (t.rows ?? 0), 0);
-  const latest = (st?.tables ?? []).map((t) => t.latest_date).filter(Boolean).sort().pop() || "—";
+  const tables = [...(st?.tables ?? [])].sort((a, b) => (b.latest_date ?? "").localeCompare(a.latest_date ?? ""));
+  const totalRows = tables.reduce((s, t) => s + (t.rows ?? 0), 0);
+  const latest = tables.map((t) => t.latest_date).filter(Boolean).sort().pop() || "—";
 
   body.innerHTML =
-    `<div class="setsec"><div class="sh">${ic("database", 15)}<h3>数据底座</h3><span class="mono">DuckDB · 共享只读</span><span class="sp"></span>` +
-    `<span class="datachip i-${stage[1] === "ok" ? "up" : stage[1] === "warn" ? "mid" : ""}" id="db-state"><i></i><span>${stage[0]}</span></span></div>` +
-    `<div class="setrow"><span class="lab">库路径</span><div class="ctl"><span class="num" style="font-size:11px">${esc(st?.duckdb_path || "—")}</span></div></div>` +
-    `<div class="setrow"><span class="lab">数据日期</span><div class="ctl"><span class="num">${latest}</span></div></div>` +
-    `<div class="setrow"><span class="lab">记录总数</span><div class="ctl"><span class="num">${fmt(totalRows, 0)}</span><span style="color:var(--faint);font-size:11px">${(st?.tables ?? []).length} 张表</span></div></div>` +
-    `<div class="setrow"><span class="lab">数据表</span><div class="ctl" style="flex-direction:column;align-items:stretch">` +
-    (st?.tables ?? []).map((t) =>
-      `<div style="display:flex;gap:10px;font-size:11.5px;align-items:center"><span class="mono" style="width:150px">${esc(t.table)}</span><span class="num" style="color:var(--dim)">${fmt(t.rows ?? 0, 0)} 行</span><span style="color:var(--faint)">最新 ${esc(t.latest_date || "—")}</span></div>`).join("") +
+    /* ① 总览 */
+    `<div class="setsec"><div class="sh">${ic("database", 15)}<h3>数据底座总览</h3><span class="mono">DuckDB · 共享只读</span><span class="sp"></span>` +
+    `<span class="datachip i-${stage[1] === "ok" ? "up" : stage[1] === "warn" ? "mid" : ""}"><i></i><span>${esc(stage[0])}</span></span></div>` +
+    `<div class="setrow"><span class="lab">数据日期</span><div class="ctl"><span class="num" style="font-weight:600">${esc(latest)}</span>` +
+    `<span style="font-size:11px;color:var(--faint)">库路径 <span class="num" style="font-size:10.5px">${esc(st?.duckdb_path || "—")}</span></span></div></div>` +
+    `<div class="setrow"><span class="lab">记录总数</span><div class="ctl"><span class="num">${fmt(totalRows, 0)}</span><span style="color:var(--faint);font-size:11px">${tables.length} 张数据集</span></div></div>` +
+    `<div class="setrow"><span class="lab">调度链</span><div class="ctl"><span style="font-size:12px;color:var(--dim)">${esc(tasksR?.schedule || "—")}</span></div></div></div>` +
+    /* ② 数据集卡板：按最新日期倒序，一眼看出哪些更新了 */
+    `<div class="setsec"><div class="sh"><h3>数据集</h3><span class="sub">按最新日期倒序 · 色点 = 新鲜度（绿 ≤2 天 / 黄 ≤5 天 / 红 更久）</span></div>` +
+    `<div class="dsgrid">` +
+    (tables.length ? tables.map((t) => {
+      const n = daysAgo(t.latest_date);
+      const cls = freshCls(n);
+      return `<div class="dscard"><div class="ds-h"><i class="logdot ${cls}"></i><b>${esc(TABLE_ZH[t.table] || t.table)}</b></div>` +
+        `<div class="ds-date num">${esc(t.latest_date || "—")}</div>` +
+        `<div class="ds-m"><span class="num">${fmt(t.rows ?? 0, 0)} 行</span>` +
+        `<span class="fresh ${cls}">${freshLabel(n)}</span></div></div>`;
+    }).join("") : `<div style="color:var(--faint);font-size:12px">库未初始化——运行 python -m app.updater 或导入数据包</div>`) +
     `</div></div>` +
-    `<div class="setrow"><span class="lab">调度链</span><div class="ctl"><span style="font-size:12px;color:var(--dim)">${esc(tasksR?.schedule || "—")}</span></div></div>` +
-    `<div class="setrow"><span class="lab"></span><div class="ctl" style="gap:10px">` +
+    /* ③ 更新进度（3s 轮询编排快照）+ 手动任务 */
+    `<div class="setsec"><div class="sh"><h3>更新进度</h3><span class="mono">update_progress</span><span class="sp"></span><span class="sub num" id="up-saved"></span></div>` +
+    `<div class="upcard" id="up-progress"><span style="color:var(--faint);font-size:11.5px">读取编排快照…</span></div>` +
+    `<div class="setrow" style="border-top:1px solid var(--border-soft);margin-top:12px;padding-top:10px"><span class="lab">手动任务</span><div class="ctl" style="gap:8px">` +
     tasks.map((t) => `<button class="hbtn" data-run="${t.kind}" title="${esc(t.description)}">${esc(t.label)}</button>`).join("") +
-    `<span style="font-size:10.5px;color:var(--faint)">触发后经控制通道交 updater 进程执行（约 2s 消费）</span></div></div></div>` +
+    `</div></div>` +
+    `<div style="font-size:10.5px;color:var(--faint)">触发后经控制通道交 updater 进程执行（约 2s 消费）；执行结果以更新日志落账为准</div></div>` +
+    /* ④ 更新日志 */
     `<div class="setsec"><div class="sh"><h3>更新日志</h3><span class="mono">update_log</span></div>` +
     `<table><thead><tr><th>时间</th><th>类型</th><th>状态</th><th class="n">新增记录</th><th>说明</th></tr></thead><tbody>` +
     (logs.length ? logs.map((l) => {
-      const ok = l.status === "success" || l.status === "ok";
-      return `<tr><td class="num">${esc(String(l.started_at || l.finished_at || "—")).replace("T", " ").slice(0, 16)}</td>` +
+      const ok = l.status === "success" || l.status === "ok" || l.status === "completed";
+      const [txt, cls] = STATUS_TEXT[String(l.status)] ?? [String(l.status || "—"), "flat"];
+      return `<tr><td class="num">${esc(String(l.created_at || l.started_at || "—")).replace("T", " ").slice(0, 16)}</td>` +
         `<td>${esc(String(l.data_type || "—"))}</td>` +
-        `<td><span class="tag ${ok ? "" : "bad"}">${ok ? "成功" : esc(String(l.status || "—"))}</span></td>` +
+        `<td><span class="tag ${cls}">${esc(txt)}</span></td>` +
         `<td class="n num">${l.rows != null ? "+" + fmt(l.rows, 0) : "—"}</td>` +
-        `<td style="max-width:280px;overflow:hidden;text-overflow:ellipsis;color:var(--faint)">${esc(String(l.message || ""))}</td></tr>`;
+        `<td style="max-width:280px;overflow:hidden;text-overflow:ellipsis;color:var(--faint)">${esc(String(l.detail || l.error || l.message || ""))}</td></tr>`;
     }).join("") : `<tr><td colspan="5" style="text-align:center;color:var(--faint)">${esc("update_log 未初始化——运行 python -m app.updater")}</td></tr>`) +
     `</tbody></table></div>`;
 
@@ -91,11 +185,13 @@ async function renderData(body: HTMLElement): Promise<void> {
       try {
         await dataApi.trigger(b.dataset.run!);
         toast(`已触发 ${b.textContent} · updater 将消费执行`);
-        setTimeout(() => void render(), 3000);
+        void refreshUpState();
       } catch (e) {
         toast((e as Error).message || "触发失败");
       }
     }));
+  void refreshUpState();
+  upTimer = setInterval(() => void refreshUpState(), 3000);
 }
 
 /* ── 外观 ── */

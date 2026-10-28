@@ -22,6 +22,9 @@
   </div>
   <div class="datachip" id="datachip"><i></i><span id="datachip-t">行情底座 · 检测中</span></div>
   <span class="sp"></span>
+  <span class="seg" id="dev-toggle" title="桌面 / 手机布局切换">
+    <button data-dev="desktop">桌面</button><button data-dev="mobile">手机</button>
+  </span>
   <button class="icbtn" id="btn-theme" title="切换深浅主题" data-ic="moon" data-sz="16"></button>
   <button class="vipbadge off" id="vipbadge" data-ic="crown-simple" data-sz="13"><span id="vipbadge-t">未登录</span></button>
   <div class="userchip" id="userchip" title="点击登录 / 管理账户">
@@ -267,6 +270,16 @@
 
   </main>
 </div>
+
+<!-- ═══ 手机版底部页签（body.mobile 时显示，替代左侧图标栏） ═══ -->
+<nav class="mtabs" id="mtabs">
+  <a class="on" data-page="market"><span data-ic="chart-line-up" data-sz="19"></span><span>行情</span></a>
+  <a data-page="watchlist"><span data-ic="star" data-sz="19"></span><span>自选</span></a>
+  <a data-page="sectors"><span data-ic="squares-four" data-sz="19"></span><span>板块</span></a>
+  <a data-page="corepicks"><span data-ic="target" data-sz="19"></span><span>核心标</span></a>
+  <a data-page="cards"><span data-ic="cards" data-sz="19"></span><span>卡片</span></a>
+  <a data-page="settings"><span data-ic="gear" data-sz="19"></span><span>设置</span></a>
+</nav>
 
 <!-- ═══ 弹窗层 ═══ -->
 <div class="scrim" id="scrim"></div>

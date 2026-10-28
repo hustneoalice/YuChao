@@ -19,6 +19,7 @@ const loaded = { watchlist: false, sectors: false, corepicks: false };
 function goPage(p: string): void {
   document.querySelectorAll(".page").forEach((x) => x.classList.toggle("on", x.id === "page-" + p));
   document.querySelectorAll("#rail a").forEach((a) => a.classList.toggle("on", (a as HTMLElement).dataset.page === p));
+  document.querySelectorAll("#mtabs a").forEach((a) => a.classList.toggle("on", (a as HTMLElement).dataset.page === p));
   if (p === "market") renderKline();
   if (p === "watchlist" && !loaded.watchlist) { loaded.watchlist = true; renderWatchlist(); }
   if (p === "sectors" && !loaded.sectors) { loaded.sectors = true; void loadSectors(); }
@@ -179,11 +180,33 @@ function initRailResize(): void {
   });
 }
 
+/* ── 设备模式（桌面 / 手机）：顶栏 seg 切换，body.mobile 驱动移动布局 ── */
+type DeviceMode = "desktop" | "mobile";
+function applyDevice(m: DeviceMode, persist = true): void {
+  document.body.classList.toggle("mobile", m === "mobile");
+  document.querySelectorAll<HTMLElement>("#dev-toggle button").forEach((b) =>
+    b.classList.toggle("on", b.dataset.dev === m));
+  if (persist) localStorage.setItem("yc_device", m);
+  if (document.getElementById("page-market")!.classList.contains("on")) klResize();
+}
+function initDevice(): void {
+  const saved = localStorage.getItem("yc_device") as DeviceMode | null;
+  const mode: DeviceMode = saved ?? (window.matchMedia("(max-width: 760px)").matches ? "mobile" : "desktop");
+  applyDevice(mode, saved != null); // 首次访问跟随视口且不落盘，手动切换后才记忆
+  document.getElementById("dev-toggle")!.addEventListener("click", (e) => {
+    const b = (e.target as HTMLElement).closest<HTMLElement>("button[data-dev]");
+    if (b) applyDevice(b.dataset.dev as DeviceMode);
+  });
+  document.querySelectorAll<HTMLElement>("#mtabs a").forEach((a) =>
+    a.addEventListener("click", () => goPage(a.dataset.page!)));
+}
+
 /* ── 启动 ── */
 function boot(): void {
   applyAppearance();
   injectIcons();
   bindNav();
+  initDevice();
   initRailResize();
   initSearch();
   initAuth();
@@ -203,6 +226,11 @@ function boot(): void {
     document.dispatchEvent(new CustomEvent("yc:patch-theme", { detail: next }));
   });
   subscribe(drawTheme);
+
+  // 顶栏数据 chip 点击 → 数据底座看板
+  document.getElementById("datachip")!.addEventListener("click", () => {
+    document.dispatchEvent(new CustomEvent("yc:goto-settings", { detail: "data" }));
+  });
 
   // 跨页事件
   document.addEventListener("yc:goto-page", (e) => goPage((e as CustomEvent).detail));

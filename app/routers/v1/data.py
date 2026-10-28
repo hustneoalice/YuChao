@@ -4,6 +4,7 @@
 都不直接写库——落控制请求（data/control_requests.jsonl），由 updater 进程
 （唯一写者）轮询消费、经编排器排队执行（数据包操作与更新任务互斥）。
 """
+import json
 from pathlib import Path
 
 from fastapi import APIRouter, Depends
@@ -65,6 +66,22 @@ def update(body: UpdateTrigger):
         "force": body.force,
         "note": "updater 进程约 2s 内消费；执行结果以 GET /data/updates 落账为准",
     }
+
+
+@router.get("/data/update/state", summary="更新编排快照（进行中/排队/最近任务的实时进度）")
+def update_state():
+    """读 updater 进程落盘的 update_progress.json（只读快照，节流 ~1s）。
+
+    返回 {saved_at, running, queued, recent}；running 任务含 stage/percent/
+    done/total/rows/logs，驱动前端进度条。updater 未运行时返回空快照。
+    """
+    empty = {"saved_at": None, "running": None, "queued": [], "recent": []}
+    try:
+        return json.loads(settings.update_snapshot_path.read_text(encoding="utf-8"))
+    except FileNotFoundError:
+        return empty
+    except Exception:
+        return {**empty, "error": "snapshot_unreadable"}
 
 
 @router.get("/data/updates", summary="更新落账查询（updater 写入的 update_log）")

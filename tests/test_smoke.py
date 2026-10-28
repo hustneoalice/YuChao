@@ -1,4 +1,6 @@
 """M1 冒烟：仅凭契约即可对接 K线/板块/核心标 三页端点。"""
+import json
+
 import pytest
 from fastapi.testclient import TestClient
 
@@ -128,6 +130,34 @@ def test_data_update_trigger_202(client: TestClient, monkeypatch, tmp_path):
                         tmp_path / "c.jsonl")
     r = client.post("/api/v1/data/update", json={"kind": "valuation"})
     assert r.status_code == 202 and r.json()["accepted"] is True
+
+
+def test_data_update_state_empty(client: TestClient, monkeypatch, tmp_path):
+    # 快照缺失 → 空编排态（updater 未运行属正常，不算错误）
+    monkeypatch.setattr("app.config.settings.update_snapshot_path",
+                        tmp_path / "missing.json")
+    r = client.get("/api/v1/data/update/state")
+    assert r.status_code == 200
+    body = r.json()
+    assert body["running"] is None
+    assert body["queued"] == [] and body["recent"] == []
+
+
+def test_data_update_state_snapshot(client: TestClient, monkeypatch, tmp_path):
+    snap = {"saved_at": "2026-10-28T17:00:05", "queued": [],
+            "running": {"id": "t1", "kind": "kline_update", "label": "K 线增量",
+                        "status": "running", "stage": "拉取行情", "percent": 42.0,
+                        "done": 42, "total": 100, "rows": 1200, "logs": []},
+            "recent": [{"id": "t0", "kind": "valuation", "label": "全市场估值",
+                        "status": "completed", "rows": 5300, "finished_at": "2026-10-28T16:20:11"}]}
+    p = tmp_path / "progress.json"
+    p.write_text(json.dumps(snap, ensure_ascii=False), encoding="utf-8")
+    monkeypatch.setattr("app.config.settings.update_snapshot_path", p)
+    r = client.get("/api/v1/data/update/state")
+    assert r.status_code == 200
+    body = r.json()
+    assert body["running"]["percent"] == 42.0
+    assert body["recent"][0]["kind"] == "valuation"
 
 
 def test_data_not_ready_503(tmp_path, monkeypatch):

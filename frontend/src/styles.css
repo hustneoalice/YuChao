@@ -468,6 +468,34 @@ td .lnk:hover{text-decoration:underline}
 .logdot.ok{background:var(--down)} .logdot.warn{background:var(--warn)} .logdot.bad{background:var(--up)}
 .compliance{font-size:11px;color:var(--faint);line-height:1.8;border-top:1px solid var(--border-soft);padding-top:12px}
 
+/* 数据底座看板（设置 · 数据页签） */
+.dsgrid{display:grid;grid-template-columns:repeat(3,1fr);gap:10px}
+.dscard{border:1px solid var(--border);border-radius:11px;padding:10px 12px;background:var(--panel-2);
+  display:flex;flex-direction:column;gap:6px;min-width:0}
+.dscard .ds-h{display:flex;align-items:center;gap:7px;font-size:12px;color:var(--dim);min-width:0}
+.dscard .ds-h b{color:var(--text);font-size:12.5px;font-weight:600;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.dscard .ds-date{font-size:16px;font-weight:700;font-family:var(--mono);letter-spacing:-.01em}
+.dscard .ds-m{display:flex;align-items:center;gap:8px;font-size:10.5px;color:var(--faint)}
+.dscard .ds-m .fresh{margin-left:auto}
+.fresh{font-size:10px;padding:1px 7px;border-radius:99px;background:var(--panel-3);color:var(--dim);white-space:nowrap}
+.fresh.ok{background:var(--down-soft);color:var(--down)}
+.fresh.warn{background:var(--warn-soft);color:var(--warn)}
+.fresh.bad{background:var(--up-soft);color:var(--up)}
+.upcard{display:flex;flex-direction:column;gap:8px;font-size:12px;min-height:30px}
+.uprow{display:flex;align-items:center;gap:8px;min-width:0}
+.upbar{height:7px;border-radius:4px;background:var(--panel-3);overflow:hidden;width:100%}
+.upbar i{display:block;height:100%;background:var(--p1);border-radius:4px;transition:width .4s}
+.uplogs{max-height:96px;overflow-y:auto;background:var(--panel-2);border:1px solid var(--border-soft);
+  border-radius:8px;padding:6px 9px;font-family:var(--mono);font-size:10.5px;color:var(--faint);
+  display:flex;flex-direction:column;gap:2px}
+.uprec{display:flex;align-items:center;gap:8px;font-size:11px;color:var(--dim);padding:3px 0;
+  border-bottom:1px solid var(--border-soft);min-width:0}
+.uprec:last-child{border-bottom:0}
+.datachip{cursor:pointer}
+
+/* ═══ 手机版布局（顶栏「手机」切换 / 窄视口自动） ═══ */
+.mtabs{display:none}
+
 @media (max-width:1180px){
   .rightcol{display:none}
   .cardgrid{grid-template-columns:repeat(3,1fr)}
@@ -476,3 +504,52 @@ td .lnk:hover{text-decoration:underline}
 @media (prefers-reduced-motion:reduce){
   *{animation:none!important;transition:none!important}
 }
+
+/* ── body.mobile：六页单列化 · rail→底部页签 · rcol 下移 · topbar 精简 ── */
+body.mobile .mtabs{display:flex;position:fixed;left:0;right:0;bottom:0;z-index:60;
+  height:calc(54px + env(safe-area-inset-bottom));padding-bottom:env(safe-area-inset-bottom);
+  background:var(--topbar);backdrop-filter:blur(20px) saturate(180%);
+  -webkit-backdrop-filter:blur(20px) saturate(180%);border-top:1px solid var(--border)}
+body.mobile .mtabs a{flex:1;display:flex;flex-direction:column;align-items:center;justify-content:center;
+  gap:2px;color:var(--faint);font-size:10px;min-width:0}
+body.mobile .mtabs a.on{color:var(--accent)}
+body.mobile .rail{display:none}
+body.mobile .shell{grid-template-columns:1fr;
+  height:calc(100vh - 52px - 54px - env(safe-area-inset-bottom));margin-top:52px}
+/* 顶栏精简：搜索占满 · 隐藏数据chip/VIP/用户名/品牌英文 */
+body.mobile .topbar{gap:8px;padding:0 10px}
+body.mobile .gsearch{flex:1;width:auto;min-width:0}
+body.mobile .gsearch .gbox .mono{display:none}
+body.mobile .datachip,body.mobile .vipbadge{display:none}
+body.mobile .userchip #user-name{display:none}
+body.mobile .brand span{display:none}
+/* 六页通用：页面纵向滚动 */
+body.mobile .page{overflow-y:auto;padding:10px 10px 14px;gap:10px;
+  -webkit-overflow-scrolling:touch}
+body.mobile .phead{flex-wrap:wrap;row-gap:6px}
+/* 行情页：图表列竖排，卡片列移到 K 线下方 */
+body.mobile .mkt-row{flex-direction:column;overflow:visible}
+body.mobile .kl-col{flex:none}
+body.mobile .chartbox{flex:none!important;height:58vh}
+body.mobile .rcol-grip{display:none}
+body.mobile .rightcol{width:auto;min-width:0;display:flex}
+body.mobile .sh-stats{display:none}
+body.mobile .stock-head{flex-wrap:wrap;gap:8px}
+body.mobile .sh-price .p{font-size:24px}
+body.mobile .chartbar{overflow-x:auto;scrollbar-width:none}
+body.mobile .chartbar::-webkit-scrollbar{display:none}
+body.mobile .chartbar .legend{display:none}
+body.mobile .kl-nav{height:36px}
+/* 其余页 */
+body.mobile .tblwrap{max-height:52vh}
+body.mobile #page-sectors > div:nth-of-type(2){flex-direction:column!important}
+body.mobile #page-sectors .tblwrap{max-height:40vh}
+body.mobile .heat{grid-template-columns:repeat(2,1fr)}
+body.mobile .cardgrid{grid-template-columns:repeat(2,1fr)}
+body.mobile .setwrap{flex-direction:column}
+body.mobile .setnav{width:auto;flex-direction:row;overflow-x:auto;padding-bottom:2px}
+body.mobile .setnav button{flex:none}
+body.mobile .setbody{overflow:visible;padding-right:0}
+body.mobile .dsgrid{grid-template-columns:repeat(2,1fr)}
+body.mobile .factorgrid{grid-template-columns:1fr}
+body.mobile .modal{padding:16px}

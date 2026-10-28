@@ -150,9 +150,25 @@ export interface UpdateLogItem {
   run_id?: string; data_type?: string; status?: string; started_at?: string;
   finished_at?: string; rows?: number; message?: string; [k: string]: unknown;
 }
+/* 更新编排快照（updater 落盘 update_progress.json，经 /data/update/state 透出） */
+export interface UpTaskState {
+  id: string; kind: string; label: string; trigger: string; status: string; stage?: string;
+  total?: number; done?: number; succeeded?: number; failed?: number; rows?: number;
+  percent?: number; elapsed_s?: number | null; message?: string; error?: string;
+  queued_at?: string; started_at?: string | null; finished_at?: string | null;
+  logs?: { time: string; level: string; message: string }[];
+}
+export interface UpdateSnapshot {
+  saved_at: string | null;
+  running: UpTaskState | null;
+  queued: UpTaskState[];
+  recent: UpTaskState[];
+  error?: string;
+}
 export const dataApi = {
   status: () => req<DataStatus>("/data/status"),
   tasks: () => req<{ items: { kind: string; label: string; description: string }[]; schedule: string; note: string }>("/data/tasks"),
+  state: () => req<UpdateSnapshot>("/data/update/state"),
   trigger: (kind: string, force = false) =>
     req<{ accepted: boolean; request_id: string }>("/data/update", { method: "POST", body: { kind, force } }),
   updates: (limit = 50) => req<{ items: UpdateLogItem[]; note?: string }>(`/data/updates?limit=${limit}`),
