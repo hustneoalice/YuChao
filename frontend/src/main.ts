@@ -215,6 +215,7 @@ function boot(): void {
     patch("theme", (e as CustomEvent).detail as "dark" | "light");
   });
   subscribe(() => {
+    applyAppearance();          // 主题/涨跌方向/强调色 → data-* 属性（缺此行切换不生效）
     refreshVipUI();
     if (document.getElementById("page-market")!.classList.contains("on")) {
       renderStockHead();
