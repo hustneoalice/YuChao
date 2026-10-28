@@ -3,6 +3,7 @@
  *  · 自研操盘通道：短线 MA7/MA10、中线 MA35/MA45，逐柱填充（强橙/弱蓝）
  *  · registerYAxis('normal') 全局轴模板：成交量轴万/亿（策影 config.ts 同款）
  *  · 滚轮缩放 / 拖拽平移为 klinecharts 原生能力
+ *  · 十字光标浮动信息卡：OHLC/涨跌/振幅/区间位置/量额，周期（日/周/月）区分标题
  */
 import { init, dispose, registerIndicator, registerYAxis, type Chart } from "klinecharts";
 import type { Bar } from "../api";
@@ -130,6 +131,8 @@ export interface KlineChartHandle {
   setMain: (inds: MainKey[]) => void;
   /** 副图多选：每个指标一个窗格，高度均分（策影 autoLayout 同款） */
   setSub: (inds: SubKey[]) => void;
+  /** 当前周期（d/w/m）：决定十字光标卡片的标题形态 */
+  setPeriod: (p: "d" | "w" | "m") => void;
   retheme: () => void;
   resize: () => void;
   destroy: () => void;
@@ -186,6 +189,35 @@ function styles() {
   };
 }
 
+/* ── 十字光标浮动信息卡（周期区分标题） ── */
+type TipPeriod = "d" | "w" | "m";
+
+/** 量/额：万以下原值，万 → 亿（策影 formatVolumeValue 口径 + 手单位） */
+function fmtWanYi(v: number, unit = ""): string {
+  if (!isFinite(v)) return "—";
+  if (Math.abs(v) >= 1e8) return (v / 1e8).toFixed(2) + "亿" + unit;
+  if (Math.abs(v) >= 1e4) return (v / 1e4).toFixed(2) + "万" + unit;
+  return v.toFixed(0) + unit;
+}
+
+function tipTitle(date: string, p: TipPeriod): string {
+  if (p === "m") return `${date.slice(0, 7)} · 月线`;
+  if (p === "w") return `${date} 当周 · 周线`;
+  return `${date} · 北京时间`;
+}
+
+/** 区间位置：当前收盘在近 window 根（含当根）高低区间内的分位（%） */
+function rangePosition(list: { high: number; low: number; close: number }[], i: number, window = 250): number | null {
+  const s = Math.max(0, i - window + 1);
+  const seg = list.slice(s, i + 1);
+  const hi = Math.max(...seg.map((x) => x.high));
+  const lo = Math.min(...seg.map((x) => x.low));
+  if (!isFinite(hi) || !isFinite(lo) || hi === lo) return null;
+  return ((list[i].close - lo) / (hi - lo)) * 100;
+}
+
+const sgn = (v: number, digits = 2): string => (v > 0 ? "+" : "") + v.toFixed(digits);
+
 export function mountKline(el: HTMLElement): KlineChartHandle {
   ensureRegistered();
   const chart = init(el, {
@@ -202,13 +234,58 @@ export function mountKline(el: HTMLElement): KlineChartHandle {
   chart.setSymbol({ ticker: "YUCHAO", pricePrecision: 2, volumePrecision: 0 });
   chart.setPeriod({ type: "day", span: 1 });
 
+  /* ── 浮动信息卡：跟随十字光标，边缘翻转避让 ── */
+  const tip = document.createElement("div");
+  tip.className = "kl-tip";
+  tip.style.display = "none";
+  el.appendChild(tip);
+  let period: TipPeriod = "d";
+
+  const onCross = (...args: unknown[]) => {
+    const ch = args[0] as { x?: number; y?: number } | null;
+    if (!ch || ch.x == null || ch.y == null) { tip.style.display = "none"; return; }
+    const list = chart.getDataList() as { timestamp: number; open: number; high: number; low: number; close: number; volume?: number; amount?: number; date?: string }[];
+    // v10 crosshair 事件只带坐标，经 convertFromPixel 反查数据索引（策影同款）
+    const hit = chart.convertFromPixel([{ x: ch.x }]) as unknown;
+    const di = (Array.isArray(hit) ? hit[0] : hit)?.dataIndex as number | undefined;
+    const bar = di != null ? list[di] : undefined;
+    if (!bar) { tip.style.display = "none"; return; }
+    const prev = di! > 0 ? list[di! - 1] : undefined;
+    const base = prev?.close || bar.open;                 // 涨跌/振幅基准（首根 vs 开盘）
+    const chg = bar.close - base;
+    const pct = base ? (chg / base) * 100 : 0;
+    const amp = base ? ((bar.high - bar.low) / base) * 100 : 0;
+    const pos = rangePosition(list, di!);
+    const posTxt = pos == null ? "—" : pos.toFixed(1) + "%";
+    const row = (k: string, v: string, cls = "") =>
+      `<div class="r"><span>${k}</span><b class="num ${cls}">${v}</b></div>`;
+    const cls = chg > 0 ? "up" : chg < 0 ? "down" : "";
+    tip.innerHTML =
+      `<div class="t num">${tipTitle(bar.date ?? "", period)}</div>` +
+      row("开", bar.open.toFixed(2)) + row("高", bar.high.toFixed(2)) +
+      row("低", bar.low.toFixed(2)) + row("收", bar.close.toFixed(2)) +
+      row("涨跌", `${sgn(chg)} (${sgn(pct)}%)`, cls) +
+      row("振幅", amp.toFixed(2) + "%") + row("位置", posTxt) +
+      row("量", fmtWanYi(bar.volume ?? 0, "手")) + row("额", fmtWanYi(bar.amount ?? 0));
+    tip.style.display = "block";
+    // 定位 + 翻转（卡片实际尺寸就绪后再算，避免首帧抖动）
+    const w = tip.offsetWidth, h = tip.offsetHeight;
+    const flipX = ch.x + 16 + w > el.clientWidth;
+    const flipY = ch.y + 16 + h > el.clientHeight;
+    tip.style.left = (flipX ? ch.x - w - 16 : ch.x + 16) + "px";
+    tip.style.top = (flipY ? ch.y - h - 16 : ch.y + 16) + "px";
+  };
+  try { chart.subscribeAction("onCrosshairChange", onCross as never); } catch { /* 忽略 */ }
+
   const handle: KlineChartHandle = {
     chart,
     setData(bars: Bar[]) {
       const list = bars.map((b) => ({
         timestamp: toTs(b.date), open: b.open, high: b.high, low: b.low,
-        close: b.close, volume: b.volume ?? 0,
+        close: b.close, volume: b.volume ?? 0, amount: b.amount ?? 0,
+        date: b.date,
       }));
+      tip.style.display = "none";                          // 数据重载时收起旧卡片
       // v10 无 applyNewData，经 DataLoader 一次性回填（策影同款）
       chart.setDataLoader({ getBars: (params) => { params.callback(list, false); } });
     },
@@ -269,9 +346,14 @@ export function mountKline(el: HTMLElement): KlineChartHandle {
       const h = Math.max(64, Math.min(110, Math.round(el.clientHeight * 0.38 / n)));
       panes.forEach((p) => chart.setPaneOptions({ id: p.id, height: h }));
     },
+    setPeriod(p: "d" | "w" | "m") { period = p; },
     retheme() { chart.setStyles(styles()); },
     resize() { chart.resize(); },
-    destroy() { dispose(el); },
+    destroy() {
+      try { chart.unsubscribeAction("onCrosshairChange", onCross as never); } catch { /* 忽略 */ }
+      tip.remove();
+      dispose(el);
+    },
   };
   return handle;
 }

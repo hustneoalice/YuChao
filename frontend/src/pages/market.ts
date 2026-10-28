@@ -308,6 +308,7 @@ export function renderKline(): void {
   if (!kl) kl = mountKline(document.getElementById("kl-main")!);
   // 每次都按当前状态应用指标（setMain/setSub 幂等：先移除再创建），
   // 指标 seg 切换只改状态后调这里即可生效
+  kl.setPeriod(mk.period as "d" | "w" | "m");
   kl.setMain(mk.mainInds);
   kl.setSub(mk.subInds);
   kl.resize();
