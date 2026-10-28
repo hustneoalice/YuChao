@@ -289,12 +289,31 @@ export function mountKline(el: HTMLElement): KlineChartHandle {
   const nav = document.createElement("div");
   nav.className = "kl-nav";
   nav.innerHTML =
+    `<div class="kl-nav-btns"><button data-j="first" title="跳到最早">⇤</button>` +
+    `<button data-j="prev" title="向前一页">‹</button></div>` +
     `<canvas class="kl-nav-cv"></canvas>` +
     `<div class="kl-nav-win" title="拖动调整可见范围"><i></i><b></b></div>` +
+    `<div class="kl-nav-btns r"><button data-j="next" title="向后一页">›</button>` +
+    `<button data-j="last" title="回到最新">⇥</button></div>` +
     `<button class="kl-nav-latest" title="回到最新">最新 ›</button>`;
   el.appendChild(nav);
   const navCv = nav.querySelector("canvas")!;
   const navWin = nav.querySelector(".kl-nav-win") as HTMLElement;
+  // 快速跳转（策影 navJump 同款：first / ±0.8 页 / last）
+  nav.addEventListener("click", (e) => {
+    const b = (e.target as HTMLElement).closest<HTMLButtonElement>("button[data-j]");
+    if (!b) return;
+    const list = chart.getDataList();
+    const r = chart.getVisibleRange?.() as { from: number; to: number } | undefined;
+    if (!list.length || !r) return;
+    const vis = r.to - r.from;
+    try {
+      if (b.dataset.j === "first") chart.scrollToDataIndex(0, 0);
+      else if (b.dataset.j === "last") chart.scrollToRealTime(0);
+      else if (b.dataset.j === "prev") chart.scrollToDataIndex(Math.max(0, Math.round(r.from - vis * 0.8)), 0);
+      else if (b.dataset.j === "next") chart.scrollToDataIndex(Math.min(Math.max(0, list.length - vis), Math.round(r.from + vis * 0.8)), 0);
+    } catch { /* 忽略 */ }
+  });
 
   /** 画全量 close 缩略线（涨跌分段染色），并按可见区间刷新窗口位置 */
   const navDraw = () => {
@@ -326,8 +345,10 @@ export function mountKline(el: HTMLElement): KlineChartHandle {
     if (!list.length || !r) return;
     const L = list.length;
     const from = Math.max(0, Math.floor(r.from)), to = Math.min(L, Math.ceil(r.to));
-    navWin.style.left = (from / L) * 100 + "%";
-    navWin.style.width = Math.max(1.5, ((to - from) / L) * 100) + "%";
+    // 窗口定位相对缩略图画布区（两侧有跳转按钮占位）
+    const cvL = navCv.offsetLeft, cvW = navCv.clientWidth;
+    navWin.style.left = cvL + (from / L) * cvW + "px";
+    navWin.style.width = Math.max(2, ((to - from) / L) * cvW) + "px";
   };
   const onVisChange = () => { requestAnimationFrame(navUpdateWin); };
   try { chart.subscribeAction("onVisibleRangeChange", onVisChange as never); } catch { /* 忽略 */ }
@@ -344,9 +365,9 @@ export function mountKline(el: HTMLElement): KlineChartHandle {
   navWin.addEventListener("pointermove", (e) => {
     if (!navWin.hasPointerCapture?.(e.pointerId)) return;
     const L = chart.getDataList().length;
-    if (!L || !nav.clientWidth) return;
+    if (!L || !navCv.clientWidth) return;
     const nf = Math.max(0, Math.min(L - navDrag.count,
-      navDrag.from + ((e.clientX - navDrag.x) / nav.clientWidth) * L));
+      navDrag.from + ((e.clientX - navDrag.x) / navCv.clientWidth) * L));
     try { chart.scrollToDataIndex(Math.round(nf), 0); } catch { /* 忽略 */ }
     navUpdateWin();
   });
@@ -408,9 +429,10 @@ export function mountKline(el: HTMLElement): KlineChartHandle {
       const up = chartUp(), dn = chartDown();
       for (const k of inds) {
         if (k === "vol") {
-          // 策影 createSubIndicatorConfig：禁用大数格式化，轴/图例文本走万/亿
+          // 策影 createSubIndicatorConfig：禁用大数格式化，轴/图例文本走万/亿；
+          // calcParams [5,10,40] = 5/10/40 日均量线（40 日均量作缩放量能基准）
           chart.createIndicator({
-            name: "VOL", shouldFormatBigNumber: false,
+            name: "VOL", shouldFormatBigNumber: false, calcParams: [5, 10, 40],
             styles: { bars: [{ upColor: up, downColor: dn, noChangeColor: NEUTRAL }] },
           } as never, false);
         } else if (k === "macd") {
