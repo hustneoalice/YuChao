@@ -159,9 +159,8 @@ svg{display:block}
 .chartbar{display:flex;align-items:center;gap:8px;padding:7px 12px;border-bottom:1px solid var(--border);min-height:42px}
 .chartbar .sp{flex:1}
 .barsep{width:1px;height:14px;background:var(--border);margin:0 2px}
-.chartbar .legend{font-size:10.5px;color:var(--dim);gap:8px;white-space:nowrap}
 .chartbar .seg button{padding:3px 10px;font-size:11.5px}
-.legend{display:flex;flex-wrap:wrap;gap:10px;font-size:11.5px;color:var(--dim)}
+.legend{display:flex;flex-wrap:wrap;gap:10px;font-size:11px;color:var(--dim);white-space:nowrap}
 .legend span{display:inline-flex;align-items:center;gap:5px}
 .legend i{width:9px;height:2px;border-radius:2px;display:block}
 
@@ -342,8 +341,11 @@ td .lnk:hover{text-decoration:underline}
 .kl-ipanel{position:absolute;top:34px;right:10px;z-index:20;background:var(--panel);
   border:1px solid var(--border);border-radius:11px;box-shadow:var(--shadow);padding:9px 11px;
   display:flex;flex-direction:column;gap:6px}
+.kl-stage .legend{position:absolute;top:10px;right:12px;z-index:6;pointer-events:none;
+  justify-content:flex-end;background:color-mix(in srgb,var(--panel) 72%,transparent);
+  padding:3px 9px;border-radius:8px;backdrop-filter:blur(6px);-webkit-backdrop-filter:blur(6px)}
+.kl-ipanel[hidden]{display:none!important}
 .kl-ipanel .iprow{display:flex;align-items:center;gap:4px}
-.kl-ipanel .ipk{font-size:11px;color:var(--faint);width:28px;flex:none}
 .kl-ipanel button{padding:4px 9px;border-radius:8px;font-size:11.5px;color:var(--dim);
   border:1px solid var(--border-soft);min-height:0}
 .kl-ipanel button:hover{color:var(--text);background:var(--panel-2)}
@@ -538,7 +540,7 @@ body.mobile .stock-head{flex-wrap:wrap;gap:8px}
 body.mobile .sh-price .p{font-size:24px}
 body.mobile .chartbar{overflow-x:auto;scrollbar-width:none}
 body.mobile .chartbar::-webkit-scrollbar{display:none}
-body.mobile .chartbar .legend{display:none}
+body.mobile .kl-stage .legend{display:none}
 body.mobile .kl-nav{height:36px}
 /* 其余页 */
 body.mobile .tblwrap{max-height:52vh}
