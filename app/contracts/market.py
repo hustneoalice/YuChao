@@ -16,6 +16,9 @@ class Bar(BaseModel):
     amount: Optional[float] = None
     pct_chg: Optional[float] = None
     turnover_rate: Optional[float] = None
+    live: Optional[bool] = Field(
+        default=None, description="盘中实时合并的「今日未收盘 bar」标记（非库内落库数据）"
+    )
     indicators: Optional[dict[str, Optional[float]]] = Field(
         default=None, description="with=indicator 时的标准指标（MA5/7/10/20/35/45、std20、BOLL）"
     )

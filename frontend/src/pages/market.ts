@@ -69,6 +69,61 @@ export async function openStock(s: CurStock, from?: { page: string; label: strin
     mk.quote = q;
     renderRight();
   } catch { /* 实时兜底失败：保持日线数据展示 */ }
+  startPoll();
+}
+
+/* ── 盘中轮询（策影 WebSocket「原地更新最后一根」的轮询版）：
+   12s 拉 quote → 右列刷新 + K 线末根局部更新（不重拉全量序列）。
+   后端 kline 已合并今日 bar（守卫 _merge_live_bar），这里只负责盘中跳动；
+   行情日 < 末根日（盘前昨收快照）时不动 K 线，与策影 _quote_is_today 同思路。 ── */
+let pollTimer: ReturnType<typeof setInterval> | null = null;
+let pollBusy = false;
+
+function stopPoll(): void {
+  if (pollTimer) { clearInterval(pollTimer); pollTimer = null; }
+}
+
+async function pollTick(): Promise<void> {
+  if (pollBusy || document.hidden || !mk.cur) return;
+  const s = mk.cur;
+  pollBusy = true;
+  try {
+    const q = await marketApi.quote(s.symbol);
+    if (mk.cur?.symbol !== s.symbol || !q) return;
+    mk.quote = q;
+    renderRight();
+    const rtDate = (q.rt_time || q.date || "").slice(0, 10);
+    if (!q.rt_price || !rtDate || !mk.bars.length) return;
+    const last = mk.bars[mk.bars.length - 1];
+    const lastDate = last.date.slice(0, 10);
+    if (rtDate > lastDate) {
+      // quote 先于 kline 到位：直接补今日浮根（字段为 quote 合并后的实时段）
+      mk.bars.push({
+        date: rtDate,
+        open: q.open ?? last.close,
+        high: q.high ?? q.rt_price,
+        low: q.low ?? q.rt_price,
+        close: q.rt_price,
+        volume: q.volume ?? null, amount: q.amount ?? null,
+      });
+      renderKline();
+    } else if (rtDate === lastDate) {
+      last.close = q.rt_price;
+      last.high = Math.max(last.high, q.rt_price);
+      last.low = Math.min(last.low, q.rt_price);
+      if (q.open) last.open = q.open;
+      if (q.volume != null) last.volume = q.volume;
+      if (q.amount != null) last.amount = q.amount;
+      renderKline();
+    }
+  } catch { /* 实时兜底失败：静默降级 */ } finally {
+    pollBusy = false;
+  }
+}
+
+function startPoll(): void {
+  stopPoll();
+  pollTimer = setInterval(pollTick, 12000);
 }
 
 /* ── K线下方资讯/研报面板（东财直连，后端 TTL 缓存；会话内按 symbol+tab 缓存） ── */

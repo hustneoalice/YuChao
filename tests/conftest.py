@@ -119,6 +119,14 @@ def duckdb_file(tmp_path):
     return path
 
 
+@pytest.fixture(autouse=True)
+def _freeze_realtime(monkeypatch):
+    """默认冻结实时行情：K 线「今日 bar 合并」与 quote 实时覆盖测试不联网
+    （2026-10-28 实测 kline 合并会引入腾讯真实价，冲掉夹具尾根导致断言失真）。
+    需要实时段的用例自行 monkeypatch 覆盖本冻结。"""
+    monkeypatch.setattr("app.foundation.live.realtime_quote", lambda *a, **k: None)
+
+
 @pytest.fixture()
 def client(duckdb_file, monkeypatch):
     from fastapi.testclient import TestClient

@@ -15,6 +15,65 @@ from pydantic import TypeAdapter
 router = APIRouter(tags=["market"])
 
 
+def _merge_live_bar(bars: list, symbol: str, adjust: Adjust) -> list:
+    """盘中合并「今日未收盘 bar」（策影同款 + 三守卫，2026-10-28 用户：
+    科创50 顶部已实时转涨、K 线末根还是昨日 —— 实时价此前只进 quote 不进 K 线）。
+
+    守卫 1 _quote_is_today：行情必须属于今天才允许改/补 K 线 —— 盘前腾讯返回
+    昨收快照，不守卫会补出一根与昨日逐位相同的「假今日 bar」。
+    守卫 2 分支：末根==今天 → 原地更新（close 覆盖 / high 取大 / low 取小）；
+    末根<今天 → 补一根（open 兜底 prev_close）。
+    守卫 3 一致性：行情归属日 < K 线末根 → 丢弃实时（上游延迟/跨日残留）。
+    复权：实时价是原始价，库内 qfq/hfq —— 按昨收比缩放实时段（当日形态不变）；
+    qfq 锚定最新价，比值常态为 1，缩放只是除息日当天的保险。
+    volume/amount 由 _tx_quotes 已统一为股/元，直接落位。
+    """
+    if not bars:
+        return bars
+    try:
+        rt = live.realtime_quote(symbol)
+    except Exception:
+        return bars
+    if not rt or not rt.get("price"):
+        return bars
+    today = date.today().isoformat()
+    rt_date = (rt.get("ts") or "")[:10]
+    if rt_date != today:                                # 守卫 1
+        return bars
+    last = bars[-1]
+    last_date = (last.get("date") or "")[:10]
+    if rt_date < last_date:                             # 守卫 3
+        return bars
+    scale = 1.0
+    if adjust is not Adjust.raw and rt.get("prev_close"):
+        prev_qfq = bars[-2]["close"] if last_date == today and len(bars) > 1 else last["close"]
+        if prev_qfq and rt["prev_close"]:
+            scale = prev_qfq / rt["prev_close"] or 1.0
+    f = lambda v: (v * scale) if v is not None else None  # noqa: E731
+    o, h, l, c = f(rt.get("open")), f(rt.get("high")), f(rt.get("low")), f(rt["price"])
+    c_l = min((v for v in (l, o, c) if v is not None), default=None)
+    if last_date == today:                              # 守卫 2a：原地更新
+        last["close"] = c
+        if h: last["high"] = max(last.get("high") or h, h)
+        if c_l is not None:
+            last["low"] = min(last.get("low") or c_l, c_l)
+        if o: last["open"] = o
+        if rt.get("volume"): last["volume"] = rt["volume"]
+        if rt.get("amount"): last["amount"] = rt["amount"]
+        if rt.get("turnover"): last["turnover_rate"] = rt["turnover"]
+        last["live"] = True
+    else:                                               # 守卫 2b：补今日 bar
+        prev = last["close"]
+        bars.append({
+            "date": today, "open": o or prev, "high": h or c or prev,
+            "low": c_l if c_l is not None else (c or prev), "close": c,
+            "volume": rt.get("volume"), "amount": rt.get("amount"),
+            "pct_chg": rt.get("pct"), "turnover_rate": rt.get("turnover"),
+            "live": True,
+        })
+    return bars
+
+
 @router.get("/market/kline", response_model=Kline, summary="K 线（复权在查询层派生）")
 def kline(
     symbol: str = Query(description="6 位代码，兼容 sh.600519 / 600519.SH 形态"),
@@ -32,6 +91,10 @@ def kline(
         raise vip_required("VIP 通道未授权：短线/中线操盘通道数据不返回（M1 桩）")
     data = repo.market.get_kline(conn, symbol, adjust, with_param.value if with_param else None,
                                  start, end, limit)
+    # 盘中实时：把「今日未收盘 bar」合并进尾部（守卫见 _merge_live_bar）；
+    # 显式 start/end 查历史区间时不并（用户在翻历史，不应出现今天的浮根）
+    if not (start or end):
+        data["bars"] = _merge_live_bar(data["bars"], data["symbol"], adjust)
     return TypeAdapter(Kline).validate_python(data)
 
 

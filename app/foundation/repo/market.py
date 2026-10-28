@@ -65,16 +65,18 @@ def get_kline(
     if end:
         conds.append("date <= ?")
         params.append(end)
+    # DESC 取最新 N 根后反转回时间正序（ASC+LIMIT 会取到最早段；指标按正序计算）
     rows = conn.execute(
         f"""
         SELECT symbol, date, open, high, low, close, volume, amount, pct_chg, turnover_rate
         FROM {src}
         WHERE {' AND '.join(conds)}
-        ORDER BY date
+        ORDER BY date DESC
         LIMIT ?
         """,
         [*params, limit],
     ).fetchall()
+    rows.reverse()
 
     closes = [r[5] for r in rows]
     inds = standard_indicators(closes) if with_param == "indicator" else None
