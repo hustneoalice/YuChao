@@ -1,4 +1,4 @@
-"""行情端点：GET /market/kline · /market/quote · /market/search。"""
+"""行情端点：GET /market/kline · /market/quote · /market/search · 资讯/研报。"""
 from typing import Optional
 
 from fastapi import APIRouter, Depends, Query
@@ -8,6 +8,7 @@ from ...contracts.market import Kline, Quote, SearchHit
 from ...errors import vip_required
 from ...foundation import repo
 from ...foundation.db import get_conn
+from ...foundation import live
 from pydantic import TypeAdapter
 
 router = APIRouter(tags=["market"])
@@ -46,3 +47,30 @@ def search(
 ):
     hits = repo.market.search(conn, q, limit)
     return Page(items=[SearchHit(**h) for h in hits], total=len(hits))
+
+
+# ── 实时资讯/研报（东财直连 + live 层 TTL 缓存；失败降级为空列表不 5xx） ──
+
+@router.get("/market/news", summary="个股资讯（东财搜索，10min 缓存）")
+def news(symbol: str, limit: int = Query(default=12, ge=1, le=30)):
+    try:
+        return {"items": live.stock_news(symbol, limit)}
+    except Exception:
+        return {"items": []}
+
+
+@router.get("/market/reports", summary="个股研报（东财 reportapi，2h 缓存）")
+def reports(symbol: str, limit: int = Query(default=12, ge=1, le=30)):
+    try:
+        return {"items": live.stock_reports(symbol, limit)}
+    except Exception:
+        return {"items": []}
+
+
+@router.get("/market/industry-reports", summary="行业研报（按 universe 行业归属，2h 缓存）")
+def industry_reports(symbol: str, limit: int = Query(default=12, ge=1, le=30),
+                     conn=Depends(get_conn)):
+    try:
+        return live.industry_reports(conn, symbol, limit)
+    except Exception:
+        return {"industry": "", "items": [], "skipped": True}

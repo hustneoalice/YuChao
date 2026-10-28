@@ -44,9 +44,85 @@ export async function openStock(s: CurStock, from?: { page: string; label: strin
     renderStockHead();
     renderKline();
     renderRight();
+    showBriefing();
   } catch (e) {
     toast((e as Error).message || "K线加载失败");
   }
+}
+
+/* ── K线下方资讯/研报面板（东财直连，后端 TTL 缓存；会话内按 symbol+tab 缓存） ── */
+type BriefTab = "news" | "reports" | "indrep";
+let briefTab: BriefTab = "news";
+const briefCache = new Map<string, string>(); // key → 渲染好的 HTML
+
+function briefKey(sym: string, t: BriefTab): string {
+  return `${sym}|${t}`;
+}
+
+function showBriefing(): void {
+  const s = mk.cur!;
+  const panel = document.getElementById("brief-panel")!;
+  panel.hidden = false;
+  briefCache.clear();
+  drawBrief("加载中…");
+  void loadBrief(s.symbol, briefTab);
+  // 600ms 后预取另两个 tab（策影同款：错开 K 线首屏，切 tab 零等待）
+  window.setTimeout(() => {
+    if (mk.cur?.symbol !== s.symbol) return;
+    for (const t of ["news", "reports", "indrep"] as BriefTab[]) {
+      if (t !== briefTab && !briefCache.has(briefKey(s.symbol, t))) void loadBrief(s.symbol, t);
+    }
+  }, 600);
+}
+
+async function loadBrief(sym: string, t: BriefTab): Promise<void> {
+  try {
+    const html = t === "news" ? await briefNews(sym)
+      : t === "reports" ? await briefReports(sym)
+      : await briefIndrep(sym);
+    if (mk.cur?.symbol !== sym) return; // 已切股
+    briefCache.set(briefKey(sym, t), html);
+    if (t === briefTab) drawBrief(html);
+  } catch {
+    if (t === briefTab) drawBrief(`<div class="bempty">加载失败，稍后重试</div>`);
+  }
+}
+
+function drawBrief(html: string): void {
+  document.getElementById("brief-body")!.innerHTML = html;
+}
+
+const briefNews = async (sym: string): Promise<string> => {
+  const { items } = await marketApi.news(sym);
+  if (!items.length) return `<div class="bempty">暂无相关资讯</div>`;
+  return items.map((n) =>
+    `<a class="bitem" href="${n.url}" target="_blank" rel="noopener">` +
+    `<div class="bt">${n.title || n.summary}</div>` +
+    `<div class="bm"><span>${n.source || "未知来源"}</span><i>·</i><span class="num">${n.time}</span></div></a>`
+  ).join("");
+};
+
+const briefReports = async (sym: string): Promise<string> => {
+  const { items } = await marketApi.reports(sym);
+  return renderReportList(items);
+};
+
+const briefIndrep = async (sym: string): Promise<string> => {
+  const r = await marketApi.industryReports(sym);
+  if (!r.industry) return `<div class="bempty">暂无行业归属信息</div>`;
+  if (r.skipped) return `<div class="bempty">${r.industry} · 近期暂无收录的行业研报</div>`;
+  return `<div class="bsec">${r.industry} · 近 1 年研报</div>` + renderReportList(r.items);
+};
+
+function renderReportList(items: { date: string; org: string; rating: string; title: string; url: string }[]): string {
+  if (!items.length) return `<div class="bempty">近 1 年暂无研报</div>`;
+  return items.map((r) =>
+    `<a class="bitem" href="${r.url}" target="_blank" rel="noopener">` +
+    `<div class="bt">${r.title}</div>` +
+    `<div class="bm"><span class="tag acc">${r.org || "未知机构"}</span>` +
+    (r.rating ? `<span class="tag up">${r.rating}</span>` : "") +
+    `<span class="num" style="margin-left:auto">${r.date}</span></div></a>`
+  ).join("");
 }
 
 export function refreshCur(): void {
@@ -67,6 +143,17 @@ function renderBackbar(): void {
 
 export function initMarket(): void {
   initRcolResize();
+  // 资讯/研报 tab 切换（点击已选 tab 不重复请求，走缓存）
+  document.getElementById("brief-panel")!.addEventListener("click", (e) => {
+    const b = (e.target as HTMLElement).closest<HTMLButtonElement>("button[data-bt]");
+    if (!b) return;
+    briefTab = b.dataset.bt as BriefTab;
+    document.querySelectorAll("#brief-panel .brief-tabs button").forEach((x) =>
+      x.classList.toggle("on", x === b));
+    const sym = mk.cur?.symbol;
+    if (sym && briefCache.has(briefKey(sym, briefTab))) drawBrief(briefCache.get(briefKey(sym, briefTab))!);
+    else if (sym) { drawBrief("加载中…"); void loadBrief(sym, briefTab); }
+  });
   document.getElementById("btn-back")!.addEventListener("click", () => {
     if (!mk.from) return;
     document.dispatchEvent(new CustomEvent("yc:goto-page", { detail: mk.from.page }));

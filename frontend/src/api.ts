@@ -91,7 +91,15 @@ export const marketApi = {
     req<Kline>(`/market/kline?${new URLSearchParams(Object.entries(q).filter(([, v]) => v != null).map(([k, v]) => [k, String(v)]))}`),
   quote: (symbol: string) => req<Quote>(`/market/quote?symbol=${encodeURIComponent(symbol)}`),
   search: (q: string, limit = 10) => req<{ items: SearchHit[]; total: number }>(`/market/search?q=${encodeURIComponent(q)}&limit=${limit}`),
+  /* 实时资讯/研报（后端东财直连 + TTL 缓存，失败降级空列表） */
+  news: (symbol: string, limit = 12) => req<{ items: NewsItem[] }>(`/market/news?symbol=${encodeURIComponent(symbol)}&limit=${limit}`),
+  reports: (symbol: string, limit = 12) => req<{ items: ReportItem[] }>(`/market/reports?symbol=${encodeURIComponent(symbol)}&limit=${limit}`),
+  industryReports: (symbol: string, limit = 12) =>
+    req<{ industry: string; items: ReportItem[]; skipped?: boolean }>(`/market/industry-reports?symbol=${encodeURIComponent(symbol)}&limit=${limit}`),
 };
+
+export interface NewsItem { time: string; source: string; title: string; summary: string; url: string; }
+export interface ReportItem { date: string; org: string; rating: string; title: string; industry: string; url: string; }
 
 /* ── sectors ── */
 export interface SectorSummary {
