@@ -20,6 +20,8 @@ import time
 from datetime import date, timedelta
 from typing import Any, Dict, List, Optional
 
+import httpx
+
 from ..updater.collectors.http import client, _UA, pure_of
 from .symbol import INDEX_NAMES, TICKER_INDICES
 
@@ -51,6 +53,20 @@ def _cached(prefix: str, ttl: float):
     return deco
 
 
+_EM_TIMEOUT = 3.0        # 东财单请求超时：掐死连接时快速降级（曾 8s 卡死 quote 链路）
+
+
+def _em_get(url: str, *, params: dict, referer: str = _EM_REFERER) -> "httpx.Response":
+    """东财 GET：共享连接池失败（RemoteProtocolError=服务端掐死 keep-alive 连接）
+    时换一次性新连接重试一次，仍失败才抛出。避免 httpx 复用死连接反复 8s 挂起。"""
+    headers = {"User-Agent": _UA, "Referer": referer}
+    try:
+        return client.get(url, params=params, timeout=_EM_TIMEOUT, headers=headers)
+    except httpx.RemoteProtocolError:
+        with httpx.Client(http2=False) as tmp:
+            return tmp.get(url, params=params, timeout=_EM_TIMEOUT, headers=headers)
+
+
 def _norm_industry(name: Optional[str]) -> str:
     """行业名归一化：去掉东财分级后缀 Ⅰ/Ⅱ/Ⅲ，便于 universe.industry（一级名）比对。"""
     return _SUFFIX_RE.sub("", str(name or "").strip())
@@ -69,8 +85,8 @@ def stock_news(symbol: str, limit: int = 12) -> List[Dict[str, str]]:
         "param": {"cmsArticleWebOld": {"searchScope": "default", "sort": "time",
                   "pageIndex": 1, "pageSize": int(limit), "preTag": "", "postTag": ""}},
     }, separators=(",", ":"))
-    r = client.get(_SEARCH_API, params={"cb": "cb", "param": inner}, timeout=12,
-                   headers={"User-Agent": _UA, "Referer": "https://so.eastmoney.com/"})
+    r = _em_get(_SEARCH_API, params={"cb": "cb", "param": inner},
+                referer="https://so.eastmoney.com/")
     r.raise_for_status()
     text = r.text
     d = json.loads(text[text.index("(") + 1: text.rindex(")")])
@@ -88,82 +104,102 @@ def stock_news(symbol: str, limit: int = 12) -> List[Dict[str, str]]:
 
 
 # ---------------------------------------------------------------------------
-# 实时行情快照（东财 push2）：盘中价兜底，10s 缓存
+# 实时行情快照（腾讯批量 qt.gtimg.cn，策影同款源）：盘中价兜底，10s 缓存
 # ---------------------------------------------------------------------------
 
-_RT_FIELDS = "f43,f44,f45,f46,f47,f48,f60,f86,f169,f170,f57,f58"
+_TX_API = "https://qt.gtimg.cn/q="
+# 腾讯批量行情字段位（策影同款解析）：
+# 1=名称 3=现价 4=昨收 5=今开 31=涨跌额 32=涨跌幅% 33=最高 34=最低 36=成交量(手) 37=成交额(万元)
 
 
-def _secid_of(symbol: str) -> str:
-    """东财 secid：带后缀（000001.SH/399001.SZ）按后缀映射；裸码按首位数字猜。"""
+def _tx_symbol(symbol: str) -> str:
+    """腾讯形式：600519→sh600519、000001.SH→sh000001、399001.SZ→sz399001。
+
+    市场规则与策影一致：5/6/9→sh、4/8（含920段）→bj、其余→sz；
+    带市场后缀（.SH/.SZ/.BJ）直接按后缀。"""
     s = str(symbol).strip().upper()
+    code = s.split(".")[0] if "." in s else s
     if "." in s:
-        code, mkt = s.split(".", 1)
-        return f"1.{code}" if mkt == "SH" else f"0.{code}"
-    code = pure_of(s)
-    return f"1.{code}" if code.startswith(("6", "9", "5")) else f"0.{code}"
+        mkt = s.split(".")[1].lower()
+        return f"{mkt}{code}"
+    if code.startswith("920") or code[0] in "48":
+        return f"bj{code}"
+    return f"{'sh' if code[0] in '569' else 'sz'}{code}"
+
+
+def _tx_quotes(symbols: List[str]) -> Dict[str, Dict[str, Any]]:
+    """腾讯批量实时行情（一次 HTTP 拿多只，0.4s 级，比东财稳定）。
+
+    返回 {symbol: {name, price, prev_close, open, high, low, chg, pct, amount, volume}}；
+    amount 已换算为元，volume 为股。拉取失败的标的不在结果里。"""
+    if not symbols:
+        return {}
+    tx_list = [_tx_symbol(s) for s in symbols]
+    by_tx = dict(zip(tx_list, symbols))
+    by_code = {s.split(".")[0]: s for s in symbols}      # 6位码兜底（防 p[0] 形式变化）
+    out: Dict[str, Dict[str, Any]] = {}
+    for i in range(0, len(tx_list), 50):                 # 腾讯单次上限 50
+        batch = tx_list[i:i + 50]
+        try:
+            r = client.get(_TX_API + ",".join(batch), timeout=4,
+                           headers={"User-Agent": _UA, "Referer": "https://gu.qq.com/"})
+            r.raise_for_status()
+            r.encoding = "gbk"
+            lines = [l for l in r.text.strip().split(";") if "~" in l]
+        except Exception:
+            continue
+        for line in lines:
+            p = line.split("~")
+            if len(p) < 38 or not p[3]:
+                continue
+            num = lambda k: float(p[k]) if p[k] else None    # noqa: E731
+            # p[0] 形如 v_sh000001 → 'sh000001' 反查；再以 p[2] 6位码兜底
+            sym = by_tx.get(p[0].split("_", 1)[-1]) or by_code.get(p[2]) or p[2]
+            out[sym] = {
+                "name": p[1], "price": num(3), "prev_close": num(4),
+                "open": num(5), "high": num(33), "low": num(34),
+                "chg": num(31), "pct": num(32),
+                "amount": num(37) * 1e4 if num(37) is not None else None,   # 万元 → 元
+                "volume": num(36) * 100 if num(36) is not None else None,   # 手 → 股
+            }
+    return out
 
 
 @_cached("live:rt", 10)
 def realtime_quote(symbol: str) -> Optional[Dict[str, Any]]:
-    """东财实时快照。返回 {price, high, low, open, prev_close, pct, amount,
-    volume, ts}；secid 映射见 _secid_of（指数带后缀直达，如 000001.SH→1.000001）。"""
-    secid = _secid_of(symbol)
-    r = client.get("https://push2.eastmoney.com/api/qt/stock/get",
-                   params={"secid": secid, "fields": _RT_FIELDS, "invt": "2"},
-                   timeout=8, headers={"User-Agent": _UA, "Referer": _EM_REFERER})
-    r.raise_for_status()
-    d = (r.json().get("data") or {})
-    if not d.get("f43") or d.get("f43") == "-":
+    """实时快照（策影同款腾讯批量源，10s 缓存；失败 None 同样入缓存——
+    网络被掐时 10s 内不重复撞超时）。
+
+    返回 {price, high, low, open, prev_close, pct, amount, volume, ts}。"""
+    d = _tx_quotes([symbol]).get(symbol)
+    if not d or d.get("price") is None:
         return None
-    scale = 10 ** int(d.get("f59") or 2)     # 价格精度（北交所 3 位）
-    amt = d.get("f48")
-    vol = d.get("f47")
     return {
-        "price": d["f43"] / scale,
-        "high": d["f44"] / scale if isinstance(d.get("f44"), (int, float)) else None,
-        "low": d["f45"] / scale if isinstance(d.get("f45"), (int, float)) else None,
-        "open": d["f46"] / scale if isinstance(d.get("f46"), (int, float)) else None,
-        "prev_close": d["f60"] / scale if isinstance(d.get("f60"), (int, float)) else None,
-        "pct": d["f170"] / 100 if isinstance(d.get("f170"), (int, float)) else None,
-        "amount": amt if isinstance(amt, (int, float)) else None,        # f48 已是元
-        "volume": vol * 100 if isinstance(vol, (int, float)) else None,  # f47 单位手 → 股
-        "ts": time.strftime("%Y-%m-%d %H:%M", time.localtime(d["f86"])) if d.get("f86") else None,
+        "price": d["price"], "high": d["high"], "low": d["low"], "open": d["open"],
+        "prev_close": d["prev_close"],
+        "pct": d["pct"],                                     # 腾讯已是百分数
+        "amount": d["amount"], "volume": d["volume"],
+        "ts": time.strftime("%Y-%m-%d %H:%M"),
     }
 
 
 @_cached("live:idx", 10)
 def realtime_indices() -> Dict[str, Any]:
-    """常用指数批量实时（东财 push2 /qt/stock/get 逐个拉取，10s 缓存）：ticker 数据源。
+    """常用指数批量实时（策影同款腾讯批量源，一次 HTTP，10s 缓存）：ticker 数据源。
 
-    ulist.np 批量接口已被东财断连（RemoteProtocolError），退化为 7 次单标的
-    请求（与 realtime_quote 同端点，已验证可用）。返回
-    {"items": [{symbol, name, price, chg, pct, amount}], "total_amount": 沪+深之和}。
+    返回 {"items": [{symbol, name, price, chg, pct, amount}], "total_amount": 沪+深之和}；
+    pct 为小数（0.0063），前端 ×100 显示。
     """
+    raw = _tx_quotes([s for s, _, _ in TICKER_INDICES])
     out: List[Dict[str, Any]] = []
-    for sym, name, secid in TICKER_INDICES:
-        d: Dict[str, Any] = {}
-        for attempt in range(2):                    # 连发被东财偶发掐断，重试一次
-            try:
-                r = client.get("https://push2.eastmoney.com/api/qt/stock/get",
-                               params={"secid": secid, "fltt": "2", "invt": "2",
-                                       "fields": "f43,f48,f169,f170"},
-                               timeout=6, headers={"User-Agent": _UA, "Referer": _EM_REFERER})
-                r.raise_for_status()
-                d = (r.json().get("data") or {})
-                if d.get("f43") is not None:
-                    break
-            except Exception:
-                pass
-            time.sleep(0.25)
-        if d.get("f43") is None:
+    for sym, name, _secid in TICKER_INDICES:
+        d = raw.get(sym)
+        if not d:
             continue
-        price, chg, pct, amt = d.get("f43"), d.get("f169"), d.get("f170"), d.get("f48")
-        num = lambda v: v if isinstance(v, (int, float)) else None      # noqa: E731
-        out.append({"symbol": sym, "name": name, "price": num(price),
-                    "chg": num(chg),
-                    "pct": pct / 100 if isinstance(pct, (int, float)) else None,
-                    "amount": amt if isinstance(amt, (int, float)) else None})   # f48 已是元
+        out.append({"symbol": sym, "name": name, "price": d["price"],
+                    "chg": d["chg"],
+                    "pct": d["pct"] / 100 if d["pct"] is not None else None,
+                    "amount": d["amount"]})
     total = sum(i["amount"] for i in out
                 if i["amount"] and i["symbol"] in ("000001.SH", "399001.SZ"))
     return {"items": out, "total_amount": total}
@@ -196,8 +232,7 @@ def _fetch_reports(qtype: int, params_extra: Dict[str, Any],
         "beginTime": (end - timedelta(days=days)).isoformat(), "endTime": end.isoformat(),
         **params_extra,
     }
-    r = client.get(_REPORT_API, params=params, timeout=15,
-                   headers={"User-Agent": _UA, "Referer": _EM_REFERER})
+    r = _em_get(_REPORT_API, params=params)
     r.raise_for_status()
     return r.json().get("data") or []
 
@@ -234,10 +269,10 @@ def _industry_codes() -> Dict[str, str]:
     codes: Dict[str, str] = {}
     end = date.today()
     for page in range(1, 31):
-        r = client.get(_REPORT_API, params={
+        r = _em_get(_REPORT_API, params={
             "pageSize": "100", "pageNo": str(page), "qType": "1",
             "beginTime": (end - timedelta(days=90)).isoformat(), "endTime": end.isoformat(),
-        }, timeout=15, headers={"User-Agent": _UA, "Referer": _EM_REFERER})
+        })
         r.raise_for_status()
         rows = r.json().get("data") or []
         for k in rows:

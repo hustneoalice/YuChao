@@ -50,22 +50,27 @@ export async function openStock(s: CurStock, from?: { page: string; label: strin
   renderBackbar();
   document.dispatchEvent(new CustomEvent("yc:goto-page", { detail: "market" }));
   renderHeadLoading();
+  // K线先渲染不等 quote（东财实时快照慢/被掐时不再拖住首屏），
+  // quote 到达后单独补头部（涨跌胶囊/今开最高最低/实时价）
   try {
-    const [k, q] = await Promise.all([
-      // 后端 ORDER BY date ASC LIMIT N 语义为「取最早 N 根」：
-      // limit 提到 2000（单标的上市以来日线），前端再取尾部即最新行情
-      marketApi.kline({ symbol: s.symbol, limit: 2000 }),
-      marketApi.quote(s.symbol).catch(() => null),
-    ]);
+    const k = await marketApi.kline({ symbol: s.symbol, limit: 2000 });
+    if (mk.cur?.symbol !== s.symbol) return;   // 用户已切到别的标的，丢弃过期回包
     mk.bars = k.bars;
-    mk.quote = q;
+    mk.quote = null;
     renderStockHead();
     renderKline();
     renderRight();
     showBriefing();
   } catch (e) {
     toast((e as Error).message || "K线加载失败");
+    return;
   }
+  try {
+    const q = await marketApi.quote(s.symbol);
+    if (mk.cur?.symbol !== s.symbol || !q) return;
+    mk.quote = q;
+    renderStockHead();
+  } catch { /* 实时兜底失败：保持日线数据展示 */ }
 }
 
 /* ── K线下方资讯/研报面板（东财直连，后端 TTL 缓存；会话内按 symbol+tab 缓存） ── */
