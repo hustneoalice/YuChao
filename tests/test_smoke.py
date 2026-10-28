@@ -124,6 +124,40 @@ def test_data_status(client: TestClient):
     assert tables["stock_profile"]["rows"] == 0
 
 
+def test_index_kline_and_quote(client: TestClient, duckdb_file):
+    # 指数形态（000001.SH）不剥裸码：与个股 000001.SZ 歧义由后缀区分
+    import duckdb
+    from tests.conftest import _bars
+    con = duckdb.connect(duckdb_file)
+    con.executemany(
+        "INSERT OR REPLACE INTO daily_ohlcv VALUES (?,?,?,?,?,?,?,?,?,?)",
+        _bars("000001.SH", 40, 3000.0, 0.5))
+    con.executemany(
+        "INSERT OR REPLACE INTO daily_ohlcv VALUES (?,?,?,?,?,?,?,?,?,?)",
+        _bars("000001", 40, 10.0))
+    con.close()
+    r = client.get("/api/v1/market/kline?symbol=000001.SH&limit=10")
+    assert r.status_code == 200
+    k = r.json()
+    assert k["symbol"] == "000001.SH" and k["name"] == "上证指数"
+    assert 3000 < k["bars"][-1]["close"] < 3010        # 指数价级，非个股 10 元级
+    r = client.get("/api/v1/market/kline?symbol=000001&limit=1")
+    assert r.status_code == 200 and r.json()["symbol"] == "000001"  # 裸码仍走个股
+    r = client.get("/api/v1/market/quote?symbol=000001.SH")
+    assert r.status_code == 200
+    q = r.json()
+    assert q["name"] == "上证指数" and q.get("valuation") is None   # 指数无估值/资金流
+
+
+def test_market_indices_degrade(client: TestClient, monkeypatch):
+    # 东财不可达 → 空列表降级（不 5xx）
+    monkeypatch.setattr("app.foundation.live.realtime_indices",
+                        lambda: (_ for _ in ()).throw(RuntimeError("em down")))
+    r = client.get("/api/v1/market/indices")
+    assert r.status_code == 200
+    assert r.json() == {"items": [], "total_amount": 0}
+
+
 def test_data_update_trigger_202(client: TestClient, monkeypatch, tmp_path):
     # M2：501 桩 → 控制通道 202（updater 进程消费）
     monkeypatch.setattr("app.config.settings.control_requests_path",

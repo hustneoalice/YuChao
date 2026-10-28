@@ -43,6 +43,8 @@ def quote(symbol: str, conn=Depends(get_conn)):
         if rt:
             q["rt_price"] = rt["price"]
             q["rt_time"] = rt["ts"]
+            if rt.get("prev_close") is not None:
+                q["rt_prev_close"] = rt["prev_close"]   # 东财昨收：指数等跨源时防错位
             # 盘中（快照为今日）时用实时值覆盖价格字段，尾部日线日期改标实时时间
             if rt["ts"] and rt["ts"][:10] == date.today().isoformat():
                 q["date"] = rt["ts"]
@@ -66,6 +68,14 @@ def search(
 ):
     hits = repo.market.search(conn, q, limit)
     return Page(items=[SearchHit(**h) for h in hits], total=len(hits))
+
+
+@router.get("/market/indices", summary="指数 ticker 实时行情（东财批量，10s 缓存）")
+def indices():
+    try:
+        return live.realtime_indices()
+    except Exception:
+        return {"items": [], "total_amount": 0}
 
 
 # ── 实时资讯/研报（东财直连 + live 层 TTL 缓存；失败降级为空列表不 5xx） ──

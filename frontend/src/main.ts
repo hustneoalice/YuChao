@@ -268,11 +268,13 @@ function boot(): void {
   });
   sse.start();
 
-  // 启动默认视图：若本地有上次标的则恢复，否则空态
+  // 启动默认视图：有上次标的则恢复，否则默认上证指数（大盘即首页）
   const last = localStorage.getItem("yc_last_symbol");
   if (last) {
     const [symbol, name] = last.split("|");
     void openStock({ symbol, name: name || symbol });
+  } else {
+    void openStock({ symbol: "000001.SH", name: "上证指数" });
   }
 }
 

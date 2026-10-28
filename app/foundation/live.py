@@ -21,6 +21,7 @@ from datetime import date, timedelta
 from typing import Any, Dict, List, Optional
 
 from ..updater.collectors.http import client, _UA, pure_of
+from .symbol import INDEX_NAMES, TICKER_INDICES
 
 _CACHE: Dict[str, tuple[float, Any]] = {}          # key → (到期时间戳, 数据)
 
@@ -93,12 +94,21 @@ def stock_news(symbol: str, limit: int = 12) -> List[Dict[str, str]]:
 _RT_FIELDS = "f43,f44,f45,f46,f47,f48,f60,f86,f169,f170,f57,f58"
 
 
+def _secid_of(symbol: str) -> str:
+    """东财 secid：带后缀（000001.SH/399001.SZ）按后缀映射；裸码按首位数字猜。"""
+    s = str(symbol).strip().upper()
+    if "." in s:
+        code, mkt = s.split(".", 1)
+        return f"1.{code}" if mkt == "SH" else f"0.{code}"
+    code = pure_of(s)
+    return f"1.{code}" if code.startswith(("6", "9", "5")) else f"0.{code}"
+
+
 @_cached("live:rt", 10)
 def realtime_quote(symbol: str) -> Optional[Dict[str, Any]]:
     """东财实时快照。返回 {price, high, low, open, prev_close, pct, amount,
-    volume, ts}；secid 映射：sh→1. / sz·bj→0.（北交所 secid 亦走 0）。"""
-    code = pure_of(symbol)
-    secid = f"1.{code}" if code.startswith(("6", "9", "5")) else f"0.{code}"
+    volume, ts}；secid 映射见 _secid_of（指数带后缀直达，如 000001.SH→1.000001）。"""
+    secid = _secid_of(symbol)
     r = client.get("https://push2.eastmoney.com/api/qt/stock/get",
                    params={"secid": secid, "fields": _RT_FIELDS, "invt": "2"},
                    timeout=8, headers={"User-Agent": _UA, "Referer": _EM_REFERER})
@@ -116,10 +126,47 @@ def realtime_quote(symbol: str) -> Optional[Dict[str, Any]]:
         "open": d["f46"] / scale if isinstance(d.get("f46"), (int, float)) else None,
         "prev_close": d["f60"] / scale if isinstance(d.get("f60"), (int, float)) else None,
         "pct": d["f170"] / 100 if isinstance(d.get("f170"), (int, float)) else None,
-        "amount": amt * 10 if isinstance(amt, (int, float)) else None,   # f48 单位十元 → 元
+        "amount": amt if isinstance(amt, (int, float)) else None,        # f48 已是元
         "volume": vol * 100 if isinstance(vol, (int, float)) else None,  # f47 单位手 → 股
         "ts": time.strftime("%Y-%m-%d %H:%M", time.localtime(d["f86"])) if d.get("f86") else None,
     }
+
+
+@_cached("live:idx", 10)
+def realtime_indices() -> Dict[str, Any]:
+    """常用指数批量实时（东财 push2 /qt/stock/get 逐个拉取，10s 缓存）：ticker 数据源。
+
+    ulist.np 批量接口已被东财断连（RemoteProtocolError），退化为 7 次单标的
+    请求（与 realtime_quote 同端点，已验证可用）。返回
+    {"items": [{symbol, name, price, chg, pct, amount}], "total_amount": 沪+深之和}。
+    """
+    out: List[Dict[str, Any]] = []
+    for sym, name, secid in TICKER_INDICES:
+        d: Dict[str, Any] = {}
+        for attempt in range(2):                    # 连发被东财偶发掐断，重试一次
+            try:
+                r = client.get("https://push2.eastmoney.com/api/qt/stock/get",
+                               params={"secid": secid, "fltt": "2", "invt": "2",
+                                       "fields": "f43,f48,f169,f170"},
+                               timeout=6, headers={"User-Agent": _UA, "Referer": _EM_REFERER})
+                r.raise_for_status()
+                d = (r.json().get("data") or {})
+                if d.get("f43") is not None:
+                    break
+            except Exception:
+                pass
+            time.sleep(0.25)
+        if d.get("f43") is None:
+            continue
+        price, chg, pct, amt = d.get("f43"), d.get("f169"), d.get("f170"), d.get("f48")
+        num = lambda v: v if isinstance(v, (int, float)) else None      # noqa: E731
+        out.append({"symbol": sym, "name": name, "price": num(price),
+                    "chg": num(chg),
+                    "pct": pct / 100 if isinstance(pct, (int, float)) else None,
+                    "amount": amt if isinstance(amt, (int, float)) else None})   # f48 已是元
+    total = sum(i["amount"] for i in out
+                if i["amount"] and i["symbol"] in ("000001.SH", "399001.SZ"))
+    return {"items": out, "total_amount": total}
 
 
 # ---------------------------------------------------------------------------

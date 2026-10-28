@@ -50,19 +50,25 @@
     <section class="page on" id="page-market">
       <div class="mkt-row">
         <div class="kl-col">
+          <div class="tickerbar" id="tickerbar" title="常用指数实时 · 点击查看K线 · 悬停暂停滚动">
+            <div class="tk-track" id="tk-track"></div>
+          </div>
           <div class="stock-head">
             <div class="sh-l">
               <button class="backbtn" id="btn-back" hidden>
                 <span data-ic="arrow-left" data-sz="14"></span><span id="back-label">返回</span>
               </button>
               <div class="sh-name">
-                <b id="s-name">—</b><span class="sh-code num" id="s-code"></span>
-                <span class="tag flat" id="s-board" hidden></span>
+                <b id="s-name">—</b>
+                <span class="sh-badge b-sh" id="s-badge" hidden>SH</span>
+                <span class="sh-code num" id="s-code"></span>
+                <span class="sh-chip" id="s-industry" hidden></span>
+                <span class="sh-cons" id="s-concepts"></span>
               </div>
             </div>
             <div class="sh-price">
               <span class="p num" id="s-price">—</span>
-              <span class="c" id="s-chg"></span>
+              <span class="sh-pcaps up" id="s-chg"><i>—</i><b>—</b></span>
             </div>
             <div class="sh-stats" id="s-stats"></div>
           </div>
@@ -71,6 +77,9 @@
             <div class="chartbar">
               <span class="seg" id="kl-period">
                 <button class="on" data-p="d">日K</button><button data-p="w">周K</button><button data-p="m">月K</button>
+              </span>
+              <span class="seg" id="kl-layout" title="多周期布局：上下/四宫格只显主图，左右可带副图">
+                <button class="on" data-ly="single">单屏</button><button data-ly="h">左右</button><button data-ly="v">上下</button><button data-ly="quad">四宫格</button>
               </span>
               <span class="barsep"></span>
               <span class="seg" id="kl-view" title="观察档位：一键显示最近 N 根">
@@ -91,8 +100,7 @@
               <button class="hbtn" id="kl-ipanel-btn" title="指标管理：预设方案 · 分组显影">指标</button>
             </div>
             <div class="kl-stage" id="kl-stage">
-              <div class="legend" id="kl-legend"></div>
-              <div class="kl-main" id="kl-main"></div>
+              <div class="kl-panels" id="kl-panels"></div>
               <div class="empty" id="kl-empty" style="display:none">
                 <span data-ic="chart-line" data-sz="30" style="color:var(--faint)"></span>
                 <b>选择一个标的开始看盘</b>

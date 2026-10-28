@@ -129,6 +129,8 @@ export interface KlineChartHandle {
   setData: (bars: Bar[]) => void;
   /** 主图多选叠加：增量增删，不动已叠加的同名指标 */
   setMain: (inds: MainKey[]) => void;
+  /** 图内右上角指标图例（MA/BOLL/操盘通道，色块+名称；多面板时每实例一份） */
+  drawLegend: (inds: MainKey[]) => void;
   /** 副图多选：每个指标一个窗格，高度均分（策影 autoLayout 同款） */
   setSub: (inds: SubKey[]) => void;
   /** 当前周期（d/w/m）：决定十字光标卡片的标题形态 */
@@ -250,6 +252,35 @@ export function mountKline(el: HTMLElement): KlineChartHandle {
   tip.style.display = "none";
   el.appendChild(tip);
   let period: TipPeriod = "d";
+
+  /* ── 图内右上角指标图例：色块 + 名称；操盘通道按本面板数据判多空 ── */
+  const legend = document.createElement("div");
+  legend.className = "legend";
+  el.appendChild(legend);
+  const drawLegend = (inds: MainKey[]) => {
+    const accC = cssv("--accent") || "#FF9F43", p1C = "#0A84FF", vipC = cssv("--vip") || "#FFD60A";
+    const dimC = cssv("--dim") || "#A1A1A6";
+    const parts: string[] = [];
+    if (inds.includes("ma"))
+      parts.push(`<span><i style="background:${accC}"></i>MA5</span><span><i style="background:${p1C}"></i>MA10</span><span><i style="background:${vipC}"></i>MA20</span>`);
+    if (inds.includes("boll"))
+      parts.push(`<span><i style="background:${dimC}"></i>BOLL(20,2)</span>`);
+    const list = chart.getDataList() as { close: number }[];
+    for (const k of inds) {
+      if (k !== "short" && k !== "mid") continue;
+      const n = k === "short" ? 10 : 45;
+      const closes = list.map((b) => b.close);
+      const last = closes[closes.length - 1];
+      const ma = closes.length >= n ? closes.slice(-n).reduce((s, v) => s + v, 0) / n : null;
+      const strong = ma != null && last > ma;
+      const fill = strong ? "rgba(255,155,87,.82)" : "rgba(90,88,251,.86)";
+      parts.push(`<span><i style="background:${CH_FAST}"></i>${k === "short" ? "短线" : "中线"}快线</span>` +
+        `<span><i style="background:${CH_SLOW}"></i>慢线</span>` +
+        `<span><i style="background:${fill}"></i>${strong ? "多头 · 偏强" : "空头 · 偏弱"}</span>`);
+    }
+    legend.innerHTML = parts.join("");
+    legend.style.display = parts.length ? "flex" : "none";
+  };
 
   const onCross = (...args: unknown[]) => {
     const ch = args[0] as { x?: number; y?: number } | null;
@@ -385,7 +416,7 @@ export function mountKline(el: HTMLElement): KlineChartHandle {
 
   const handle: KlineChartHandle = {
     chart,
-    setData(bars: Bar[]) {
+    setData: (bars: Bar[]) => {
       const list = bars.map((b) => ({
         timestamp: toTs(b.date), open: b.open, high: b.high, low: b.low,
         close: b.close, volume: b.volume ?? 0, amount: b.amount ?? 0,
@@ -477,11 +508,13 @@ export function mountKline(el: HTMLElement): KlineChartHandle {
       } catch { /* 忽略 */ }
     },
     navRefresh() { requestAnimationFrame(navDraw); },
+    drawLegend,
     retheme() { chart.setStyles(styles()); requestAnimationFrame(navDraw); },
     resize() { chart.resize(); requestAnimationFrame(navDraw); },
     destroy() {
       try { chart.unsubscribeAction("onCrosshairChange", onCross as never); } catch { /* 忽略 */ }
       tip.remove();
+      legend.remove();
       nav.remove();
       dispose(el);
     },

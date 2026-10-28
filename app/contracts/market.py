@@ -76,6 +76,7 @@ class Quote(BaseModel):
     # 盘中实时兜底（东财 push2 快照，非盘中/拉取失败时为 None，价格仍为日线收盘）
     rt_price: Optional[float] = None
     rt_time: Optional[str] = None          # "YYYY-MM-DD HH:MM" 快照时间（东财 f86）
+    rt_prev_close: Optional[float] = None  # 东财昨收：实时涨跌额的跨源基准
 
 
 class SearchHit(BaseModel):

@@ -2,7 +2,7 @@
 from typing import Optional
 
 from .. import db
-from ..symbol import normalize_symbol
+from ..symbol import INDEX_NAMES, index_form, normalize_symbol
 from ...errors import not_found
 from ...contracts.common import Adjust
 from ...foundation.indicators import standard_indicators
@@ -19,6 +19,19 @@ def universe_entry(conn, symbol: str) -> Optional[dict]:
     return dict(zip(_UNIVERSE_COLS.replace(", ", ",").split(","), row))
 
 
+def _index_entry(conn, symbol: str) -> Optional[dict]:
+    """指数形态（000001.SH）且 daily_ohlcv 有数据 → 返回替代条目，避免裸码歧义。"""
+    idx = index_form(symbol)
+    if idx is None:
+        return None
+    if not conn.execute(
+        "SELECT 1 FROM daily_ohlcv WHERE symbol = ? LIMIT 1", [idx]
+    ).fetchone():
+        return None
+    return {"symbol": idx, "name": INDEX_NAMES.get(idx),
+            "market": idx.split(".")[1].lower(), "industry": None, "status": None}
+
+
 def get_kline(
     conn,
     symbol: str,
@@ -28,15 +41,21 @@ def get_kline(
     end: Optional[str] = None,
     limit: int = 500,
 ) -> dict:
-    """K 线：复权口径由 PRICE_VIEW_DDL 的视图保证（qfq 看盘 / hfq 收益 / raw 原始价）。"""
-    symbol = normalize_symbol(symbol)
-    meta = universe_entry(conn, symbol)
+    """K 线：复权口径由 PRICE_VIEW_DDL 的视图保证（qfq 看盘 / hfq 收益 / raw 原始价）。
+
+    指数（000001.SH 等带后缀形态）优先走指数分支：不剥裸码（否则与个股
+    000001.SZ 歧义），名称取常用指数表，无因子自动退化为原始价。
+    """
+    meta = _index_entry(conn, symbol)
+    symbol = meta["symbol"] if meta else normalize_symbol(symbol)
     if meta is None:
-        # 指数等池外品种：daily_ohlcv 有数据即放行，名称留空
-        if not conn.execute(
-            "SELECT 1 FROM daily_ohlcv WHERE symbol = ? LIMIT 1", [symbol]
-        ).fetchone():
-            raise not_found(f"未收录标的：{symbol}", {"symbol": symbol})
+        meta = universe_entry(conn, symbol)
+        if meta is None:
+            # 指数等池外品种：daily_ohlcv 有数据即放行，名称留空
+            if not conn.execute(
+                "SELECT 1 FROM daily_ohlcv WHERE symbol = ? LIMIT 1", [symbol]
+            ).fetchone():
+                raise not_found(f"未收录标的：{symbol}", {"symbol": symbol})
 
     src = db.source_for(adjust.value)
     conds, params = ["symbol = ?"], [symbol]
@@ -79,7 +98,24 @@ def get_kline(
 
 
 def get_quote(conn, symbol: str) -> dict:
-    """快照 = 最新日线（qfq 口径）+ 估值 + 当日资金流 + 池内档案。"""
+    """快照 = 最新日线（qfq 口径）+ 估值 + 当日资金流 + 池内档案；指数走精简分支。"""
+    meta = _index_entry(conn, symbol)
+    if meta is not None:
+        # 指数快照：仅最新日线（估值/资金流/档案均不适用）
+        bar_row = conn.execute(
+            """
+            SELECT date, open, high, low, close, volume, amount, pct_chg, turnover_rate
+            FROM v_daily_ohlcv_qfq WHERE symbol = ? ORDER BY date DESC LIMIT 1
+            """,
+            [meta["symbol"]],
+        ).fetchone()
+        if bar_row is None:
+            raise not_found(f"未收录标的：{meta['symbol']}", {"symbol": meta["symbol"]})
+        keys = ["date", "open", "high", "low", "close", "volume", "amount", "pct_chg", "turnover_rate"]
+        out = {**meta, **dict(zip(keys, bar_row))}
+        out["date"] = str(out["date"])
+        return out
+
     symbol = normalize_symbol(symbol)
     meta = universe_entry(conn, symbol)
     bar_row = conn.execute(

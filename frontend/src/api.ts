@@ -82,17 +82,22 @@ export interface Quote {
   date?: string; open?: number; high?: number; low?: number; close?: number;
   pct_chg?: number; volume?: number; amount?: number; turnover_rate?: number;
   /* 盘中实时兜底（后端东财 push2 快照，10s 缓存；非盘中/失败时缺省） */
-  rt_price?: number; rt_time?: string;
+  rt_price?: number; rt_time?: string; rt_prev_close?: number;
   valuation?: { date: string; pe_ttm?: number; pb?: number; ps_ttm?: number; total_mv?: number; circ_mv?: number } | null;
   capital_flow?: { date: string; net_main?: number; net_super?: number; net_large?: number; net_medium?: number; net_small?: number } | null;
 }
 export interface SearchHit { symbol: string; name?: string; market?: string; industry?: string; status?: string }
 
+export interface IndexQuote {
+  symbol: string; name: string; price?: number | null; chg?: number | null;
+  pct?: number | null; amount?: number | null;
+}
 export const marketApi = {
   kline: (q: { symbol: string; adjust?: string; with?: string; limit?: number; start?: string; end?: string }) =>
     req<Kline>(`/market/kline?${new URLSearchParams(Object.entries(q).filter(([, v]) => v != null).map(([k, v]) => [k, String(v)]))}`),
   quote: (symbol: string) => req<Quote>(`/market/quote?symbol=${encodeURIComponent(symbol)}`),
   search: (q: string, limit = 10) => req<{ items: SearchHit[]; total: number }>(`/market/search?q=${encodeURIComponent(q)}&limit=${limit}`),
+  indices: () => req<{ items: IndexQuote[]; total_amount?: number }>("/market/indices"),
   /* 实时资讯/研报（后端东财直连 + TTL 缓存，失败降级空列表） */
   news: (symbol: string, limit = 12) => req<{ items: NewsItem[] }>(`/market/news?symbol=${encodeURIComponent(symbol)}&limit=${limit}`),
   reports: (symbol: string, limit = 12) => req<{ items: ReportItem[] }>(`/market/reports?symbol=${encodeURIComponent(symbol)}&limit=${limit}`),
