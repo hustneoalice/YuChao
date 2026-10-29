@@ -1,9 +1,9 @@
 /* 入口：导航 / 全局搜索 / 主题 / SSE 接线 / 启动 */
 import "./styles.css";
 import { ic, injectIcons } from "./icons";
-import { marketApi } from "./api";
+import { authApi, getToken, marketApi } from "./api";
 import { fmtChg } from "./fmt";
-import { applyAppearance, getState, patch, subscribe } from "./store";
+import { applyAppearance, getState, patch, setUser, subscribe } from "./store";
 import { toast } from "./ui";
 import { initAuth, refreshVipUI } from "./auth";
 import { initMarket, klResize, openStock, renderKline, renderRight } from "./pages/market";
@@ -12,6 +12,7 @@ import { initSectors, loadSectors } from "./pages/sectors";
 import { initCorepicks, renderCorepicks } from "./pages/corepicks";
 import { initCards, renderCards } from "./pages/cards";
 import { initSettings, refreshDatachip, openSettingsTab } from "./pages/settings";
+import { initSync, pullOnLogin } from "./sync";
 import { SseClient } from "./sse";
 
 const loaded = { watchlist: false, sectors: false, corepicks: false };
@@ -215,6 +216,7 @@ function boot(): void {
   initSectors();
   initCards();
   initSettings();
+  initSync();                 // F04：本地变更→云推送；带 token 启动→静默拉取合并
 
   // 主题按钮
   const btn = document.getElementById("btn-theme")!;
@@ -275,6 +277,18 @@ function boot(): void {
     void openStock({ symbol, name: name || symbol });
   } else {
     void openStock({ symbol: "000001.SH", name: "上证指数" });
+  }
+
+  // 带令牌启动：恢复会话 + 云设置拉取（静默，失败保持本地态）
+  if (getToken()) {
+    void authApi.me().then((u) => {
+      setUser(u);
+      refreshVipUI();
+      void pullOnLogin().then(() => {
+        document.dispatchEvent(new CustomEvent("yc:kprefs"));
+        if (document.getElementById("page-watchlist")?.classList.contains("on")) renderWatchlist();
+      });
+    }).catch(() => { /* 令牌无效：req 已派发 yc:auth-expired */ });
   }
 }
 

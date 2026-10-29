@@ -35,7 +35,7 @@ def register(body: RegisterIn):
 @router.post("/auth/login", response_model=TokenPair, summary="登录（邮箱或用户名）")
 def login(body: LoginIn):
     try:
-        out = service.login(body.identifier, body.password)
+        out = service.login(body.identifier, body.password, body.remember)
     except service.AuthError as e:
         raise ApiError("auth_error", e.message, e.status_code)
     out["user"] = _TYPE_USER.validate_python(out["user"])

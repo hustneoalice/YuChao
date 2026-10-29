@@ -14,6 +14,7 @@ class RegisterIn(BaseModel):
 class LoginIn(BaseModel):
     identifier: str = Field(..., description="邮箱或用户名")
     password: str = Field(...)
+    remember: bool = Field(True, description="记住我：30 天令牌；否则 1 天")
 
 
 class UserPublic(BaseModel):
@@ -55,3 +56,43 @@ class ActivationCode(BaseModel):
     status: str
     redeemed_by: Optional[str] = None
     redeemed_at: Optional[datetime] = None
+
+
+# ── F04 · 按用户设置云同步 ────────────────────────────────────────────────
+
+class PrefsIn(BaseModel):
+    prefs: dict = Field(..., description="偏好键值（深合并写入）")
+
+
+class PrefsOut(BaseModel):
+    prefs: dict
+
+
+class WatchItem(BaseModel):
+    symbol: str = Field(..., max_length=16)
+    name: str = ""
+    group: str = "默认"
+    ts: Optional[str] = None                 # ISO 时间（None 则服务端补）
+
+
+class WatchlistIn(BaseModel):
+    items: list[WatchItem] = Field(..., max_length=500)
+
+
+class WatchlistOut(BaseModel):
+    items: list[WatchItem]
+
+
+class CardItem(BaseModel):
+    card_id: str = Field(..., max_length=32)
+    enabled: bool = True
+    sort: int = 0
+    mode: str = "simple"                     # simple | detailed
+
+
+class CardsIn(BaseModel):
+    items: list[CardItem]
+
+
+class CardsOut(BaseModel):
+    items: list[CardItem]

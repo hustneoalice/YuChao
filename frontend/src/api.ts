@@ -48,6 +48,11 @@ async function req<T>(path: string, init?: ReqOpts): Promise<T> {
       if (typeof j.message === "string") message = j.message;
       detail = j.detail ?? null;
     } catch { /* 非 JSON 错误体 */ }
+    // 401 会话过期（登录/注册接口本身除外）：清令牌并广播，auth.ts 弹登录
+    if (res.status === 401 && !path.startsWith("/auth/")) {
+      setToken(null);
+      window.dispatchEvent(new CustomEvent("yc:auth-expired"));
+    }
     throw new ApiError(res.status, code, message, detail);
   }
   if (init?.raw) return res as unknown as T;
@@ -65,9 +70,24 @@ export interface TokenPair { token: string; user: UserPublic }
 export const authApi = {
   register: (p: { email: string; password: string; username?: string }) =>
     req<TokenPair>("/auth/register", { method: "POST", body: p }),
-  login: (p: { identifier: string; password: string }) =>
+  login: (p: { identifier: string; password: string; remember?: boolean }) =>
     req<TokenPair>("/auth/login", { method: "POST", body: p }),
   me: () => req<UserPublic>("/auth/me"),
+};
+
+/* ── F04 · 按用户设置云同步 ── */
+export interface WatchItem { symbol: string; name: string; group: string; ts?: string | null }
+export interface CardItem { card_id: string; enabled: boolean; sort: number; mode: string }
+export const meApi = {
+  prefs: () => req<{ prefs: Record<string, unknown> }>("/me/prefs"),
+  putPrefs: (prefs: Record<string, unknown>) =>
+    req<{ prefs: Record<string, unknown> }>("/me/prefs", { method: "PUT", body: { prefs } }),
+  watchlist: () => req<{ items: WatchItem[] }>("/me/watchlist"),
+  putWatchlist: (items: WatchItem[]) =>
+    req<{ items: WatchItem[] }>("/me/watchlist", { method: "PUT", body: { items } }),
+  cards: () => req<{ items: CardItem[] }>("/me/cards"),
+  putCards: (items: CardItem[]) =>
+    req<{ items: CardItem[] }>("/me/cards", { method: "PUT", body: { items } }),
 };
 
 /* ── market ── */

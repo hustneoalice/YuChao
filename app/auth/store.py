@@ -50,7 +50,8 @@ CREATE TABLE IF NOT EXISTS orders (
 CREATE TABLE IF NOT EXISTS watchlists (
     user_id TEXT NOT NULL,
     symbol TEXT NOT NULL,                    -- 自选 ≤500（服务层校验）
-    group_id TEXT,
+    group_id TEXT,                           -- 分组名（前端以名字管理分组）
+    name TEXT,                               -- 标的名称（F04 云同步）
     note TEXT,
     created_at TEXT NOT NULL,
     PRIMARY KEY (user_id, symbol)
@@ -66,6 +67,7 @@ CREATE TABLE IF NOT EXISTS card_config (
     card_id TEXT NOT NULL,                   -- 卡片启停排序；停用保留配置
     enabled INTEGER NOT NULL DEFAULT 1,
     sort INTEGER DEFAULT 0,
+    mode TEXT NOT NULL DEFAULT 'simple',     -- simple | detailed（F04）
     PRIMARY KEY (user_id, card_id)
 );
 CREATE TABLE IF NOT EXISTS feishu_config (
@@ -84,6 +86,19 @@ CREATE TABLE IF NOT EXISTS llm_config (
 
 _init_lock = threading.Lock()
 _init_for: Path | None = None
+
+
+def _migrate(conn: sqlite3.Connection) -> None:
+    """旧库补列（幂等）：CREATE TABLE IF NOT EXISTS 不会改已有表结构。"""
+    for stmt in (
+        "ALTER TABLE watchlists ADD COLUMN name TEXT",
+        "ALTER TABLE card_config ADD COLUMN mode TEXT NOT NULL DEFAULT 'simple'",
+    ):
+        try:
+            conn.execute(stmt)
+        except sqlite3.OperationalError:
+            pass                             # 列已存在
+    conn.commit()
 
 
 def _connect(path: Path) -> sqlite3.Connection:
@@ -105,6 +120,7 @@ def get_conn() -> sqlite3.Connection:
             if _init_for != path:
                 c = _connect(path)
                 c.executescript(SCHEMA)
+                _migrate(c)
                 c.commit()
                 c.close()
                 _init_for = path

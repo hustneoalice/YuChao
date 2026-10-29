@@ -3,12 +3,12 @@ import { marketApi, type Bar, type IndexQuote, type Quote } from "../api";
 import { cssv, esc, fmt, fmtChg, fmtYi } from "../fmt";
 import { sma, bollSeries, kdjSeries, atrSeries, sixSegment } from "../indicators";
 import { ic } from "../icons";
-import { CARD_DEFS, getState, setCardPref, subscribe } from "../store";
+import { CARD_DEFS, getState, notifyLocal, setCardPref, subscribe } from "../store";
 import { openModal, toast } from "../ui";
 import { mountKline, type KlineChartHandle, type MainKey, type SubKey } from "./kline";
 
-const CH_FAST = "#FF9800";
-const CH_SLOW = "#0A84FF";
+const CH_FAST = "#C084FC";   // 方案 B · 紫罗兰（与 kline.ts 趋势通道一致）
+const CH_SLOW = "#2DD4BF";   // 方案 B · 青绿
 
 export const SEG6 = ["超卖", "低位", "弱势", "回升", "强势", "超买"];
 export const SEGNAME = ["", "超卖", "低位", "弱势", "回升", "强势", "超买"];
@@ -43,6 +43,28 @@ export const mk = {
 };
 if (!LAYOUT_PANELS[mk.layout]) mk.layout = "single";
 mk.panels = [...LAYOUT_PANELS[mk.layout]];
+
+/* K线偏好持久化（F04：本地 + sync.ts 云同步）——主/副图指标集合 */
+const KMAIN_OK: MainKey[] = ["ma", "boll", "short", "mid", "avg"];
+const KSUB_OK: SubKey[] = ["vol", "macd", "kdj", "rsi"];
+function readInds<T extends string>(key: string, ok: T[], fb: T[]): T[] {
+  try {
+    const v = JSON.parse(localStorage.getItem(key) || "") as unknown;
+    if (Array.isArray(v)) {
+      const f = v.filter((x): x is T => typeof x === "string" && ok.includes(x as T));
+      if (v.length === 0 || f.length) return f;   // 空数组合法（极简预设）
+    }
+  } catch { /* 忽略坏值 */ }
+  return fb;
+}
+mk.mainInds = readInds("yc_kmain", KMAIN_OK, mk.mainInds);
+mk.subInds = readInds("yc_ksub", KSUB_OK, mk.subInds);
+
+function saveKPrefs(): void {
+  localStorage.setItem("yc_kmain", JSON.stringify(mk.mainInds));
+  localStorage.setItem("yc_ksub", JSON.stringify(mk.subInds));
+  notifyLocal("prefs");
+}
 
 /* ── 载入 ── */
 export async function openStock(s: CurStock, from?: { page: string; label: string } | null): Promise<void> {
@@ -260,6 +282,7 @@ export function initMarket(): void {
     if (!b) return;
     mk.layout = b.dataset.ly as KLayout;
     localStorage.setItem("yc_klayout", mk.layout);
+    notifyLocal("prefs");
     toggleSeg("kl-layout", b);
     mk.active = 0;
     mk.panels = [...LAYOUT_PANELS[mk.layout]];
@@ -300,6 +323,7 @@ export function initMarket(): void {
       b.classList.toggle("on");
       mk.mainInds = [...document.querySelectorAll<HTMLElement>("#kl-main-ind button.on")]
         .map((x) => x.dataset.mi as MainKey);
+      saveKPrefs();
       syncIndUI();
       renderKline();
     }
@@ -310,6 +334,7 @@ export function initMarket(): void {
       b.classList.toggle("on");
       mk.subInds = [...document.querySelectorAll<HTMLElement>("#kl-sub-ind button.on")]
         .map((x) => x.dataset.si as SubKey);
+      saveKPrefs();
       syncIndUI();
       renderKline();
     }
@@ -328,7 +353,7 @@ export function initMarket(): void {
     document.querySelectorAll("#kl-view button").forEach((x) => x.classList.remove("on"));
     activeKl()?.resetView();
   });
-  // 智能高度开关（策影同款）：主图/副图 3.6:1 自适应分配，持久化
+  // 智能高度开关（策影同款）：主图/副图 3.6:1 自适应分配，持久化 + 云同步
   const autoBtn = document.getElementById("kl-auto")!;
   if (localStorage.getItem("yc_autoh") === "0") autoBtn.classList.remove("on");
   autoBtn.addEventListener("click", () => {
@@ -336,6 +361,7 @@ export function initMarket(): void {
     autoBtn.classList.toggle("on", on);
     localStorage.setItem("yc_autoh", on ? "1" : "0");
     kls.forEach((k) => k?.applyHeights());
+    notifyLocal("prefs");
   });
   // 指标管理面板：开关 + 分组多选（与 chartbar seg 同源互通）+ 预设方案
   const ipanel = document.getElementById("kl-ipanel")!;
@@ -363,6 +389,7 @@ export function initMarket(): void {
       };
       const p = pre[b.dataset.pre];
       mk.mainInds = [...p.m]; mk.subInds = [...p.s];
+      saveKPrefs();
       syncIndUI();
       renderKline();
       return;
@@ -373,6 +400,7 @@ export function initMarket(): void {
       mk.mainInds = [...ipanel.querySelectorAll<HTMLElement>(".iprow button[data-mi].on")].map((x) => x.dataset.mi as MainKey);
     else
       mk.subInds = [...ipanel.querySelectorAll<HTMLElement>(".iprow button[data-si].on")].map((x) => x.dataset.si as SubKey);
+    saveKPrefs();
     syncIndUI();
     renderKline();
   });
@@ -389,6 +417,22 @@ export function initMarket(): void {
     kls.forEach((k) => k?.drawLegend(mk.mainInds));
     applyRcolW();
     renderRight();
+  });
+  // 云设置回放（sync.ts applyPrefs 触发）：layout/指标从 localStorage 重读热应用
+  document.addEventListener("yc:kprefs", () => {
+    const l = localStorage.getItem("yc_klayout") as KLayout | null;
+    if (l && LAYOUT_PANELS[l] && l !== mk.layout) {
+      mk.layout = l;
+      mk.panels = [...LAYOUT_PANELS[l]];
+      initLayoutSeg();
+      mk.active = 0;
+      renderKline();
+      syncPeriodSeg(mk.panels[0]);
+    }
+    mk.mainInds = readInds("yc_kmain", KMAIN_OK, mk.mainInds);
+    mk.subInds = readInds("yc_ksub", KSUB_OK, mk.subInds);
+    syncIndUI();
+    renderKline();
   });
 }
 

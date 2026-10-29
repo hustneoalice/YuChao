@@ -281,7 +281,7 @@
   <div class="mhead"><h3 id="auth-title">登录</h3>
     <span class="sp"></span>
     <button class="mclose" data-close><span data-ic="x" data-sz="13"></span></button></div>
-  <p class="mdesc" id="auth-desc">登录后同步自选与 VIP 权益；行情数据无需登录即可浏览。</p>
+  <p class="mdesc" id="auth-desc">登录后自选、外观与图表设置云同步，多端一致；行情数据无需登录即可浏览。</p>
   <div class="auth-tabs">
     <span class="seg" id="auth-tabs">
       <button class="on" data-t="login">登录</button><button data-t="register">注册</button>
@@ -291,6 +291,9 @@
     <input class="field" id="auth-id" placeholder="邮箱（注册后可用用户名登录）" autocomplete="username">
     <input class="field" id="auth-user" placeholder="用户名（可选，3-20 位字母数字）" style="display:none" autocomplete="off">
     <input class="field" id="auth-pwd" type="password" placeholder="密码（≥ 8 位）" autocomplete="current-password">
+    <label id="auth-remember-row" style="display:flex;align-items:center;gap:6px;font-size:12px;color:var(--dim);cursor:pointer;user-select:none">
+      <input type="checkbox" id="auth-remember" checked style="accent-color:var(--brand)">记住我（30 天内免登录）
+    </label>
     <button class="hbtn primary" id="auth-go" style="justify-content:center;height:34px">登录</button>
     <span id="auth-err" style="font-size:11.5px;color:var(--up);display:none"></span>
   </div>

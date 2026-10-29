@@ -8,6 +8,7 @@
 """
 import hashlib
 import hmac
+import json
 import logging
 import re
 import secrets
@@ -42,10 +43,12 @@ def hash_password(password: str, salt: str) -> str:
     return dk.hex()
 
 
-def issue_token(user_id: str, email: str, tier: str, role: str) -> str:
+def issue_token(user_id: str, email: str, tier: str, role: str,
+                ttl_days: int | None = None) -> str:
     now = datetime.now(timezone.utc)
     payload = {"sub": str(user_id), "email": email, "tier": tier, "role": role,
-               "exp": now + timedelta(days=settings.token_ttl_days), "iat": now}
+               "exp": now + timedelta(days=ttl_days or settings.token_ttl_days),
+               "iat": now}
     return jwt.encode(payload, settings.jwt_secret, algorithm=ALGORITHM)
 
 
@@ -90,7 +93,7 @@ def register(email: str, password: str, username: str | None = None) -> dict:
                      "tier": "free", "role": "user"}}
 
 
-def login(identifier: str, password: str) -> dict:
+def login(identifier: str, password: str, remember: bool = True) -> dict:
     identifier = (identifier or "").strip()
     is_email = bool(EMAIL_RE.match(identifier))
     if is_email:
@@ -107,7 +110,9 @@ def login(identifier: str, password: str) -> dict:
             hash_password(password or "", row["salt"]), row["password_hash"]):
         raise AuthError("用户名/邮箱或密码错误", 401)
     user = _public_user(dict(row))
-    return {"token": issue_token(row["id"], row["email"], user["tier"], user["role"]),
+    # 记住我：30 天；否则 1 天会话令牌（TradingView 同款语义）
+    ttl = settings.token_ttl_days if remember else 1
+    return {"token": issue_token(row["id"], row["email"], user["tier"], user["role"], ttl),
             "user": user}
 
 
@@ -209,3 +214,122 @@ def list_codes(limit: int = 100) -> list[dict]:
         return [dict(r) for r in rows]
     finally:
         conn.close()
+
+
+# -- F04 · 按用户设置云同步 -------------------------------------------------
+
+PREFS_LIMIT = 64 * 1024                    # prefs_json 体积上限（防滥用）
+
+
+def get_prefs(user_id: str) -> dict:
+    conn = get_conn()
+    try:
+        row = conn.execute(
+            "SELECT prefs_json FROM user_prefs WHERE user_id=?", (user_id,)).fetchone()
+        return json.loads(row["prefs_json"]) if row else {}
+    finally:
+        conn.close()
+
+
+def put_prefs(user_id: str, prefs: dict) -> dict:
+    """深合并写入：部分键更新不影响其他键（多端并存）。"""
+    def merge(base: dict, patch: dict) -> dict:
+        out = dict(base)
+        for k, v in (patch or {}).items():
+            if isinstance(v, dict) and isinstance(out.get(k), dict):
+                out[k] = merge(out[k], v)
+            else:
+                out[k] = v
+        return out
+
+    stored = merge(get_prefs(user_id), prefs)
+    raw = json.dumps(stored, ensure_ascii=False)
+    if len(raw) > PREFS_LIMIT:
+        raise AuthError("偏好数据过大")
+    conn = get_conn()
+    try:
+        conn.execute(
+            "INSERT INTO user_prefs (user_id, prefs_json) VALUES (?,?) "
+            "ON CONFLICT(user_id) DO UPDATE SET prefs_json=excluded.prefs_json",
+            (user_id, raw))
+        conn.commit()
+    finally:
+        conn.close()
+    return stored
+
+
+def get_watchlist(user_id: str) -> list[dict]:
+    conn = get_conn()
+    try:
+        rows = conn.execute(
+            "SELECT symbol, name, group_id, created_at FROM watchlists "
+            "WHERE user_id=? ORDER BY created_at DESC, symbol", (user_id,)).fetchall()
+    finally:
+        conn.close()
+    return [{"symbol": r["symbol"], "name": r["name"] or r["symbol"],
+             "group": r["group_id"] or "默认", "ts": r["created_at"]} for r in rows]
+
+
+def put_watchlist(user_id: str, items: list[dict]) -> list[dict]:
+    """整表替换（前端拥有状态，服务端只存）：≤500 条。"""
+    if len(items) > 500:
+        raise AuthError("自选最多 500 条")
+    now = datetime.now().isoformat(timespec="seconds")
+    rows = []
+    seen: set[str] = set()
+    for it in items:
+        sym = str(it.get("symbol") or "").strip()
+        if not sym or sym in seen:
+            continue
+        seen.add(sym)
+        rows.append((user_id, sym, str(it.get("group") or "默认"),
+                     str(it.get("name") or sym), now))
+    conn = get_conn()
+    try:
+        conn.execute("BEGIN")
+        conn.execute("DELETE FROM watchlists WHERE user_id=?", (user_id,))
+        conn.executemany(
+            "INSERT INTO watchlists (user_id, symbol, group_id, name, created_at) "
+            "VALUES (?,?,?,?,?)", rows)
+        conn.commit()
+    except Exception:
+        conn.rollback()
+        raise
+    finally:
+        conn.close()
+    return get_watchlist(user_id)
+
+
+def get_cards(user_id: str) -> list[dict]:
+    conn = get_conn()
+    try:
+        rows = conn.execute(
+            "SELECT card_id, enabled, sort, mode FROM card_config "
+            "WHERE user_id=? ORDER BY sort, card_id", (user_id,)).fetchall()
+    finally:
+        conn.close()
+    return [{"card_id": r["card_id"], "enabled": bool(r["enabled"]),
+             "sort": r["sort"], "mode": r["mode"] or "simple"} for r in rows]
+
+
+def put_cards(user_id: str, items: list[dict]) -> list[dict]:
+    if len(items) > 100:
+        raise AuthError("卡片配置异常")
+    conn = get_conn()
+    try:
+        conn.execute("BEGIN")
+        conn.execute("DELETE FROM card_config WHERE user_id=?", (user_id,))
+        conn.executemany(
+            "INSERT INTO card_config (user_id, card_id, enabled, sort, mode) "
+            "VALUES (?,?,?,?,?)",
+            [(user_id, str(it["card_id"]), 1 if it.get("enabled", True) else 0,
+              int(it.get("sort") or 0),
+              "detailed" if it.get("mode") == "detailed" else "simple")
+             for it in items])
+        conn.commit()
+    except Exception:
+        conn.rollback()
+        raise
+    finally:
+        conn.close()
+    return get_cards(user_id)

@@ -59,6 +59,16 @@ const state: AppState = {
 type Listener = () => void;
 const subs = new Set<Listener>();
 
+/* 本地变更 → 云同步事件（sync.ts 监听去抖推送）；applying 期间（拉取回放）不回推 */
+export type LocalKind = "prefs" | "watchlist" | "cards";
+let applying = false;
+export function isApplying(): boolean { return applying; }
+export function beginApply(): void { applying = true; }
+export function endApply(): void { applying = false; }
+export function notifyLocal(kind: LocalKind): void {
+  if (!applying) document.dispatchEvent(new CustomEvent("yc:local", { detail: kind }));
+}
+
 /** 触发全局重渲染订阅者 */
 export function emit(): void {
   subs.forEach((fn) => fn());
@@ -82,21 +92,38 @@ export function setUser(u: UserPublic | null): void {
 export function patch<K extends "theme" | "dir" | "accent">(k: K, v: AppState[K]): void {
   state[k] = v as never;
   localStorage.setItem(LS[k], JSON.stringify(v));
+  notifyLocal("prefs");
   emit();
 }
 
 export function setCardPref(id: string, p: Partial<CardPref>): void {
   state.cards[id] = { ...state.cards[id], ...p };
   localStorage.setItem(LS.cards, JSON.stringify(state.cards));
+  notifyLocal("cards");
   emit();
 }
 export function resetCards(): void {
   localStorage.removeItem(LS.cards);
   state.cards = loadCards();
+  notifyLocal("cards");
   emit();
 }
 
-/* ── 自选（localStorage 客户端实现，F04 后端就绪后切换） ── */
+/* 云端数据回放（sync.ts 拉取后整批装载；applying 抑制回推） */
+export function loadAppearance(v: { theme?: "dark" | "light"; dir?: "cn" | "intl"; accent?: AppState["accent"] }): void {
+  if (v.theme) { state.theme = v.theme; localStorage.setItem(LS.theme, JSON.stringify(v.theme)); }
+  if (v.dir) { state.dir = v.dir; localStorage.setItem(LS.dir, JSON.stringify(v.dir)); }
+  if (v.accent) { state.accent = v.accent; localStorage.setItem(LS.accent, JSON.stringify(v.accent)); }
+  applyAppearance();
+  emit();
+}
+export function loadCardsFrom(prefs: CardPrefs): void {
+  state.cards = prefs;
+  localStorage.setItem(LS.cards, JSON.stringify(state.cards));
+  emit();
+}
+
+/* ── 自选（F04：本地即时生效 + sync.ts 云同步） ── */
 export function isWatched(symbol: string): boolean {
   return state.watchlist.some((w) => w.symbol === symbol);
 }
@@ -104,17 +131,25 @@ export function addWatch(symbol: string, name: string, group = "默认"): boolea
   if (isWatched(symbol)) return false;
   state.watchlist.unshift({ symbol, name: name || symbol, group, ts: Date.now() });
   localStorage.setItem(LS.watchlist, JSON.stringify(state.watchlist));
+  notifyLocal("watchlist");
   emit();
   return true;
 }
 export function removeWatch(symbol: string): void {
   state.watchlist = state.watchlist.filter((w) => w.symbol !== symbol);
   localStorage.setItem(LS.watchlist, JSON.stringify(state.watchlist));
+  notifyLocal("watchlist");
   emit();
 }
 export function moveWatchGroup(symbol: string, group: string): void {
   const w = state.watchlist.find((x) => x.symbol === symbol);
-  if (w) { w.group = group; localStorage.setItem(LS.watchlist, JSON.stringify(state.watchlist)); emit(); }
+  if (w) { w.group = group; localStorage.setItem(LS.watchlist, JSON.stringify(state.watchlist)); notifyLocal("watchlist"); emit(); }
+}
+/** 云端自选整批装载（applying 抑制回推） */
+export function loadWatchlistFrom(items: AppState["watchlist"]): void {
+  state.watchlist = items;
+  localStorage.setItem(LS.watchlist, JSON.stringify(state.watchlist));
+  emit();
 }
 export function setWlGroup(g: string): void {
   state.wlGroup = g;

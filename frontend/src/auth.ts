@@ -1,7 +1,8 @@
-/* 登录 / 注册 + VIP 徽章 + 兑换 */
+/* 登录 / 注册 + VIP 徽章 + 兑换 + 云设置同步触发 */
 import { authApi, licenseApi, type UserPublic } from "./api";
 import { esc } from "./fmt";
 import { getState, isVip, setUser, emit } from "./store";
+import { flushSync, pullOnLogin } from "./sync";
 import { toast, openModal, closeModals } from "./ui";
 
 let mode: "login" | "register" = "login";
@@ -52,11 +53,13 @@ function drawAuth(): void {
   document.getElementById("auth-title")!.textContent = mode === "login" ? "登录" : "注册";
   document.getElementById("auth-desc")!.textContent =
     mode === "login"
-      ? "登录后同步自选与 VIP 权益；行情数据无需登录即可浏览。"
-      : "注册即创建本地账户（JWT 鉴权）；邮箱为登录标识，用户名可选。";
+      ? "登录后自选、外观与图表设置云同步，多端一致。"
+      : "注册即创建账户（JWT 鉴权）；邮箱为登录标识，用户名可选。";
   document.querySelectorAll("#auth-tabs button").forEach((b) =>
     b.classList.toggle("on", (b as HTMLElement).dataset.t === mode));
   (document.getElementById("auth-user") as HTMLElement).style.display = mode === "register" ? "" : "none";
+  (document.getElementById("auth-remember-row") as HTMLElement).style.display =
+    mode === "login" ? "" : "none";
   document.getElementById("auth-go")!.textContent = mode === "login" ? "登录" : "注册";
   const err = document.getElementById("auth-err")!;
   err.style.display = "none";
@@ -71,6 +74,7 @@ export function openAuth(m: "login" | "register" = "login"): void {
 async function submitAuth(): Promise<void> {
   const err = document.getElementById("auth-err")!;
   const pwd = (document.getElementById("auth-pwd") as HTMLInputElement).value;
+  const remember = (document.getElementById("auth-remember") as HTMLInputElement | null)?.checked ?? true;
   const btn = document.getElementById("auth-go") as HTMLButtonElement;
   err.style.display = "none";
   try {
@@ -78,7 +82,7 @@ async function submitAuth(): Promise<void> {
     let user: UserPublic;
     if (mode === "login") {
       const identifier = (document.getElementById("auth-id") as HTMLInputElement).value.trim();
-      const r = await authApi.login({ identifier, password: pwd });
+      const r = await authApi.login({ identifier, password: pwd, remember });
       user = r.user;
       localStorage.setItem("yc_token", r.token);
     } else {
@@ -92,6 +96,8 @@ async function submitAuth(): Promise<void> {
     closeModals();
     (document.getElementById("auth-pwd") as HTMLInputElement).value = "";
     toast(mode === "login" ? `欢迎回来，${user.username || user.email}` : "注册成功，已自动登录");
+    // 云设置拉取合并：服务器缺失键回传本地，自选/卡片/外观跟账户走
+    void pullOnLogin().then(() => emit());
   } catch (e) {
     err.textContent = (e as Error).message || "请求失败";
     err.style.display = "";
@@ -125,6 +131,7 @@ export async function redeem(): Promise<void> {
 }
 
 export function logout(): void {
+  flushSync();                    // 冲刷未落库的设置变更（尽力而为）
   localStorage.removeItem("yc_token");
   setUser(null);
   emit();
@@ -153,6 +160,13 @@ export function initAuth(): void {
   document.getElementById("redeem-btn")!.addEventListener("click", redeem);
   document.getElementById("redeem-input")!.addEventListener("keydown", (e) => {
     if (e.key === "Enter") redeem();
+  });
+  // 会话过期（任意 /api 401）→ 清态弹登录
+  window.addEventListener("yc:auth-expired", () => {
+    setUser(null);
+    emit();
+    toast("登录已过期，请重新登录");
+    openAuth("login");
   });
   drawUserchip();
   refreshVipUI();
