@@ -7,6 +7,33 @@ _INVENTORY = (
     "corepicks_result", "stock_profile",
 )
 
+# 个股维度表 → 完整度按「最新截面覆盖标的数 / 全市场证券数」计算；
+# 其余（板块快照/证券清单/核心标名单）不适用 → None
+_COVERAGE_TABLES = {
+    "daily_ohlcv": "date", "adjust_factor": "ex_date", "capital_flow": "date",
+    "financials": "report_date", "daily_valuation": "date", "stock_profile": None,
+}
+
+
+def _coverage(conn, table: str, date_col: str | None,
+              latest_date: str | None) -> float | None:
+    try:
+        if table == "stock_profile" or date_col is None or not latest_date:
+            # 个股档案无日期维度：全表去重标的数
+            row = conn.execute(f"SELECT COUNT(DISTINCT symbol) FROM {table}").fetchone()
+        else:
+            row = conn.execute(
+                f"SELECT COUNT(*) FROM {table} WHERE {date_col} = ?",
+                [latest_date]).fetchone()
+        n = int(row[0] or 0) if row else 0
+        if n <= 0:
+            return 0.0
+        uni = conn.execute("SELECT COUNT(*) FROM stock_universe").fetchone()
+        total = int(uni[0] or 0) if uni else 0
+        return round(min(100.0, n * 100.0 / total), 1) if total > 0 else None
+    except Exception:
+        return None
+
 
 def table_status(conn, table: str) -> dict:
     date_col = _DATE_COL.get(table)
@@ -14,9 +41,13 @@ def table_status(conn, table: str) -> dict:
     try:
         row = conn.execute(f"SELECT COUNT(*), {date_expr} FROM {table}").fetchone()
     except Exception:
-        return {"table": table, "rows": None, "latest_date": None}
+        return {"table": table, "rows": None, "latest_date": None, "coverage": None}
+    latest = str(row[1]) if row and row[1] else None
+    coverage = None
+    if table in _COVERAGE_TABLES:
+        coverage = _coverage(conn, table, _COVERAGE_TABLES[table], latest)
     return {"table": table, "rows": int(row[0]) if row else 0,
-            "latest_date": str(row[1]) if row and row[1] else None}
+            "latest_date": latest, "coverage": coverage}
 
 
 # 各表"最新日期"列名（1.0 schema 原样；无日期维度 → None）

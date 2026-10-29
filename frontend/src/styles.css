@@ -557,6 +557,15 @@ td .lnk:hover{text-decoration:underline}
 .uprecent{font-size:11px;color:var(--faint);cursor:pointer;user-select:none}
 .uprecent:hover{color:var(--dim)}
 .uprecent-list{margin-top:6px;display:flex;flex-direction:column;gap:4px}
+.upstop{padding:2px 12px;font-size:11px;border-color:color-mix(in srgb,var(--up) 45%,transparent);color:var(--up)}
+.upstop:hover{border-color:var(--up);background:color-mix(in srgb,var(--up) 12%,transparent)}
+/* 数据内容卡 · 完整度条（最新截面覆盖标的数 / 全市场） */
+.ds-cov{display:flex;align-items:center;gap:7px;margin-top:7px}
+.ds-cov .bar{flex:1;height:4px;border-radius:3px;background:var(--panel-3);overflow:hidden}
+.ds-cov .bar i{display:block;height:100%;border-radius:3px;background:var(--down);transition:width .5s}
+.ds-cov.mid .bar i{background:var(--warn)}
+.ds-cov.bad .bar i{background:var(--up)}
+.ds-cov>span{font-size:10px;color:var(--faint);flex:none;min-width:30px;text-align:right}
 .uplogs{max-height:96px;overflow-y:auto;background:var(--panel-2);border:1px solid var(--border-soft);
   border-radius:8px;padding:6px 9px;font-family:var(--mono);font-size:10.5px;color:var(--faint);
   display:flex;flex-direction:column;gap:2px}

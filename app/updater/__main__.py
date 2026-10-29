@@ -79,6 +79,11 @@ def main() -> None:
             offset, reqs = control.poll(offset)
             for r in reqs:
                 kind = str(r.get("kind") or "")
+                if kind == "__cancel__":
+                    res = orchestrator.cancel((r.get("params") or {}).get("task_id"))
+                    logger.info("[Control] 收到停止请求 (id=%s) → %s",
+                                r.get("id"), res)
+                    continue
                 logger.info("[Control] 收到触发请求 %s (id=%s force=%s)",
                             kind, r.get("id"), r.get("force"))
                 res = orchestrator.submit(kind, trigger="manual",

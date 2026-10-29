@@ -150,7 +150,8 @@ async function refreshUpState(): Promise<void> {
       `<b style="font-size:12.5px">${esc(r.label)}</b>` +
       `<span class="upstat ${st.cap}">${esc(st.label)}</span>` +
       `<span style="font-size:11px;color:var(--faint)">${esc(r.trigger === "manual" ? "手动触发" : "自动触发")}</span>` +
-      `<span style="flex:1"></span><b class="num" style="font-size:12.5px">${(r.percent ?? 0).toFixed(1)}%</b></div>`,
+      `<span style="flex:1"></span><b class="num" style="font-size:12.5px">${(r.percent ?? 0).toFixed(1)}%</b>` +
+      (isRun ? `<button class="hbtn upstop" id="up-stop" title="排队任务直接移除，运行中的采集会尽快退出">停止</button>` : "") + `</div>`,
       `<div class="upbar"><i style="width:${pct}%"></i></div>`,
       `<div style="display:flex;justify-content:space-between;font-size:11px">` +
       `<span style="color:var(--dim)">${esc(r.stage || "")}</span>` +
@@ -233,10 +234,15 @@ async function renderData(body: HTMLElement): Promise<void> {
     (tables.length ? tables.map((t) => {
       const n = daysAgo(t.latest_date);
       const cls = freshCls(n);
+      const cov = typeof t.coverage === "number" ? t.coverage : null;
+      const covCls = cov == null ? "" : cov >= 90 ? "" : cov >= 50 ? "mid" : "bad";
       return `<div class="dscard"><div class="ds-h"><i class="logdot ${cls}"></i><b>${esc(TABLE_ZH[t.table] || t.table)}</b></div>` +
         `<div class="ds-date num">${esc(t.latest_date || "—")}</div>` +
         `<div class="ds-m"><span class="num">${fmtW(t.rows ?? 0)} 条</span>` +
-        `<span class="fresh ${cls}">${freshLabel(n)}</span></div></div>`;
+        `<span class="fresh ${cls}">${freshLabel(n)}</span></div>` +
+        (cov != null ? `<div class="ds-cov ${covCls}"><div class="bar"><i style="width:${Math.max(cov, 1.5)}%"></i></div>` +
+          `<span class="num">${cov >= 99 ? "完整" : cov.toFixed(0) + "%"}</span></div>` : "") +
+        `</div>`;
     }).join("") : `<div style="color:var(--faint);font-size:12px">数据还在准备中 — 用上方「手动更新」按钮开始第一次更新</div>`) +
     `</div></div>` +
     /* ④ 更新记录：每天自动更新了什么、成功与否、新增多少 */
@@ -262,6 +268,18 @@ async function renderData(body: HTMLElement): Promise<void> {
         toast((e as Error).message || "触发失败");
       }
     }));
+  /* 停止按钮：refreshUpState 每 3s 重绘内部 DOM，委托挂在容器上只绑一次 */
+  const upBody = document.getElementById("up-body");
+  if (upBody) upBody.addEventListener("click", async (e) => {
+    if (!(e.target as HTMLElement).closest(".upstop")) return;
+    try {
+      await dataApi.cancel();
+      toast("已请求停止 · updater 将消费");
+      void refreshUpState();
+    } catch (err) {
+      toast((err as Error).message || "停止失败");
+    }
+  });
   void refreshUpState();
   upTimer = setInterval(() => void refreshUpState(), 3000);
 }

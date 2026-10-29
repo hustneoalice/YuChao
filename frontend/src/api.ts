@@ -148,7 +148,7 @@ export const corepicksApi = {
 export interface DataStatus {
   stage: "uninitialized" | "initializing" | "ready" | "updating" | "update_failed";
   duckdb_path: string;
-  tables: { table: string; rows?: number; latest_date?: string }[];
+  tables: { table: string; rows?: number; latest_date?: string; coverage?: number | null }[];
   generated_at: string;
 }
 export interface UpdateLogItem {
@@ -176,6 +176,8 @@ export const dataApi = {
   state: () => req<UpdateSnapshot>("/data/update/state"),
   trigger: (kind: string, force = false) =>
     req<{ accepted: boolean; request_id: string }>("/data/update", { method: "POST", body: { kind, force } }),
+  cancel: () =>
+    req<{ accepted: boolean; request_id: string }>("/data/update/cancel", { method: "POST", body: {} }),
   updates: (limit = 50) => req<{ items: UpdateLogItem[]; note?: string }>(`/data/updates?limit=${limit}`),
 };
 

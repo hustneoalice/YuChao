@@ -9,6 +9,7 @@ class TableStatus(BaseModel):
     table: str
     rows: Optional[int] = None
     latest_date: Optional[str] = None
+    coverage: Optional[float] = None  # 0-100，最新截面覆盖的标的数 / 全市场证券数
 
 
 class DataStatus(BaseModel):

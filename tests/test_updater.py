@@ -101,7 +101,9 @@ def test_orchestrator_dedup_and_serial(updater_env, tmp_path):
             return {"rows": 1}
         return fn
 
-    orch.register("a", "任务A", make_task("a", 0.15), cooldown_s=0)
+    # 时长给足（1.2s）：两次 submit 之间 dedup 窗口必须稳命中——
+    # 机器负载高时 0.15s 的任务可能在第二次 submit 前就跑完，断言会 flaky
+    orch.register("a", "任务A", make_task("a", 1.2), cooldown_s=0)
     orch.register("b", "任务B", make_task("b", 0.0), cooldown_s=0)
 
     r1 = orch.submit("a", trigger="manual")

@@ -68,6 +68,17 @@ def update(body: UpdateTrigger):
     }
 
 
+@router.post("/data/update/cancel", status_code=202,
+             summary="请求停止当前更新 / 清空排队（经控制通道交 updater 进程）")
+def update_cancel():
+    rid = ControlRequests(settings.control_requests_path).submit("__cancel__")
+    return {
+        "accepted": True,
+        "request_id": rid,
+        "note": "updater 进程约 2s 内消费；排队任务直接移除，运行中的任务由采集函数自行退出",
+    }
+
+
 @router.get("/data/update/state", summary="更新编排快照（进行中/排队/最近任务的实时进度）")
 def update_state():
     """读 updater 进程落盘的 update_progress.json（只读快照，节流 ~1s）。
