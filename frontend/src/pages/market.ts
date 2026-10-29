@@ -35,8 +35,8 @@ export const mk = {
   layout: (localStorage.getItem("yc_klayout") as KLayout) || "single",
   panels: ["d"] as PKey[],   // 每个面板的周期（按 LAYOUT_PANELS 槽位）
   active: 0,                 // 焦点面板（chartbar 周期段/观察档作用于它）
-  mainInds: ["ma"] as MainKey[], // 主图多选叠加
-  subInds: ["vol"] as SubKey[],  // 副图多选，每指标一个窗格
+  mainInds: ["ma", "short", "mid"] as MainKey[], // 默认趋势预设：MA + 短/中线趋势
+  subInds: ["vol", "macd"] as SubKey[],  // 副图多选，每指标一个窗格
   from: null as { page: string; label: string } | null,
 };
 if (!LAYOUT_PANELS[mk.layout]) mk.layout = "single";
