@@ -116,10 +116,10 @@ svg{display:block}
 .userchip span{font-size:11.5px;color:var(--dim)}
 
 /* ═══ 图标侧栏（宽度可拖拉调整：--rail-w 由 main.ts 写入并持久化） ═══ */
-.shell{display:grid;grid-template-columns:var(--rail-w, 72px) 1fr;height:calc(100vh - 52px);margin-top:52px}
+.shell{display:grid;grid-template-columns:var(--rail-w, 58px) 1fr;height:calc(100vh - 52px);margin-top:52px}
 .rail{background:var(--panel);border-right:1px solid var(--border);
   display:flex;flex-direction:column;align-items:center;gap:6px;padding:12px 0;position:relative}
-.rail a{width:46px;height:46px;border-radius:13px;display:grid;place-items:center;
+.rail a{width:40px;height:40px;border-radius:11px;display:grid;place-items:center;
   color:var(--faint);position:relative;cursor:pointer}
 .rail a:hover{color:var(--text);background:var(--panel-2)}
 .rail a.on{color:var(--accent);background:var(--accent-soft)}
@@ -135,7 +135,7 @@ svg{display:block}
 
 /* ═══ 主区 ═══ */
 .main{flex:1;min-width:0;display:flex;flex-direction:column;overflow:hidden;background:var(--page)}
-.page{display:none;flex:1;min-height:0;flex-direction:column;gap:12px;padding:14px 16px 16px;overflow:hidden}
+.page{display:none;flex:1;min-height:0;flex-direction:column;gap:8px;padding:12px 14px 14px;overflow:hidden}
 .page.on{display:flex}
 .phead{display:flex;align-items:center;gap:10px;min-height:30px}
 .phead h1{font-size:16.5px;font-weight:650;letter-spacing:-.01em}
@@ -149,12 +149,12 @@ svg{display:block}
 .hbtn svg{width:14px;height:14px}
 
 /* 面板 / 卡片 */
-.panel{background:var(--panel);border:1px solid var(--border);border-radius:14px;overflow:hidden}
+.panel{background:var(--panel);border:1px solid var(--border);border-radius:10px;overflow:hidden}
 .phead2{display:flex;align-items:center;gap:10px;padding:10px 14px;border-bottom:1px solid var(--border);min-height:40px}
 .phead2 h3{font-size:13.5px;font-weight:650}
 .phead2 .sub{font-size:11px;color:var(--faint)}
 .phead2 .sp{flex:1}
-.chartbox{background:var(--panel);border:1px solid var(--border);border-radius:14px;overflow:hidden;
+.chartbox{background:var(--panel);border:1px solid var(--border);border-radius:10px;overflow:hidden;
   display:flex;flex-direction:column;min-height:0}
 .chartbar{display:flex;align-items:center;gap:8px;padding:7px 12px;border-bottom:1px solid var(--border);min-height:42px}
 .chartbar .sp{flex:1}
@@ -262,7 +262,7 @@ td .lnk:hover{text-decoration:underline}
 .cseg .cbtn.on{color:var(--accent);background:var(--panel-3)}
 .drag{width:14px;height:20px;display:inline-flex;align-items:center;justify-content:center;color:var(--faint);cursor:grab;flex:none}
 .drag:active{cursor:grabbing}
-.rcard{background:var(--panel);border:1px solid var(--border);border-radius:14px;padding:12px 14px;position:relative}
+.rcard{background:var(--panel);border:1px solid var(--border);border-radius:10px;padding:11px 13px;position:relative}
 .rcard.dragging{opacity:.45;border-style:dashed}
 .rcard.drop-before{border-top:2px solid var(--accent)}
 .rcard.drop-after{border-bottom:2px solid var(--accent)}
@@ -320,7 +320,7 @@ td .lnk:hover{text-decoration:underline}
 .kl-panels.ly-quad{grid-template:1fr 1fr / 1fr 1fr}
 .klp{position:relative;display:flex;flex-direction:column;min-width:0;min-height:0;
   background:var(--panel);cursor:pointer;overflow:hidden}
-.klp.active{box-shadow:inset 0 0 0 1.5px color-mix(in srgb,var(--accent) 55%,transparent);z-index:2}
+.klp.active{z-index:2}
 .klp-main{flex:1;min-height:0;position:relative;cursor:crosshair}
 .klp-bar{display:flex;align-items:center;gap:7px;padding:0 10px;height:27px;flex:none;
   font-size:11px;color:var(--faint);border-bottom:1px solid var(--border-soft);
@@ -341,9 +341,9 @@ td .lnk:hover{text-decoration:underline}
 .sh-stats .srow:last-child:nth-child(2){grid-template-columns:repeat(3,auto)}
 .sh-stats b{color:var(--text);font-weight:600;font-size:12px}
 .sh-stats .srow:last-child b{color:var(--dim);font-weight:550}
-.mkt-row{display:flex;gap:12px;flex:1;min-height:0}
-.kl-col{flex:1;min-width:0;display:flex;flex-direction:column;gap:12px}
-.rightcol{width:var(--rcol-w, 366px);min-width:280px;flex:none;display:flex;flex-direction:column;gap:12px;overflow-y:auto;padding-right:2px}
+.mkt-row{display:flex;gap:8px;flex:1;min-height:0}
+.kl-col{flex:1;min-width:0;display:flex;flex-direction:column;gap:8px}
+.rightcol{width:var(--rcol-w, 366px);min-width:280px;flex:none;display:flex;flex-direction:column;gap:8px;overflow-y:auto;padding-right:2px}
 .rcol-grip{width:6px;flex:none;cursor:col-resize;border-radius:3px;background:transparent;position:relative;margin-left:-4px}
 .rcol-grip::after{content:"";position:absolute;left:50%;top:50%;transform:translate(-50%,-50%);
   width:2px;height:34px;border-radius:2px;background:var(--axis);transition:.14s}
@@ -353,7 +353,7 @@ td .lnk:hover{text-decoration:underline}
 .rcard .rh .mono{color:var(--faint);margin-left:auto}
 .rcard .rh svg{width:14px;height:14px;color:var(--accent)}
 .rcard[data-cid] .rh .mono{margin-left:auto}
-.locklayer{position:absolute;inset:0;border-radius:14px;background:color-mix(in srgb,var(--panel) 82%,transparent);
+.locklayer{position:absolute;inset:0;border-radius:10px;background:color-mix(in srgb,var(--panel) 82%,transparent);
   backdrop-filter:blur(3px);display:flex;flex-direction:column;align-items:center;justify-content:center;gap:8px;z-index:5}
 .locklayer svg{width:20px;height:20px;color:var(--vip)}
 .locklayer b{font-size:12.5px;color:var(--text)}
@@ -477,8 +477,8 @@ td .lnk:hover{text-decoration:underline}
 .factor .v{font-size:16px;font-weight:700;margin-top:2px}
 
 /* 卡片页 */
-.cardgrid{display:grid;grid-template-columns:repeat(4,1fr);gap:12px}
-.fcard{background:var(--panel);border:1px solid var(--border);border-radius:14px;padding:14px;display:flex;
+.cardgrid{display:grid;grid-template-columns:repeat(4,1fr);gap:8px}
+.fcard{background:var(--panel);border:1px solid var(--border);border-radius:10px;padding:14px;display:flex;
   flex-direction:column;gap:10px;position:relative}
 .fcard .fico{width:34px;height:34px;border-radius:10px;display:grid;place-items:center;color:var(--accent);
   background:var(--accent-soft)}
@@ -500,7 +500,7 @@ td .lnk:hover{text-decoration:underline}
 .setnav button.on{color:var(--accent);background:var(--accent-soft);font-weight:600}
 .setnav svg{width:15px;height:15px;flex:none}
 .setbody{flex:1;min-width:0;overflow-y:auto;display:flex;flex-direction:column;gap:12px;padding-right:4px}
-.setsec{background:var(--panel);border:1px solid var(--border);border-radius:14px;padding:15px 16px}
+.setsec{background:var(--panel);border:1px solid var(--border);border-radius:10px;padding:15px 16px}
 .setsec .sh{display:flex;align-items:center;gap:9px;margin-bottom:12px}
 .setsec .sh h3{font-size:13.5px;font-weight:650}
 .setsec .sh .mono{color:var(--faint)}

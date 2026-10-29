@@ -151,7 +151,7 @@ function initRailResize(): void {
   const apply = (w: number) =>
     document.documentElement.style.setProperty("--rail-w", `${w}px`);
   const saved = Number(localStorage.getItem("yc_rail_w"));
-  if (saved >= 64 && saved <= 220) apply(saved);
+  if (saved >= 48 && saved <= 220) apply(saved);
   grip.addEventListener("mousedown", (e) => {
     e.preventDefault();
     grip.classList.add("on");
@@ -159,7 +159,7 @@ function initRailResize(): void {
     document.body.style.userSelect = "none";
     const move = (ev: MouseEvent) => {
       // 预留拖拽手柄自身 3px 悬出，取指针位置即目标宽度
-      const w = Math.min(220, Math.max(64, ev.clientX));
+      const w = Math.min(220, Math.max(48, ev.clientX));
       apply(w);
       localStorage.setItem("yc_rail_w", String(w));
       // 行情页图表跟随重排
