@@ -36,6 +36,7 @@ def update_valuation(progress=None, ctx=None) -> dict:
             conn = writer.conn()
             syms = [str(r[0]) for r in conn.execute(
                 "SELECT symbol FROM stock_universe WHERE symbol ~ '^[0-9]{6}$'").fetchall()]
+            writer.reset()          # 备用车道批量抓取期间不持锁
             raw = sources.fetch_qt_batch(syms, progress=progress, cancel=cancel)
             snap = {s: (v[2], v[3], v[4], v[5], v[6]) for s, v in raw.items()}
             listed, industries = {}, {}
@@ -98,6 +99,7 @@ def update_valuation(progress=None, ctx=None) -> dict:
         except Exception as e:
             logger.warning("[Valuation] 补行业分类失败: %s", e)
         conn.commit()
+        writer.reset()          # 写完立即释放锁
 
         with_pe = sum(1 for r in rows if r[2] is not None)
         result.update(status="success", rows=len(rows),

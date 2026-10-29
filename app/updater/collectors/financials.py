@@ -47,7 +47,6 @@ def update_financials(progress=None, ctx=None) -> dict:
     progress = progress or (lambda **k: None)   # 允许无进度上报直调
     try:
         periods = _last_periods(2)
-        conn = writer.conn()
         total_rows = 0
         for pi, period in enumerate(periods):
             if cancel and cancel():
@@ -55,6 +54,7 @@ def update_financials(progress=None, ctx=None) -> dict:
                 break
             progress(stage="采集财务", total=0, done=0,
                      message=f"报告期 {period}（{pi + 1}/{len(periods)}）")
+            # 抓取阶段不持锁（网络请求可能数十秒）
             main = sources.fetch_financial_period(period)
             if not main:
                 progress(log=f"报告期 {period} 暂无披露数据（可能未到披露季）",
@@ -65,6 +65,7 @@ def update_financials(progress=None, ctx=None) -> dict:
             for sym, rep, np_, yoy, roe in main:
                 dr, ocf = extras.get(sym, (None, None))
                 rows.append((sym, rep, np_, yoy, roe, dr, ocf, None))
+            conn = writer.conn()        # 写窗口：拿锁 → 写 → 立即释放
             # 幂等：先删该报告期再整批插入（不依赖主键存在）
             conn.execute("DELETE FROM financials WHERE report_date = ?", [period])
             conn.executemany(
@@ -72,6 +73,7 @@ def update_financials(progress=None, ctx=None) -> dict:
                 "(symbol,report_date,net_profit,net_profit_yoy,roe,debt_ratio,"
                 "operating_cashflow,audit_opinion) VALUES (?,?,?,?,?,?,?,?)", rows)
             conn.commit()
+            writer.reset()
             total_rows += len(rows)
             progress(log=f"报告期 {period} 写入 {len(rows)} 条",
                      level="success" if rows else "info")

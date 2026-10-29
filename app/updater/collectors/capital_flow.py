@@ -30,6 +30,7 @@ def update_capital_flow(progress=None, ctx=None) -> dict:
             "SELECT symbol FROM stock_universe WHERE symbol ~ '^[0-9]{6}$'").fetchall()]
         latest = {str(r[0]): str(r[1]) for r in conn.execute(
             "SELECT symbol, MAX(date) FROM capital_flow GROUP BY symbol").fetchall()}
+        writer.reset()          # 逐只抓取（十几分钟）期间绝不能持写锁
         progress(stage="采集资金流", total=len(symbols), done=0,
                  message=f"新浪逐只资金流，{len(symbols)} 个标的")
 
@@ -55,22 +56,26 @@ def update_capital_flow(progress=None, ctx=None) -> dict:
             done += 1
             if len(buf) >= 2000 or done % _COMMIT_EVERY == 0:
                 if buf:
-                    conn.executemany(
+                    c = writer.conn()        # 写批次：拿锁 → 写 → 立即释放
+                    c.executemany(
                         "INSERT OR REPLACE INTO capital_flow "
                         "(symbol,date,net_main,net_super,net_large,net_medium,net_small) "
                         "VALUES (?,?,?,?,?,?,?)", buf)
-                    conn.commit()
+                    c.commit()
+                    writer.reset()
                     buf.clear()
                 progress(done=done, rows=rows_written,
                          log=f"资金流 [{done}/{len(symbols)}] 累计 {rows_written} 行")
             time.sleep(_SINA_SLEEP)
 
         if buf:
-            conn.executemany(
+            c = writer.conn()
+            c.executemany(
                 "INSERT OR REPLACE INTO capital_flow "
                 "(symbol,date,net_main,net_super,net_large,net_medium,net_small) "
                 "VALUES (?,?,?,?,?,?,?)", buf)
-            conn.commit()
+            c.commit()
+            writer.reset()
             buf.clear()
 
         if rows_written == 0 and failed == 0 and done:

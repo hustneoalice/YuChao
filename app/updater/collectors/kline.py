@@ -46,18 +46,20 @@ def update_kline(progress=None, ctx=None) -> dict:
     progress = progress or (lambda **k: None)   # 允许无进度上报直调
     try:
         target = expected_asof()
-        conn = writer.conn()
 
-        # 目标集：个股（universe 6位码）+ 指数/ETF（daily_ohlcv 里带后缀的 symbol）
+        # 读目标集/cutoff：短连接用完立即释放——DuckDB 写锁是连接级排他的，
+        # 抓取阶段（5665 只 × ~150ms ≈ 十几分钟）绝不能持锁，否则 API 进程
+        # 的只读连接全部被拒，前端整个瘫掉（真实踩坑）。
+        conn = writer.conn()
         stocks = [str(r[0]) for r in conn.execute(
             "SELECT symbol FROM stock_universe WHERE symbol ~ '^[0-9]{6}$'").fetchall()]
         others = [str(r[0]) for r in conn.execute(
             "SELECT DISTINCT symbol FROM daily_ohlcv WHERE symbol LIKE '%.%'").fetchall()]
-        targets = sorted(set(stocks) | set(others))
-
-        # per-symbol cutoff（1.0 原样 group by，不逐个查）
         latest = {str(r[0]): str(r[1]) for r in conn.execute(
             "SELECT symbol, MAX(date) FROM daily_ohlcv GROUP BY symbol").fetchall()}
+        writer.reset()
+
+        targets = sorted(set(stocks) | set(others))
 
         pending = []
         for s in targets:
@@ -106,28 +108,33 @@ def update_kline(progress=None, ctx=None) -> dict:
             done += 1
             if len(buf) >= 20000 or done % _COMMIT_EVERY == 0:
                 if buf:
-                    conn.executemany(
+                    c = writer.conn()            # 写批次：拿锁 → 写 → 立即释放
+                    c.executemany(
                         "INSERT OR REPLACE INTO daily_ohlcv "
                         "(symbol,date,open,high,low,close,volume,amount,pct_chg,turnover_rate) "
                         "VALUES (?,?,?,?,?,?,?,?,?,?)", buf)
-                    conn.commit()
+                    c.commit()
+                    writer.reset()
                     buf.clear()
                 progress(done=done, rows=rows_written,
                          log=f"K线增量 [{done}/{len(pending)}] 累计 {rows_written} 根")
 
         if buf:
-            conn.executemany(
+            c = writer.conn()
+            c.executemany(
                 "INSERT OR REPLACE INTO daily_ohlcv "
                 "(symbol,date,open,high,low,close,volume,amount,pct_chg,turnover_rate) "
                 "VALUES (?,?,?,?,?,?,?,?,?,?)", buf)
-            conn.commit()
+            c.commit()
+            writer.reset()
             buf.clear()
 
         # 近期 pct_chg 缺失行补算（腾讯车道不带涨跌幅；窗口外不动）
         filled = 0
         try:
             window = (date.today() - timedelta(days=_PCT_FILL_DAYS)).isoformat()
-            cur = conn.execute("""
+            c = writer.conn()
+            cur = c.execute("""
                 UPDATE daily_ohlcv o SET pct_chg = ROUND((o.close / p.prev - 1) * 100, 4)
                 FROM (
                     SELECT symbol, date,
@@ -138,9 +145,11 @@ def update_kline(progress=None, ctx=None) -> dict:
                   AND o.pct_chg IS NULL AND p.prev IS NOT NULL AND p.prev > 0
             """, [window])
             filled = cur.fetchone()[0] if cur.description else 0
-            conn.commit()
+            c.commit()
+            writer.reset()
         except Exception as e:
             logger.warning("[Kline] pct 补算失败: %s", e)
+            writer.reset()
 
         # kline:{symbol}:1d 事件（最后一根 bar；事件量 ≈ 标的数，文件总线可承载）
         if bus is not None:

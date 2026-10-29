@@ -23,6 +23,7 @@ def update_quotes(progress=None, ctx=None) -> dict:
         symbols = [str(r[0]) for r in conn.execute(
             "SELECT symbol FROM stock_universe WHERE symbol ~ '^[0-9]{6}$' "
             "ORDER BY symbol").fetchall()]
+        writer.reset()          # 批量抓取（1-3 分钟）期间绝不能持写锁
         progress(stage="采集行情快照", total=len(symbols), done=0,
                  message=f"{day} 全市场 {len(symbols)} 只（腾讯 qt）")
 
@@ -30,6 +31,7 @@ def update_quotes(progress=None, ctx=None) -> dict:
         if not raw:
             raise RuntimeError("行情快照为空（腾讯 qt 不可达）")
 
+        conn = writer.conn()    # 抓完再拿锁，写完立即释放
         # 换手率：当日 daily_ohlcv 行的 turnover_rate 补写（K线车道不带换手率）
         turn_rows = [(v[7], s) for s, v in raw.items()
                      if v[7] is not None]
@@ -47,6 +49,7 @@ def update_quotes(progress=None, ctx=None) -> dict:
                 "UPDATE stock_universe SET name = ?, updated_at = CURRENT_TIMESTAMP "
                 "WHERE symbol = ?", name_rows)
         conn.commit()
+        writer.reset()
 
         result.update(status="success", rows=n_turn,
                       detail=f"{day} 行情快照 {len(raw)}/{len(symbols)} 只"

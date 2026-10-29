@@ -44,6 +44,7 @@ def update_adjust_factor(progress=None, ctx=None) -> dict:
             latest = {str(r[0]): str(r[1]) for r in conn.execute(
                 "SELECT symbol, MAX(ex_date) FROM adjust_factor GROUP BY symbol"
             ).fetchall()}
+            writer.reset()          # baostock 逐只抓取（全市场极慢）期间不持锁
             progress(stage="采集复权因子", total=len(symbols), done=0,
                      message=f"baostock 逐只复权因子，{len(symbols)} 个标的")
 
@@ -85,22 +86,26 @@ def update_adjust_factor(progress=None, ctx=None) -> dict:
                 done += 1
                 if len(buf) >= 5000 or done % _COMMIT_EVERY == 0:
                     if buf:
-                        conn.executemany(
+                        c = writer.conn()    # 写批次：拿锁 → 写 → 立即释放
+                        c.executemany(
                             "INSERT OR REPLACE INTO adjust_factor "
                             "(symbol,ex_date,fore_adjust_factor,back_adjust_factor) "
                             "VALUES (?,?,?,?)", buf)
-                        conn.commit()
+                        c.commit()
+                        writer.reset()
                         buf.clear()
                     progress(done=done, rows=rows_written,
                              log=f"复权因子 [{done}/{len(symbols)}] 累计 {rows_written} 行")
                 time.sleep(_BAOSTOCK_SLEEP)
 
             if buf:
-                conn.executemany(
+                c = writer.conn()
+                c.executemany(
                     "INSERT OR REPLACE INTO adjust_factor "
                     "(symbol,ex_date,fore_adjust_factor,back_adjust_factor) "
                     "VALUES (?,?,?,?)", buf)
-                conn.commit()
+                c.commit()
+                writer.reset()
                 buf.clear()
 
             result.update(status="success", rows=rows_written,
