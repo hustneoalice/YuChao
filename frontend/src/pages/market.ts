@@ -336,6 +336,12 @@ export function initMarket(): void {
   document.getElementById("kl-ipanel-btn")!.addEventListener("click", (e) => {
     e.stopPropagation();
     ipanel.hidden = !ipanel.hidden;
+    if (!ipanel.hidden) {                  // 弹在「指标」按钮正下方（右对齐）
+      const r = (e.currentTarget as HTMLElement).getBoundingClientRect();
+      ipanel.style.top = `${r.bottom + 6}px`;
+      ipanel.style.right = `${Math.max(8, window.innerWidth - r.right)}px`;
+      ipanel.style.left = "auto";
+    }
   });
   document.addEventListener("click", (e) => {
     if (!ipanel.hidden && !(e.target as HTMLElement).closest("#kl-ipanel,#kl-ipanel-btn")) ipanel.hidden = true;
@@ -606,26 +612,21 @@ function cardBody(cid: string, mode: string): string {
     const val = q?.valuation;
     const fmtCap = (v?: number | null): string | null =>
       v == null || !isFinite(v) ? null : v >= 1e12 ? fmt(v / 1e12, 2) + "万亿" : fmtYi(v, 0);
-    const shares = val?.total_mv && price ? val.total_mv / price : null;   // 总股本 = 总市值 ÷ 价
-    const amt = rtLive ? (q!.amount ?? (q!.volume ?? last.volume ?? 0) * price)
-      : (last.amount ?? (last.volume || 0) * last.close);
-    const cell = (l: string, v: string | null, vc = "") =>
-      v == null ? "" : `<div class="bi-i"><span>${l}</span><b class="num ${vc}">${v}</b></div>`;
-    const cells = [
-      cell("最新价", fmt(price), cls),
-      cell("涨跌幅", `${fmtChg(chgAbs)} <i>${fmtChg(chgPct)}%</i>`, cls),
-      cell("行业", q?.industry || (s.symbol.includes(".") ? "指数" : null)),
-      cell("换手", q?.turnover_rate != null ? fmt(q.turnover_rate) + "%" : null),
-      cell("总市值", fmtCap(val?.total_mv)), cell("流通市值", fmtCap(val?.circ_mv)),
-      cell("PE(TTM)", val?.pe_ttm != null ? (val.pe_ttm > 0 ? fmt(val.pe_ttm) : "亏损") : null),
-      cell("PB", val?.pb != null && val.pb > 0 ? fmt(val.pb) : null),
-      cell("总股本", shares ? fmt(shares / 1e8, 2) + "亿股" : null),
-      cell("成交额", fmtYi(amt, 1)),
-      cell("振幅", chgBase ? fmt((last.high - last.low) / chgBase * 100) + "%" : null),
+    const row = (l: string, v: string | null, vc = "") =>
+      v == null ? "" : `<div class="bi-r"><span>${l}</span><b class="num ${vc}">${v}</b></div>`;
+    const rows = [
+      // 行式键值（不用格子形式）：每行「标签 …… 值」右对齐，两列排布
+      row("最新价", fmt(price), cls),
+      row("涨跌幅", `${fmtChg(chgAbs)} <i>${fmtChg(chgPct)}%</i>`, cls),
+      row("行业", q?.industry || (s.symbol.includes(".") ? "指数" : null)),
+      row("换手", q?.turnover_rate != null ? fmt(q.turnover_rate) + "%" : null),
+      row("总市值", fmtCap(val?.total_mv)), row("流通市值", fmtCap(val?.circ_mv)),
+      row("PE(TTM)", val?.pe_ttm != null ? (val.pe_ttm > 0 ? fmt(val.pe_ttm) : "亏损") : null),
+      row("PB", val?.pb != null && val.pb > 0 ? fmt(val.pb) : null),
     ].join("");
     const cons = (q?.concept ?? "").split(/[,，、;；\s]+/).map((x) => x.trim()).filter(Boolean);
     return `<div class="bi-name"><b>${esc(q?.name || s.name)}</b><span class="num">${s.symbol}</span></div>` +
-      `<div class="bi-grid">${cells}</div>` +
+      `<div class="bi-rows">${rows}</div>` +
       (cons.length ? `<div class="bi-cons">${cons.slice(0, 6).map((c) => `<span class="sh-con">${esc(c)}</span>`).join("")}` +
         (cons.length > 6 ? `<span class="sh-con more" title="${esc(cons.slice(6).join("、"))}">+${cons.length - 6}</span>` : "") + `</div>` : "");
   }

@@ -284,13 +284,14 @@ td .lnk:hover{text-decoration:underline}
 .bi-name{display:flex;align-items:baseline;gap:8px;margin-bottom:8px;min-width:0}
 .bi-name b{font-size:15px;font-weight:700;flex:none}
 .bi-name .num{font-size:11.5px;color:var(--dim);font-family:var(--mono);letter-spacing:.02em}
-.bi-grid{display:grid;grid-template-columns:repeat(3,1fr);gap:1px;background:var(--border);
-  border:1px solid var(--border);border-radius:9px;overflow:hidden}
-.bi-i{background:var(--panel-2);padding:6px 8px;display:flex;flex-direction:column;gap:2px;min-width:0}
-.bi-i span{font-size:10px;color:var(--faint)}
-.bi-i b{font-size:12px;font-weight:650;font-family:var(--mono);
-  white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
-.bi-i b i{font-style:normal;font-size:10.5px}
+/* 基本信息字段：行式键值（两列，无边框无底色 —— 用户「不用格子形式」） */
+.bi-rows{display:grid;grid-template-columns:1fr 1fr;gap:3px 18px}
+.bi-r{display:flex;align-items:baseline;justify-content:space-between;gap:8px;min-width:0}
+.bi-r span{font-size:10.5px;color:var(--faint);flex:none}
+.bi-r b{font-size:11.5px;font-weight:650;font-family:var(--mono);
+  white-space:nowrap;overflow:hidden;text-overflow:ellipsis;text-align:right}
+.bi-r b i{font-style:normal;font-size:10px;color:var(--faint)}
+.bi-r b.up{color:var(--up)} .bi-r b.down{color:var(--down)}
 .bi-cons{display:flex;gap:4px;flex-wrap:wrap;margin-top:8px}
 .sh-con{font-size:11px;padding:2.5px 8px;border-radius:6px;background:var(--panel-3);color:var(--dim)}
 .sh-con.more{color:var(--faint)}
@@ -386,8 +387,10 @@ td .lnk:hover{text-decoration:underline}
 .cbtn.on{color:var(--accent);border-color:color-mix(in srgb,var(--accent) 35%,transparent);
   background:color-mix(in srgb,var(--accent) 12%,transparent)}
 
-/* ── 指标管理面板（预设 / 主图 / 副图 分组显影） ── */
-.kl-ipanel{position:absolute;top:34px;right:10px;z-index:20;background:var(--panel);
+/* ── 指标管理面板（预设 / 主图 / 副图 分组显影）──
+   fixed + JS 动态定位：打开时精确贴在「指标」按钮正下方（右对齐），
+   不依赖宿主容器有无 position（曾因 .panel 无定位飞到页面右上角） */
+.kl-ipanel{position:fixed;z-index:60;background:var(--panel);
   border:1px solid var(--border);border-radius:11px;box-shadow:var(--shadow);padding:9px 11px;
   display:flex;flex-direction:column;gap:6px}
 .kl-stage .legend{position:absolute;top:10px;right:68px;z-index:6;pointer-events:none;
