@@ -16,9 +16,9 @@ export const SEGNAME = ["", "超卖", "低位", "弱势", "回升", "强势", "�
 export interface CurStock { symbol: string; name: string }
 /** 多周期布局：single 单屏 / h 左右双列 / v 上下两层 / quad 四宫格（策影同款） */
 export type KLayout = "single" | "h" | "v" | "quad";
-type PKey = "d" | "w" | "m" | "q";
+type PKey = "t" | "60" | "d" | "w" | "m" | "q";
 
-const P_LABEL: Record<PKey, string> = { d: "日", w: "周", m: "月", q: "季" };
+const P_LABEL: Record<PKey, string> = { t: "分时", "60": "60分", d: "日", w: "周", m: "月", q: "季" };
 /** 各布局的面板周期槽位（默认：左右/上下=日+周，四宫格=日周月季） */
 const LAYOUT_PANELS: Record<KLayout, PKey[]> = {
   single: ["d"], h: ["d", "w"], v: ["d", "w"], quad: ["d", "w", "m", "q"],
@@ -37,6 +37,8 @@ export const mk = {
   active: 0,                 // 焦点面板（chartbar 周期段/观察档作用于它）
   mainInds: ["ma", "short", "mid"] as MainKey[], // 默认趋势预设：MA + 短/中线趋势
   subInds: ["vol", "macd"] as SubKey[],  // 副图多选，每指标一个窗格
+  minuteData: null as { date: string; prevClose: number | null; bars: Bar[] } | null,
+  m60: null as Bar[] | null, // 60 分钟K（腾讯实时拉取，不落库）
   from: null as { page: string; label: string } | null,
 };
 if (!LAYOUT_PANELS[mk.layout]) mk.layout = "single";
@@ -56,6 +58,8 @@ export async function openStock(s: CurStock, from?: { page: string; label: strin
     if (mk.cur?.symbol !== s.symbol) return;   // 用户已切到别的标的，丢弃过期回包
     mk.bars = k.bars;
     mk.quote = null;
+    mk.minuteData = null;                      // 换标的：分时/60分缓存作废，切到时重拉
+    mk.m60 = null;
     renderKline();
     renderRight();
     showBriefing();
@@ -92,6 +96,8 @@ async function pollTick(): Promise<void> {
     if (mk.cur?.symbol !== s.symbol || !q) return;
     mk.quote = q;
     renderRight();
+    // 分时/60分面板：今日浮根只属于日线序列，分钟周期不合并（右列刷新即可）
+    if (mk.panels[mk.active] === "t" || mk.panels[mk.active] === "60") return;
     const rtDate = (q.rt_time || q.date || "").slice(0, 10);
     if (!q.rt_price || !rtDate || !mk.bars.length) return;
     const last = mk.bars[mk.bars.length - 1];
@@ -488,12 +494,33 @@ export function aggDaily(daily: Bar[], n: number): Bar[] {
   return out;
 }
 
-/** 周期 → 聚合根数（季 ≈ 65 个交易日，一年四根看大趋势） */
-const P_N: Record<PKey, number> = { d: 1, w: 5, m: 20, q: 65 };
+/** 周期 → 聚合根数（季 ≈ 65 个交易日，一年四根看大趋势）；t/60 不聚合直接用拉取数据 */
+const P_N: Record<PKey, number> = { t: 1, "60": 1, d: 1, w: 5, m: 20, q: 65 };
 
 export function barsFor(p: PKey): Bar[] {
+  if (p === "t") return mk.minuteData?.bars ?? [];
+  if (p === "60") return mk.m60 ?? [];
   const n = P_N[p] ?? 1;
   return n === 1 ? mk.bars : aggDaily(mk.bars, n);
+}
+
+/** 分时/60分数据按需拉取（后端 TTL 缓存 30s/120s，重复切回不打接口） */
+export async function ensurePeriodData(p: PKey): Promise<void> {
+  const s = mk.cur;
+  if (!s) return;
+  try {
+    if (p === "t" && !mk.minuteData) {
+      const d = await marketApi.minute(s.symbol);
+      if (mk.cur?.symbol !== s.symbol) return;
+      mk.minuteData = { date: d.date, prevClose: d.prev_close ?? null, bars: d.bars as Bar[] };
+    } else if (p === "60" && !mk.m60) {
+      const k = await marketApi.kline({ symbol: s.symbol, freq: "60" });
+      if (mk.cur?.symbol !== s.symbol) return;
+      mk.m60 = k.bars;
+    }
+  } catch (e) {
+    toast((e as Error).message || "分钟数据加载失败");
+  }
 }
 
 /* ── K线（klinecharts 10 · 策影同款配置，见 kline.ts）——多周期面板引擎 ── */
@@ -529,7 +556,7 @@ function ensurePanelDom(): void {
     `<div class="klp-bar"><b class="klp-name"></b>` +
     `<span class="klp-p" title="切换周期">${P_LABEL[p]}</span>` +
     `<span class="klp-menu">` +
-    (["d", "w", "m", "q"] as PKey[]).map((k) => `<button data-pp="${k}">${P_LABEL[k]}</button>`).join("") +
+    (["t", "60", "d", "w", "m", "q"] as PKey[]).map((k) => `<button data-pp="${k}">${P_LABEL[k]}</button>`).join("") +
     `</span></div><div class="klp-main"></div></div>`).join("");
   kls = [...box.querySelectorAll<HTMLElement>(".klp-main")].map((el) => mountKline(el));
 }
@@ -539,11 +566,12 @@ function applyPanel(i: number): void {
   const kl = kls[i];
   if (!kl || !mk.cur) return;
   const p = mk.panels[i] ?? "d";
-  kl.setPeriod(p === "q" ? "m" : p);           // 季线按月线引擎聚 65 根
-  kl.setMain(mk.mainInds);
-  kl.setSub(SUB_OK[currentLayout()]?.[i] ? mk.subInds : []);
+  kl.setPeriod(p === "q" ? "m" : p);           // 季线按月线引擎聚 65 根；t/60 原样透传
+  // 分时主图固定为均价线（MA/趋势通道对每分钟假 K 线无意义），其余周期走默认预设
+  kl.setMain(p === "t" ? ["avg"] : mk.mainInds);
+  kl.setSub(SUB_OK[currentLayout()]?.[i] ? (p === "t" ? ["vol"] : mk.subInds) : []);
   kl.setData(barsFor(p));
-  kl.drawLegend(mk.mainInds);
+  kl.drawLegend(p === "t" ? ["avg"] : (SUB_OK[currentLayout()]?.[i] ? [...mk.mainInds] : mk.mainInds));
   const box = document.querySelector<HTMLElement>(`.klp[data-pi="${i}"]`);
   if (box) box.querySelector(".klp-name")!.textContent = mk.cur.name || mk.cur.symbol;
 }
@@ -558,6 +586,11 @@ export function renderKline(): void {
   empty.style.display = "none";
   ensurePanelDom();
   kls.forEach((_, i) => applyPanel(i));
+  // 分时/60分面板：换标的后缓存已清，按需补拉（策略图面：先空后满）
+  const need = mk.panels.find((p) => (p === "t" && !mk.minuteData) || (p === "60" && !mk.m60));
+  if (need) void ensurePeriodData(need).then(() => {
+    mk.panels.forEach((p, i) => { if (p === need) applyPanel(i); });
+  });
 }
 
 /** 焦点面板周期同步到 chartbar 周期段（季线段里没有 → 全灭） */
@@ -566,11 +599,14 @@ function syncPeriodSeg(p: PKey): void {
     b.classList.toggle("on", b.dataset.p === p));
 }
 
-/** 切某面板周期（面板头 / chartbar 段共用；纯重聚合不重拉数据） */
+/** 切某面板周期（面板头 / chartbar 段共用；分时/60分先按需拉数据再渲染） */
 function setPanelPeriod(i: number, p: PKey): void {
   if (mk.panels[i] === p) { syncPeriodSeg(p); return; }
   mk.panels[i] = p;
-  applyPanel(i);
+  applyPanel(i);                               // 先渲染（缓存命中即刻有数据）
+  void ensurePeriodData(p).then(() => {
+    if (mk.panels[i] === p) applyPanel(i);     // 数据到达后重渲（未命中缓存时）
+  });
   document.querySelector<HTMLElement>(`.klp[data-pi="${i}"] .klp-p`)
     ?.replaceChildren(P_LABEL[p]);          // 面板头周期徽章同步
   if (i === mk.active) syncPeriodSeg(p);

@@ -1,4 +1,5 @@
-"""行情端点：GET /market/kline · /market/quote · /market/search · 资讯/研报。"""
+"""行情端点：GET /market/kline · /market/minute · /market/quote · /market/search · 资讯/研报。"""
+import time as _time
 from datetime import date
 from typing import Optional
 
@@ -10,9 +11,80 @@ from ...errors import vip_required
 from ...foundation import repo
 from ...foundation.db import get_conn
 from ...foundation import live
+from ...updater.collectors.http import _UA, client as tx_client, tx_symbol
 from pydantic import TypeAdapter
 
 router = APIRouter(tags=["market"])
+
+_TX_REFERER = "https://gu.qq.com/"
+_MINUTE_FREQS = {"60": ("m60", 320)}          # 对标策影周期集：分时 + 60 分先行
+_m_cache: dict = {}                           # key -> (ts, payload) 简单 TTL 缓存
+
+
+def _cached(key: str, ttl: float, fetch):
+    hit = _m_cache.get(key)
+    now = _time.time()
+    if hit and now - hit[0] < ttl:
+        return hit[1]
+    data = fetch()
+    _m_cache[key] = (now, data)
+    if len(_m_cache) > 300:                   # 防 LEAK：清过期项
+        stale = [k for k, v in _m_cache.items() if now - v[0] > ttl]
+        for k in stale[:150]:
+            _m_cache.pop(k, None)
+    return data
+
+
+def _tx_fetch(url: str, params: Optional[dict] = None):
+    r = tx_client.get(url, params=params, timeout=8,
+                      headers={"User-Agent": _UA, "Referer": _TX_REFERER})
+    r.raise_for_status()
+    return r.json()
+
+
+@router.get("/market/minute", summary="当日分时（价格线 + 均价线，腾讯实时，1 分钟粒度）")
+def minute(symbol: str = Query(description="6 位代码，兼容 sh.600519 形态")):
+    """策影 /api/data/intraday 同源移植：腾讯 minute/query。
+
+    返回 bars：date 装到分钟的 datetime，o/h/l/c=分钟价（策影同款假 K 线渲染），
+    avg=累计成交额/累计成交量/100（VWAP 均价线），prev_close 供涨跌幅坐标。
+    """
+    def fetch():
+        txc = tx_symbol(symbol)
+        if not txc:
+            raise ValueError(f"非法代码: {symbol}")
+        j = _tx_fetch("https://web.ifzq.gtimg.cn/appstock/app/minute/query",
+                      params={"code": txc})
+        d = (j.get("data") or {}).get(txc) or {}
+        body = d.get("data") or {}
+        qt = list((d.get("qt") or {}).values())
+        prev_close = None
+        if qt and len(qt[0]) > 4 and qt[0][4]:
+            prev_close = float(qt[0][4])
+        raw_day = body.get("date") or date.today().strftime("%Y%m%d")
+        day = f"{raw_day[:4]}-{raw_day[4:6]}-{raw_day[6:]}"
+        bars, pv, pa = [], 0, 0.0
+        for it in body.get("data") or []:
+            p = str(it).split(" ")
+            if len(p) < 4:
+                continue
+            price = float(p[1])
+            cum_v, cum_a = int(p[2]), float(p[3])
+            pv, pa, v, a = cum_v, cum_a, cum_v - pv, cum_a - pa
+            # VWAP：腾讯 volume 单位为手（1手=100股）。指数分时无 VWAP 概念，
+            # 算出来会掉到地上 —— 偏离现价 ±60% 直接置空，前端不画均价线。
+            avg = round(cum_a / (cum_v * 100), 3) if cum_v > 0 else None
+            if avg is not None and (price * 0.4 > avg or avg > price * 1.6):
+                avg = None
+            bars.append({
+                "date": f"{day} {p[0][:2]}:{p[0][2:]}",
+                "open": price, "high": price, "low": price, "close": price,
+                "volume": v, "amount": a,
+                "avg": avg if avg is not None else price,
+                "has_avg": avg is not None,
+            })
+        return {"symbol": symbol, "date": day, "prev_close": prev_close, "bars": bars}
+    return _cached(f"m|{symbol}", 30, fetch)
 
 
 def _merge_live_bar(bars: list, symbol: str, adjust: Adjust) -> list:
@@ -74,7 +146,7 @@ def _merge_live_bar(bars: list, symbol: str, adjust: Adjust) -> list:
     return bars
 
 
-@router.get("/market/kline", response_model=Kline, summary="K 线（复权在查询层派生）")
+@router.get("/market/kline", response_model=Kline, summary="K 线（复权在查询层派生；freq=60 为 60 分钟K）")
 def kline(
     symbol: str = Query(description="6 位代码，兼容 sh.600519 / 600519.SH 形态"),
     adjust: Adjust = Query(default=Adjust.qfq, description="qfq 看盘 / hfq 收益 / raw 原始价"),
@@ -85,10 +157,36 @@ def kline(
     start: Optional[str] = Query(default=None, description="起始日期 YYYY-MM-DD"),
     end: Optional[str] = Query(default=None, description="结束日期 YYYY-MM-DD"),
     limit: int = Query(default=500, ge=1, le=5000),
+    freq: Optional[str] = Query(default=None, description="60=60 分钟K（腾讯 mkline 实时，不落库）"),
     conn=Depends(get_conn),
 ):
     if with_param == WithParam.vip:
         raise vip_required("VIP 通道未授权：短线/中线操盘通道数据不返回（M1 桩）")
+    if freq in _MINUTE_FREQS:
+        tag, want = _MINUTE_FREQS[freq]
+
+        def fetch():
+            txc = tx_symbol(symbol)
+            if not txc:
+                raise ValueError(f"非法代码: {symbol}")
+            j = _tx_fetch("https://ifzq.gtimg.cn/appstock/app/kline/mkline",
+                          params={"param": f"{txc},{tag},,{want}"})
+            rows = (((j.get("data") or {}).get(txc) or {}).get(tag)) or []
+            # 字段序实测：[ymdHHMM, open, close, high, low, volume(股), {}, ...]
+            bars = []
+            for r in rows:
+                if len(r) < 6:
+                    continue
+                raw = str(r[0])
+                dt = f"{raw[:4]}-{raw[4:6]}-{raw[6:8]} {raw[8:10]}:{raw[10:12]}"
+                bars.append({"date": dt, "open": float(r[1]), "close": float(r[2]),
+                             "high": float(r[3]), "low": float(r[4]),
+                             "volume": float(r[5]), "live": False})
+            return bars
+
+        bars = _cached(f"k{freq}|{symbol}", 120, fetch)
+        return TypeAdapter(Kline).validate_python(
+            {"symbol": symbol, "period": freq, "adjust": "raw", "bars": bars})
     data = repo.market.get_kline(conn, symbol, adjust, with_param.value if with_param else None,
                                  start, end, limit)
     # 盘中实时：把「今日未收盘 bar」合并进尾部（守卫见 _merge_live_bar）；

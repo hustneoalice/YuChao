@@ -93,8 +93,11 @@ export interface IndexQuote {
   pct?: number | null; amount?: number | null;
 }
 export const marketApi = {
-  kline: (q: { symbol: string; adjust?: string; with?: string; limit?: number; start?: string; end?: string }) =>
+  kline: (q: { symbol: string; adjust?: string; with?: string; limit?: number; start?: string; end?: string; freq?: string }) =>
     req<Kline>(`/market/kline?${new URLSearchParams(Object.entries(q).filter(([, v]) => v != null).map(([k, v]) => [k, String(v)]))}`),
+  /* 当日分时（价格 + VWAP 均价 + 逐分钟量额，腾讯实时） */
+  minute: (symbol: string) =>
+    req<{ symbol: string; date: string; prev_close?: number; bars: (Bar & { avg: number; has_avg?: boolean })[] }>(`/market/minute?symbol=${encodeURIComponent(symbol)}`),
   quote: (symbol: string) => req<Quote>(`/market/quote?symbol=${encodeURIComponent(symbol)}`),
   search: (q: string, limit = 10) => req<{ items: SearchHit[]; total: number }>(`/market/search?q=${encodeURIComponent(q)}&limit=${limit}`),
   indices: () => req<{ items: IndexQuote[]; total_amount?: number }>("/market/indices"),

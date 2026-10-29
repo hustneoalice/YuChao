@@ -13,10 +13,12 @@ import { cssv } from "../fmt";
 const UP = "#EF5350";
 const DOWN = "#519C2C";
 const NEUTRAL = "#757575";
-const CH_FAST = "#FF9800";
-const CH_SLOW = "#0A84FF";
+/* 趋势通道配色（方案 B · 紫罗兰 × 青绿）：与 K 线红绿、MA 琥珀/蓝、BOLL 灰
+   全部区隔，避免与主流机构（同花顺/东财橙蓝通道）撞色 */
+const CH_FAST = "#C084FC";
+const CH_SLOW = "#2DD4BF";
 const channelFill = (strong: boolean, alpha: number) =>
-  strong ? `rgba(255, 155, 87, ${alpha})` : `rgba(90, 88, 251, ${alpha})`;
+  strong ? `rgba(192, 132, 252, ${alpha})` : `rgba(45, 212, 191, ${alpha})`;
 
 export function chartUp(): string {
   return document.documentElement.dataset.dir === "intl" ? DOWN : UP;
@@ -102,6 +104,16 @@ function ensureRegistered(): void {
   registered = true;
   registerTrendChannel("SHORT_TREND_CHANNEL", "短线趋势", 7, 10, 0.82);
   registerTrendChannel("MID_TREND_CHANNEL", "中线趋势", 35, 45, 0.86);
+  // 分时均价线（VWAP）：后端 /market/minute 已算好，直接透传画线
+  try {
+    registerIndicator({
+      name: "TIME_AVG",
+      shortName: "均价",
+      calc: (kLineDataList) =>
+        (kLineDataList as unknown as { avg?: number }[]).map((b) => ({ avg: b.avg ?? null })),
+      figures: [{ key: "avg", title: "均价", type: "line", styles: () => ({ color: "#26C6DA" }) }],
+    });
+  } catch { /* 重复注册忽略 */ }
   // 全局 Y 轴模板：覆盖内置 'normal'，成交量轴自动万/亿（策影 config.ts 同款）
   try {
     registerYAxis({
@@ -115,13 +127,15 @@ function ensureRegistered(): void {
   } catch { /* 重复注册会报错，忽略 */ }
 }
 
-/* ── 时间转换（策影 format.ts 逐字） ── */
+/* ── 时间转换（策影 format.ts 逐字 + 分钟级 datetime 支持） ── */
 function toTs(time: string): number {
   if (!time) return Date.now();
-  return time.includes("T") ? new Date(time).getTime() : new Date(time + "T00:00:00").getTime();
+  if (time.includes("T")) return new Date(time).getTime();
+  if (time.includes(" ")) return new Date(time.replace(" ", "T") + ":00").getTime();
+  return new Date(time + "T00:00:00").getTime();
 }
 
-export type MainKey = "ma" | "boll" | "short" | "mid";
+export type MainKey = "ma" | "boll" | "short" | "mid" | "avg";
 export type SubKey = "vol" | "macd" | "kdj" | "rsi" | "obv";
 
 export interface KlineChartHandle {
@@ -134,7 +148,7 @@ export interface KlineChartHandle {
   /** 副图多选：每个指标一个窗格，高度均分（策影 autoLayout 同款） */
   setSub: (inds: SubKey[]) => void;
   /** 当前周期（d/w/m）：决定十字光标卡片的标题形态 */
-  setPeriod: (p: "d" | "w" | "m") => void;
+  setPeriod: (p: "t" | "60" | "d" | "w" | "m") => void;
   /** 智能高度：按容器高重分主/副图（3.6:1，策影同款；开关关时副图固定 100px） */
   applyHeights: () => void;
   /** 缩放：factor>1 放大（K 线变宽），等价策影工具条 ±（barSpace ×1.25 / ×0.8） */
@@ -152,6 +166,7 @@ export interface KlineChartHandle {
 
 const MAIN_NAMES: Record<MainKey, string> = {
   ma: "MA", boll: "BOLL", short: "SHORT_TREND_CHANNEL", mid: "MID_TREND_CHANNEL",
+  avg: "TIME_AVG",
 };
 const SUB_NAMES: Record<SubKey, string> = { vol: "VOL", macd: "MACD", kdj: "KDJ", rsi: "RSI", obv: "OBV" };
 
@@ -223,7 +238,7 @@ function styles() {
 }
 
 /* ── 十字光标浮动信息卡（周期区分标题） ── */
-type TipPeriod = "d" | "w" | "m";
+type TipPeriod = "t" | "60" | "d" | "w" | "m";
 
 /** 量/额：万以下原值，万 → 亿（策影 formatVolumeValue 口径 + 手单位） */
 function fmtWanYi(v: number, unit = ""): string {
@@ -234,6 +249,8 @@ function fmtWanYi(v: number, unit = ""): string {
 }
 
 function tipTitle(date: string, p: TipPeriod): string {
+  if (p === "t") return `${date} · 分时`;
+  if (p === "60") return `${date} · 60分钟`;
   if (p === "m") return `${date.slice(0, 7)} · 月线`;
   if (p === "w") return `${date} 当周 · 周线`;
   return `${date} · 北京时间`;
@@ -288,6 +305,8 @@ export function mountKline(el: HTMLElement): KlineChartHandle {
       parts.push(`<span><i style="background:${accC}"></i>MA5</span><span><i style="background:${p1C}"></i>MA10</span><span><i style="background:${vipC}"></i>MA20</span>`);
     if (inds.includes("boll"))
       parts.push(`<span><i style="background:${dimC}"></i>BOLL(20,2)</span>`);
+    if (inds.includes("avg"))
+      parts.push(`<span><i style="background:#26C6DA"></i>均价线</span>`);
     const list = chart.getDataList() as { close: number }[];
     for (const k of inds) {
       if (k !== "short" && k !== "mid") continue;
@@ -484,6 +503,8 @@ export function mountKline(el: HTMLElement): KlineChartHandle {
             name: "BOLL", paneId: "candle_pane", isStack: true,
             styles: { lines: [{ color: dim }, { color: dim }, { color: dim }] },
           } as never, true);
+        } else if (k === "avg") {
+          chart.createIndicator({ name: "TIME_AVG", paneId: "candle_pane", isStack: true } as never, true);
         } else {
           chart.createIndicator({ name: MAIN_NAMES[k], paneId: "candle_pane", isStack: true } as never, true);
         }
@@ -517,7 +538,7 @@ export function mountKline(el: HTMLElement): KlineChartHandle {
       // 窗格高度交给智能高度统一分配（含 candle_pane）
       applyHeights();
     },
-    setPeriod(p: "d" | "w" | "m") { period = p; },
+    setPeriod(p: TipPeriod) { period = p; },
     applyHeights,
     zoom(factor: number) {
       const bs = chart.getBarSpace?.() as { bar: number } | undefined;
