@@ -321,7 +321,7 @@ function renderVip(body: HTMLElement): void {
     `<span class="tag ${vip ? "vip" : "warn"}">${vip ? `VIP有效${until ? " · " + until + " 到期" : ""}` : u ? "免费版" : "未登录"}</span></div>` +
     `<div class="setrow"><span class="lab">当前方案</span><div class="ctl"><span style="font-size:12.5px">${vip ? "VIP · 完整指标" : "免费版 · 公开名单与开源指标"}</span>` +
     `<span style="font-size:11px;color:var(--faint)">${vip ? "tier 服务端实时校验" : "VIP 指标服务端计算，未授权不返回数据"}</span></div></div>` +
-    `<div class="setrow"><span class="lab">解锁能力</span><div class="ctl"><span style="font-size:12px;color:var(--dim)">K线 VIP 通道 · 核心标三因子明细 · 六分段判定 · 趋势通道</span></div></div>` +
+    `<div class="setrow"><span class="lab">解锁能力</span><div class="ctl"><span style="font-size:12px;color:var(--dim)">K线 VIP 通道 · 核心标三因子明细 · 六分段判定 · 短中线趋势</span></div></div>` +
     `<div class="setrow"><span class="lab"></span><div class="ctl"><button class="hbtn primary" id="set-vip-go" data-ic="credit-card" data-sz="13">${vip ? "续费 / 叠加" : "立即开通"}</button>` +
     `<span style="font-size:10.5px;color:var(--faint)">兑换码（YC-XXXX-XXXX）核销 → license 自动签发 / 续期</span></div></div></div>`;
   body.querySelector("#set-vip-go")!.addEventListener("click", () => openModal("modal-vip"));

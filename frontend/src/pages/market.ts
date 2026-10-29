@@ -632,7 +632,7 @@ function cardBody(cid: string, mode: string): string {
   if (cid === "signals") {
     const segI = sixSegment(mk.bars, mk.bars.length - 1);
     if (!isVip()) {
-      return `<div class="locklayer">${ic("lock-key", 20)}<b>VIP 指标已锁定</b><span>趋势通道 · 六分段判定（服务端计算）</span><button class="hbtn primary" data-vip-open style="padding:0 12px;height:26px;font-size:11px">解锁</button></div>`;
+      return `<div class="locklayer">${ic("lock-key", 20)}<b>VIP 指标已锁定</b><span>短中线趋势 · 六分段判定（服务端计算）</span><button class="hbtn primary" data-vip-open style="padding:0 12px;height:26px;font-size:11px">解锁</button></div>`;
     }
     if (mode === "simple") {
       return `<div class="csimple"><div class="st"><b>${SEGNAME[segI]}</b> · 六分段判定<br><span style="font-size:10px;color:var(--faint)">短线 ${shortSeq[shortSeq.length - 1] > shortSeq[0] ? "上行" : "下行"} · 中线 ${midSeq[midSeq.length - 1] > midSeq[0] ? "上行" : "下行"}</span></div><div class="minifig">${spark(midSeq, 64, 22, "var(--p1)")}</div></div>`;

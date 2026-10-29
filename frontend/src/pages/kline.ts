@@ -1,6 +1,6 @@
 /* K线图表 —— klinecharts 10，配置 1:1 对齐策影 1.0（strategy-lens）
  *  · candle_up_stroke 阳线空心 · 涨 #EF5350 / 跌 #519C2C · 无网格 · 最新价水平线关
- *  · 自研操盘通道：短线 MA7/MA10、中线 MA35/MA45，逐柱填充（强橙/弱蓝）
+ *  · 自研操盘趋势：短线 MA7/MA10、中线 MA35/MA45，逐柱填充（强橙/弱蓝）
  *  · registerYAxis('normal') 全局轴模板：成交量轴万/亿（策影 config.ts 同款）
  *  · 滚轮缩放 / 拖拽平移为 klinecharts 原生能力
  *  · 十字光标浮动信息卡：OHLC/涨跌/振幅/区间位置/量额，周期（日/周/月）区分标题
@@ -25,7 +25,7 @@ export function chartDown(): string {
   return document.documentElement.dataset.dir === "intl" ? UP : DOWN;
 }
 
-/* ── 自研操盘通道（策影 indicatorRegistry 逐字移植） ──
+/* ── 自研操盘趋势（策影 indicatorRegistry 逐字移植） ──
  * 短线：MA7 快 + MA10 慢（α .82）｜中线：MA35 快 + MA45 慢（α .86）
  * 收盘 > 慢线 → 多头（橙）否则空头（蓝）
  */
@@ -100,8 +100,8 @@ let registered = false;
 function ensureRegistered(): void {
   if (registered) return;
   registered = true;
-  registerTrendChannel("SHORT_TREND_CHANNEL", "短线通道", 7, 10, 0.82);
-  registerTrendChannel("MID_TREND_CHANNEL", "中线通道", 35, 45, 0.86);
+  registerTrendChannel("SHORT_TREND_CHANNEL", "短线趋势", 7, 10, 0.82);
+  registerTrendChannel("MID_TREND_CHANNEL", "中线趋势", 35, 45, 0.86);
   // 全局 Y 轴模板：覆盖内置 'normal'，成交量轴自动万/亿（策影 config.ts 同款）
   try {
     registerYAxis({
@@ -129,7 +129,7 @@ export interface KlineChartHandle {
   setData: (bars: Bar[]) => void;
   /** 主图多选叠加：增量增删，不动已叠加的同名指标 */
   setMain: (inds: MainKey[]) => void;
-  /** 图内右上角指标图例（MA/BOLL/操盘通道，色块+名称；多面板时每实例一份） */
+  /** 图内右上角指标图例（MA/BOLL/操盘趋势，色块+名称；多面板时每实例一份） */
   drawLegend: (inds: MainKey[]) => void;
   /** 副图多选：每个指标一个窗格，高度均分（策影 autoLayout 同款） */
   setSub: (inds: SubKey[]) => void;
@@ -276,7 +276,7 @@ export function mountKline(el: HTMLElement): KlineChartHandle {
   el.appendChild(tip);
   let period: TipPeriod = "d";
 
-  /* ── 图内右上角指标图例：色块 + 名称；操盘通道按本面板数据判多空 ── */
+  /* ── 图内右上角指标图例：色块 + 名称；操盘趋势按本面板数据判多空 ── */
   const legend = document.createElement("div");
   legend.className = "legend";
   el.appendChild(legend);
