@@ -53,7 +53,19 @@ class Writer:
                 f"DuckDB 文件不存在：{self.db_path}（先用 scripts/ensure_schema.py 初始化）")
         c = getattr(_local, "wconn", None)
         if c is None:
-            c = duckdb.connect(str(self.db_path), read_only=False)
+            # 跨进程锁协调：API 进程的只读连接空闲 90s 后由 reaper 自动关闭让锁，
+            # 这里写连接拿不到锁时重试等待（3s × 50 = 150s，覆盖空闲窗口 + 余量）
+            import time
+            for i in range(50):
+                try:
+                    c = duckdb.connect(str(self.db_path), read_only=False)
+                    break
+                except duckdb.IOException as e:
+                    if "Could not set lock" not in str(e) or i == 49:
+                        raise
+                    if i == 0:
+                        logger.warning("写锁被占用（API 只读连接），等待释放后重试…")
+                    time.sleep(3)
             _local.wconn = c
         return c
 

@@ -429,6 +429,8 @@ def test_control_requests_roundtrip(tmp_path):
 def test_api_update_trigger_202(client, monkeypatch, tmp_path):
     monkeypatch.setattr("app.config.settings.control_requests_path",
                         tmp_path / "c.jsonl")
+    # 提交前有 updater 心跳探测（停机期请求会被控制通道 offset 跳过）
+    monkeypatch.setattr("app.routers.v1.data._updater_alive", lambda **kw: True)
     r = client.post("/api/v1/data/update", json={"kind": "valuation"})
     assert r.status_code == 202
     body = r.json()
@@ -437,6 +439,18 @@ def test_api_update_trigger_202(client, monkeypatch, tmp_path):
     recs = [json.loads(l) for l in
             (tmp_path / "c.jsonl").read_text().splitlines() if l.strip()]
     assert recs and recs[0]["kind"] == "valuation"
+
+
+def test_api_update_trigger_offline_503(client, monkeypatch, tmp_path):
+    """updater 不在线（无心跳快照）→ 503 明确报错，而不是静默丢失请求。"""
+    monkeypatch.setattr("app.config.settings.control_requests_path",
+                        tmp_path / "c.jsonl")
+    monkeypatch.setattr("app.config.settings.update_snapshot_path",
+                        tmp_path / "missing.json")
+    r = client.post("/api/v1/data/update", json={"kind": "valuation"})
+    assert r.status_code == 503
+    assert "更新进程未运行" in r.json()["detail"]
+    assert not (tmp_path / "c.jsonl").exists()      # 不落请求行
 
 
 def test_api_update_unknown_kind_422(client, monkeypatch, tmp_path):

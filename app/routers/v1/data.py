@@ -7,7 +7,7 @@
 import json
 from pathlib import Path
 
-from fastapi import APIRouter, Depends
+from fastapi import APIRouter, Depends, HTTPException
 from pydantic import BaseModel, Field, TypeAdapter
 
 from ...contracts.data import DataStatus
@@ -57,6 +57,10 @@ def update(body: UpdateTrigger):
         raise invalid_param(
             f"未知任务类型: {body.kind}",
             {"available": [t["kind"] for t in registry.TASKS]})
+    if not _updater_alive():
+        raise HTTPException(
+            status_code=503,
+            detail="更新进程未运行（请求不会被消费）— 启动：python -m app.updater")
     rid = ControlRequests(settings.control_requests_path).submit(
         body.kind, force=body.force)
     return {
@@ -71,6 +75,9 @@ def update(body: UpdateTrigger):
 @router.post("/data/update/cancel", status_code=202,
              summary="请求停止当前更新 / 清空排队（经控制通道交 updater 进程）")
 def update_cancel():
+    if not _updater_alive():
+        raise HTTPException(
+            status_code=503, detail="更新进程未运行，无需停止")
     rid = ControlRequests(settings.control_requests_path).submit("__cancel__")
     return {
         "accepted": True,
@@ -93,6 +100,29 @@ def update_state():
         return empty
     except Exception:
         return {**empty, "error": "snapshot_unreadable"}
+
+
+def _updater_alive(max_age_s: float = 20.0) -> bool:
+    """updater 心跳探测：进度快照 saved_at 距今 < 20s 视为在线。
+
+    控制通道请求在 updater 停机期间写入的行重启后被 offset 跳过（不重放），
+    即静默丢失——提交前必须探测，不在线要明确 503，而不是让用户等一个
+    永远不会执行的任务。快照由编排器持续刷新（空闲也每 ~5s 落一次）。
+    """
+    try:
+        snap = json.loads(settings.update_snapshot_path.read_text(encoding="utf-8"))
+        saved = snap.get("saved_at")
+        if not saved:
+            return False
+        from datetime import datetime
+        t = datetime.fromisoformat(str(saved).replace("Z", "+00:00"))
+        age = (datetime.now(tz=t.tzinfo or None) - t).total_seconds() \
+            if t.tzinfo else (datetime.now() - t).total_seconds()
+        return 0 <= age < max_age_s
+    except FileNotFoundError:
+        return False
+    except Exception:
+        return False
 
 
 @router.get("/data/updates", summary="更新落账查询（updater 写入的 update_log）")
@@ -129,6 +159,10 @@ def init(body: InitTrigger):
         kind, params = "backfill", {}
     else:
         raise invalid_param(f"未知 mode: {body.mode}", {"available": ["import", "backfill"]})
+    if not _updater_alive():
+        raise HTTPException(
+            status_code=503,
+            detail="更新进程未运行（请求不会被消费）— 启动：python -m app.updater")
     rid = ControlRequests(settings.control_requests_path).submit(kind, params=params)
     return {
         "accepted": True,
@@ -143,6 +177,10 @@ def init(body: InitTrigger):
              summary="导出离线数据包（全量快照 + SHA256 manifest，P1 · F14）")
 def export(body: ExportTrigger):
     params = {"out_dir": body.out_dir} if body.out_dir else {}
+    if not _updater_alive():
+        raise HTTPException(
+            status_code=503,
+            detail="更新进程未运行（请求不会被消费）— 启动：python -m app.updater")
     rid = ControlRequests(settings.control_requests_path).submit(
         "package_export", params=params)
     out_dir = body.out_dir or str(settings.export_dir)

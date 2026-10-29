@@ -50,7 +50,8 @@ def main() -> None:
     # 3. 调度链
     sched = None
     if settings.scheduler_enabled:
-        from .scheduler import build_scheduler, describe_chain
+        from .registry import describe_chain
+        from .scheduler import build_scheduler
 
         sched = build_scheduler(orchestrator)
         sched.start()
@@ -74,6 +75,7 @@ def main() -> None:
     signal.signal(signal.SIGTERM, _sig)
 
     logger.info("updater 就绪（控制轮询 %.1fs）", settings.control_poll_s)
+    _beat = 0
     while not stop.is_set():
         try:
             offset, reqs = control.poll(offset)
@@ -96,6 +98,9 @@ def main() -> None:
             logger.exception("[Control] 轮询异常")
             stop.wait(settings.control_poll_s)
             continue
+        _beat += 1
+        if _beat % 3 == 0:                       # ~6s 空闲心跳，维持 saved_at
+            orchestrator.heartbeat()
         stop.wait(settings.control_poll_s)
 
     if sched:

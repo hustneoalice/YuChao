@@ -3,7 +3,7 @@ import { marketApi, type Bar, type IndexQuote, type Quote } from "../api";
 import { cssv, esc, fmt, fmtChg, fmtYi } from "../fmt";
 import { sma, bollSeries, kdjSeries, atrSeries, sixSegment } from "../indicators";
 import { ic } from "../icons";
-import { CARD_DEFS, getState, isVip, setCardPref, subscribe } from "../store";
+import { CARD_DEFS, getState, setCardPref, subscribe } from "../store";
 import { openModal, toast } from "../ui";
 import { mountKline, type KlineChartHandle, type MainKey, type SubKey } from "./kline";
 
@@ -631,9 +631,6 @@ function cardBody(cid: string, mode: string): string {
   }
   if (cid === "signals") {
     const segI = sixSegment(mk.bars, mk.bars.length - 1);
-    if (!isVip()) {
-      return `<div class="locklayer">${ic("lock-key", 20)}<b>VIP 指标已锁定</b><span>短中线趋势 · 六分段判定（服务端计算）</span><button class="hbtn primary" data-vip-open style="padding:0 12px;height:26px;font-size:11px">解锁</button></div>`;
-    }
     if (mode === "simple") {
       return `<div class="csimple"><div class="st"><b>${SEGNAME[segI]}</b> · 六分段判定<br><span style="font-size:10px;color:var(--faint)">短线 ${shortSeq[shortSeq.length - 1] > shortSeq[0] ? "上行" : "下行"} · 中线 ${midSeq[midSeq.length - 1] > midSeq[0] ? "上行" : "下行"}</span></div><div class="minifig">${spark(midSeq, 64, 22, "var(--p1)")}</div></div>`;
     }
@@ -754,8 +751,7 @@ export function renderRight(): void {
   for (const def of defs) {
     const p = st.cards[def.id];
     if (!p.on) continue;
-    const locked = def.id === "signals" && !isVip();
-    html += `<div class="rcard" data-cid="${def.id}">${locked ? "" : cardHead(def)}` +
+    html += `<div class="rcard" data-cid="${def.id}">${cardHead(def)}` +
       `<div class="fbody${p.mode === "simple" && def.id === "signals" ? "" : ""}${false ? " hide" : ""}">${cardBody(def.id, p.mode)}</div></div>`;
   }
   html += `<div class="cmpl">仅提供基于公开数据的规则化分析，不构成投资建议 · 指标为开源口径前端计算，VIP 明细服务端脱敏返回</div>`;

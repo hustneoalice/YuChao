@@ -159,9 +159,10 @@ def test_market_indices_degrade(client: TestClient, monkeypatch):
 
 
 def test_data_update_trigger_202(client: TestClient, monkeypatch, tmp_path):
-    # M2：501 桩 → 控制通道 202（updater 进程消费）
+    # M2：501 桩 → 控制通道 202（updater 进程消费；探测需在线）
     monkeypatch.setattr("app.config.settings.control_requests_path",
                         tmp_path / "c.jsonl")
+    monkeypatch.setattr("app.routers.v1.data._updater_alive", lambda **kw: True)
     r = client.post("/api/v1/data/update", json={"kind": "valuation"})
     assert r.status_code == 202 and r.json()["accepted"] is True
 

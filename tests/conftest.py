@@ -133,10 +133,10 @@ def client(duckdb_file, monkeypatch):
 
     from app.foundation import db as fdb
 
-    fdb.reset_conn()
+    fdb.close_all()
     monkeypatch.setattr(settings, "duckdb_path", duckdb_file)
     from app.main import app
 
     with TestClient(app) as c:
         yield c
-    fdb.reset_conn()
+    fdb.close_all()

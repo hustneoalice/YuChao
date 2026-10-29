@@ -477,6 +477,14 @@ class UpdateOrchestrator:
         except Exception as e:
             logger.debug("[Orchestrator] 快照落盘失败: %s", e)
 
+    def heartbeat(self):
+        """空闲心跳：强制刷一次快照 saved_at。
+
+        API 侧 _updater_alive 靠 saved_at 判在线（停机期间的请求会被
+        控制通道 offset 跳过），空闲时状态不变、_persist 不会被触发，
+        必须由主循环周期调用维持心跳。"""
+        self._persist(force=True)
+
     def _load_snapshot(self):
         """启动时读回上次快照，把未结束的任务标为 interrupted。"""
         try:
