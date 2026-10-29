@@ -390,7 +390,7 @@ td .lnk:hover{text-decoration:underline}
 .kl-ipanel{position:absolute;top:34px;right:10px;z-index:20;background:var(--panel);
   border:1px solid var(--border);border-radius:11px;box-shadow:var(--shadow);padding:9px 11px;
   display:flex;flex-direction:column;gap:6px}
-.kl-stage .legend{position:absolute;top:10px;right:12px;z-index:6;pointer-events:none;
+.kl-stage .legend{position:absolute;top:10px;right:68px;z-index:6;pointer-events:none;
   justify-content:flex-end;background:color-mix(in srgb,var(--panel) 72%,transparent);
   padding:3px 9px;border-radius:8px;backdrop-filter:blur(6px);-webkit-backdrop-filter:blur(6px)}
 .kl-ipanel[hidden]{display:none!important}
