@@ -91,55 +91,107 @@ const freshHuman = (d?: string | null): string => {
 let upTimer: ReturnType<typeof setInterval> | null = null;
 const stopUpState = (): void => { if (upTimer) { clearInterval(upTimer); upTimer = null; } };
 
-/** 更新进度卡：只刷新 #up-progress，不重绘整页（保住滚动位置与按钮事件） */
+/** 秒 → 人话时长（策影 fmtDur） */
+const fmtDur = (s?: number | null): string => {
+  if (s == null) return "—";
+  if (s < 60) return `${Math.round(s)} 秒`;
+  const m = Math.floor(s / 60), r = Math.round(s % 60);
+  return r ? `${m} 分 ${r} 秒` : `${m} 分`;
+};
+
+/** 任务状态 → 色点/胶囊语义（p1 蓝=进行中，ok 绿=成功，warn 黄=排队，bad 红=失败） */
+const UP_STATUS: Record<string, { label: string; dot: string; cap: string }> = {
+  running: { label: "执行中", dot: "info", cap: "info" },
+  queued: { label: "排队中", dot: "warn", cap: "warn" },
+  completed: { label: "已完成", dot: "ok", cap: "ok" },
+  skipped: { label: "无新增", dot: "ok", cap: "warn" },
+  cancelled: { label: "已停止", dot: "warn", cap: "warn" },
+  interrupted: { label: "被中断", dot: "bad", cap: "bad" },
+  failed: { label: "失败", dot: "bad", cap: "bad" },
+};
+
+/** 日志级别 → 颜色类（info 灰 / success 绿 / warning 黄 / error 红） */
+const logCls = (lv?: string): string => (["success", "warning", "error"].includes(lv || "") ? lv! : "info");
+
+/**
+ * 数据更新卡（策影 UpdateProgressCard 同构 · 驭潮皮肤）
+ * 回答两个问题：现在在更新什么、跑到哪了；以及没在更新时，为什么不用管。
+ * 三形态：执行中（阶段+进度条+三格统计+日志）/ 排队中 / 空闲已就绪（一句话+最近记录折叠）。
+ */
 async function refreshUpState(): Promise<void> {
-  const box = document.getElementById("up-progress");
-  if (!box) { stopUpState(); return; }
+  const bodyBox = document.getElementById("up-body");
+  const chipBox = document.getElementById("up-chip");
+  const savedEl = document.getElementById("up-saved");
+  if (!bodyBox || !chipBox) { stopUpState(); return; }
   let snap: UpdateSnapshot | null = null;
   try { snap = await dataApi.state(); } catch { /* 快照不可达，保持原样 */ }
-  const saved = document.getElementById("up-saved");
-  if (saved) saved.textContent = snap?.saved_at ? `最近检查 ${snap.saved_at.replace("T", " ").slice(5, 19)}` : "";
+  if (savedEl) savedEl.textContent = snap?.saved_at ? `最近检查 ${snap.saved_at.replace("T", " ").slice(5, 19)}` : "";
   if (!snap) return;
-  const parts: string[] = [];
+
   const r = snap.running;
+  const queued = snap.queued ?? [];
+  const recent = (snap.recent ?? []).filter((t) => t.status !== "running");
+
+  /* 头部胶囊（策影 head 逻辑） */
+  const head = r
+    ? ["更新进行中", "info"] : queued.length
+    ? [`排队 ${queued.length} 项`, "warn"]
+    : snap.error ? ["检查更新状态", "warn"] : ["数据已就绪", "ok"];
+  chipBox.innerHTML = `<span class="upstat ${head[1]}">${esc(head[0])}</span>`;
+
+  const parts: string[] = [];
   if (r) {
+    const st = UP_STATUS[r.status] ?? UP_STATUS.running;
+    const isRun = r.status === "running";
     const pct = Math.max(r.percent ?? 0, 1.5);
     parts.push(
-      `<div class="uprow"><i class="logdot" style="background:var(--p1);animation:pulse 1.2s infinite"></i>` +
-      `<b style="font-size:12.5px">${esc(r.label)}</b><span class="tag p1">执行中</span>` +
-      `<span style="flex:1"></span><b class="num">${(r.percent ?? 0).toFixed(1)}%</b></div>`,
+      `<div class="uprow">` +
+      `<i class="logdot ${st.dot}"${isRun ? ' style="animation:pulse 1.2s infinite"' : ""}></i>` +
+      `<b style="font-size:12.5px">${esc(r.label)}</b>` +
+      `<span class="upstat ${st.cap}">${esc(st.label)}</span>` +
+      `<span style="font-size:11px;color:var(--faint)">${esc(r.trigger === "manual" ? "手动触发" : "自动触发")}</span>` +
+      `<span style="flex:1"></span><b class="num" style="font-size:12.5px">${(r.percent ?? 0).toFixed(1)}%</b></div>`,
       `<div class="upbar"><i style="width:${pct}%"></i></div>`,
-      `<div style="font-size:11px;color:var(--faint)">${esc(r.stage || "")}` +
-      (r.total ? ` · <b class="num" style="color:var(--text)">${fmt(r.done ?? 0, 0)}</b>/${fmt(r.total, 0)}` : "") +
-      (r.rows ? ` · 已写 ${fmt(r.rows, 0)} 行` : "") +
-      (r.elapsed_s != null ? ` · 已用 ${r.elapsed_s}s` : "") + `</div>`);
-    const logs = (r.logs ?? []).slice(-5).reverse();
+      `<div style="display:flex;justify-content:space-between;font-size:11px">` +
+      `<span style="color:var(--dim)">${esc(r.stage || "")}</span>` +
+      (r.total ? `<span style="color:var(--faint)"><b class="num" style="color:var(--text)">${fmt(r.done ?? 0, 0)}</b>/${fmt(r.total, 0)}</span>` : "") +
+      `</div>`,
+      `<div class="upstats">` +
+      `<div><div class="k">成功 / 失败</div><div class="v">` +
+      `<span style="color:var(--down)">${fmt(r.succeeded ?? 0, 0)}</span><span style="color:var(--faint)"> / </span>` +
+      `<span style="color:${r.failed ? "var(--up)" : "var(--faint)"}">${fmt(r.failed ?? 0, 0)}</span></div></div>` +
+      `<div><div class="k">已写入数据</div><div class="v">${r.rows != null ? fmtW(r.rows) : "—"}</div></div>` +
+      `<div><div class="k">${isRun ? "已用时间" : "总耗时"}</div><div class="v">${fmtDur(r.elapsed_s)}</div></div></div>`,
+    );
+    if (r.message) parts.push(`<div style="font-size:11px;color:var(--faint)">${esc(r.message)}</div>`);
+    const logs = (r.logs ?? []).slice(-8).reverse();
     if (logs.length)
       parts.push(`<div class="uplogs">${logs.map((l) =>
-        `<div>${esc(l.time || "")} ${esc(l.message || "")}</div>`).join("")}</div>`);
-  } else if (snap.queued?.length) {
-    parts.push(`<div class="uprow"><i class="logdot warn"></i>` +
-      `<span>排队等待：<b style="color:var(--text)">${snap.queued.map((q) => esc(q.label)).join("、")}</b></span></div>`);
+        `<div><i class="${logCls(l.level)}">${esc(l.time || "")}</i> ${esc(l.message || "")}</div>`).join("")}</div>`);
+    if (r.error) parts.push(`<div style="font-size:11px;color:var(--up);background:var(--up-soft);border-radius:8px;padding:7px 9px;line-height:1.5;word-break:break-all">${esc(r.error.slice(0, 300))}</div>`);
+  } else if (queued.length) {
+    parts.push(queued.map((q) =>
+      `<div class="uprow"><i class="logdot warn"></i>` +
+      `<span>排队等待：<b style="color:var(--text)">${esc(q.label)}</b></span></div>`).join(""));
   } else {
-    parts.push(`<div style="font-size:12px;color:var(--dim)">当前没有正在执行的更新 · 每个交易日收盘后会自动补最新数据，也可以用下方按钮立即更新</div>`);
+    parts.push(`<div style="font-size:12px;color:var(--dim);line-height:1.6">数据都是最新的。每个交易日收盘后会自动补齐最新行情，错过的也会自动补上，平时不需要手动操作。</div>`);
+    if (recent.length) {
+      parts.push(`<details><summary class="uprecent">最近 ${Math.min(recent.length, 5)} 次更新记录</summary>` +
+        `<div class="uprecent-list">${recent.slice(0, 5).map((t) => {
+          const st = UP_STATUS[t.status] ?? UP_STATUS.skipped;
+          const tm = (t.finished_at || t.started_at || "").slice(11, 19) || "--:--:--";
+          return `<div class="uprow" style="font-size:11px">` +
+            `<i class="logdot ${st.dot}" style="width:6px;height:6px"></i>` +
+            `<span class="num" style="color:var(--faint);flex:none">${esc(tm)}</span>` +
+            `<span style="color:var(--text);flex:none">${esc(t.label)}</span>` +
+            `<span style="color:var(--dim);flex:none">${esc(st.label)}</span>` +
+            `<span style="color:var(--faint);overflow:hidden;text-overflow:ellipsis;white-space:nowrap">` +
+            `${t.rows ? fmtW(t.rows) + " 条 · " : ""}${esc(String(t.message || ""))}</span></div>`;
+        }).join("")}</div></details>`);
+    }
   }
-  const recent = (snap.recent ?? []).filter((t) => t.status !== "running").slice(0, 6);
-  if (recent.length) {
-    parts.push(`<div style="margin-top:6px;font-size:10.5px;color:var(--faint);letter-spacing:.02em">最近任务</div>`);
-    parts.push(recent.map((t) => {
-      const [txt, cls] = STATUS_TEXT[t.status] ?? [t.status || "—", "flat"];
-      const dot = t.status === "failed" || t.status === "interrupted" ? "bad" :
-        t.status === "completed" ? "ok" : "warn";
-      const tm = (t.finished_at || t.started_at || "").replace("T", " ").slice(5, 16);
-      return `<div class="uprec"><i class="logdot ${dot}"></i>` +
-        `<span class="num" style="color:var(--faint)">${esc(tm || "—")}</span>` +
-        `<span style="color:var(--text)">${esc(t.label || t.kind)}</span>` +
-        `<span class="tag ${cls}">${esc(txt)}</span>` +
-        `<span class="num" style="margin-left:auto">${t.rows ? fmt(t.rows, 0) + " 行" : ""}</span></div>`;
-    }).join(""));
-  }
-  if (snap.error) parts.push(`<div style="font-size:10.5px;color:var(--up)">进度信息暂时读不到，不影响自动更新（${esc(snap.error)}）</div>`);
-  box.innerHTML = parts.join("");
+  if (snap.error) parts.push(`<div style="font-size:10.5px;color:var(--warn)">更新状态暂时读不到，不影响自动更新（${esc(snap.error)}）</div>`);
+  bodyBox.innerHTML = parts.join("");
 }
 
 async function renderData(body: HTMLElement): Promise<void> {
@@ -160,14 +212,22 @@ async function renderData(body: HTMLElement): Promise<void> {
   const latest = tables.map((t) => t.latest_date).filter(Boolean).sort().pop() || "—";
 
   body.innerHTML =
-    /* ① 总览：散户关心的三件事 — 更新到哪了 / 有多少 / 要不要我管 */
+    /* ① 数据更新（置顶 · 策影 UpdateProgressCard 同构）：现在更新什么/跑到哪了；没在更新时为什么不用管 */
+    `<div class="setsec"><div class="sh">${ic("paper-plane-tilt", 15)}<h3>数据更新</h3>` +
+    `<span id="up-chip" style="display:inline-flex"></span><span class="sp"></span><span class="sub num" id="up-saved"></span></div>` +
+    `<div class="upcard" id="up-body"><span style="color:var(--faint);font-size:11.5px">正在读取更新状态…</span></div>` +
+    `<div class="setrow" style="border-top:1px solid var(--border-soft);margin-top:12px;padding-top:10px"><span class="lab">手动更新</span><div class="ctl" style="gap:8px">` +
+    tasks.map((t) => `<button class="hbtn" data-run="${t.kind}" title="${esc(t.description)}">${esc(t.label)}</button>`).join("") +
+    `</div></div>` +
+    `<div style="font-size:10.5px;color:var(--faint)">平时不需要手动操作；手动更新会在后台执行，完成后页面数据自动刷新</div></div>` +
+    /* ② 总览：散户关心的三件事 — 更新到哪了 / 有多少 / 要不要我管 */
     `<div class="setsec"><div class="sh">${ic("database", 15)}<h3>数据总览</h3><span class="sub">本地数据 · 自动维护，无需操作</span><span class="sp"></span>` +
     `<span class="datachip i-${stage[1] === "ok" ? "up" : stage[1] === "warn" ? "mid" : ""}"><i></i><span>${esc(stage[0])}</span></span></div>` +
     `<div class="setrow"><span class="lab">行情更新到</span><div class="ctl"><span class="num" style="font-weight:600">${esc(latest)}</span>` +
     `<span style="font-size:11px;color:var(--faint)">${esc(freshHuman(latest))}</span></div></div>` +
     `<div class="setrow"><span class="lab">数据总量</span><div class="ctl"><span class="num">${fmtW(totalRows)}</span><span style="color:var(--faint);font-size:11px">${tables.length} 类数据</span></div></div>` +
-    `<div class="setrow"><span class="lab">自动更新</span><div class="ctl"><span style="font-size:12px;color:var(--dim)">每个交易日收盘后自动补齐最新行情，错过的会自动补上<span style="color:var(--faint)"> · 也可用下方按钮手动更新</span></span></div></div></div>` +
-    /* ② 数据内容：每类数据更新到哪天（驭潮 dscard 新鲜度色点保留） */
+    `<div class="setrow"><span class="lab">自动更新</span><div class="ctl"><span style="font-size:12px;color:var(--dim)">每个交易日收盘后自动补齐最新行情，错过的会自动补上<span style="color:var(--faint)"> · 也可用上方按钮手动更新</span></span></div></div></div>` +
+    /* ③ 数据内容：每类数据更新到哪天（驭潮 dscard 新鲜度色点保留） */
     `<div class="setsec"><div class="sh"><h3>数据内容</h3><span class="sub">每类数据更新到哪天了 · 色点：绿 最新 / 黄 稍旧 / 红 该更新了</span></div>` +
     `<div class="dsgrid">` +
     (tables.length ? tables.map((t) => {
@@ -177,27 +237,19 @@ async function renderData(body: HTMLElement): Promise<void> {
         `<div class="ds-date num">${esc(t.latest_date || "—")}</div>` +
         `<div class="ds-m"><span class="num">${fmtW(t.rows ?? 0)} 条</span>` +
         `<span class="fresh ${cls}">${freshLabel(n)}</span></div></div>`;
-    }).join("") : `<div style="color:var(--faint);font-size:12px">数据还在准备中 — 用下方「立即更新」按钮开始第一次更新</div>`) +
+    }).join("") : `<div style="color:var(--faint);font-size:12px">数据还在准备中 — 用上方「手动更新」按钮开始第一次更新</div>`) +
     `</div></div>` +
-    /* ③ 正在更新：实时进度 + 手动更新按钮（保留驭潮 upcard 结构） */
-    `<div class="setsec"><div class="sh"><h3>正在更新</h3><span class="sub">收盘后自动运行，更新过程在这里实时可见</span><span class="sp"></span><span class="sub num" id="up-saved"></span></div>` +
-    `<div class="upcard" id="up-progress"><span style="color:var(--faint);font-size:11.5px">正在读取更新状态…</span></div>` +
-    `<div class="setrow" style="border-top:1px solid var(--border-soft);margin-top:12px;padding-top:10px"><span class="lab">手动更新</span><div class="ctl" style="gap:8px">` +
-    tasks.map((t) => `<button class="hbtn" data-run="${t.kind}" title="${esc(t.description)}">${esc(t.label)}</button>`).join("") +
-    `</div></div>` +
-    `<div style="font-size:10.5px;color:var(--faint)">平时不需要手动操作；手动更新会在后台执行，完成后页面数据自动刷新</div></div>` +
     /* ④ 更新记录：每天自动更新了什么、成功与否、新增多少 */
     `<div class="setsec"><div class="sh"><h3>更新记录</h3><span class="sub">最近的自动 / 手动更新历史</span></div>` +
     `<table><thead><tr><th>时间</th><th>更新内容</th><th>结果</th><th class="n">新增数据</th><th>备注</th></tr></thead><tbody>` +
     (logs.length ? logs.map((l) => {
-      const ok = l.status === "success" || l.status === "ok" || l.status === "completed";
       const [txt, cls] = STATUS_TEXT[String(l.status)] ?? [String(l.status || "—"), "flat"];
       return `<tr><td class="num">${esc(String(l.created_at || l.started_at || "—")).replace("T", " ").slice(0, 16)}</td>` +
         `<td>${esc(DATA_TYPE_ZH[String(l.data_type || "")] || String(l.data_type || "—"))}</td>` +
         `<td><span class="tag ${cls}">${esc(txt)}</span></td>` +
         `<td class="n num">${l.rows != null ? "+" + fmtW(l.rows) : "—"}</td>` +
         `<td style="max-width:280px;overflow:hidden;text-overflow:ellipsis;color:var(--faint)">${esc(String(l.detail || l.error || l.message || ""))}</td></tr>`;
-    }).join("") : `<tr><td colspan="5" style="text-align:center;color:var(--faint)">${esc("还没有更新记录 — 点上方「立即更新」试试")}</td></tr>`) +
+    }).join("") : `<tr><td colspan="5" style="text-align:center;color:var(--faint)">${esc("还没有更新记录 — 点上方「手动更新」试试")}</td></tr>`) +
     `</tbody></table></div>`;
 
   body.querySelectorAll<HTMLElement>("[data-run]").forEach((b) =>
