@@ -324,6 +324,7 @@ def fetch_kline_tx(code: str, count: int = 3200) -> List[Dict[str, Any]]:
 
     v 换算成股：科创板（688/689）腾讯原始即股，其余为手 ×100；amount 腾讯不
     返回，写 None（涨跌幅由写库侧按前收盘补算）。"""
+    from .http import pure_of          # 局部导入避免环（fetch_kline_em 同款）
     tx = tx_symbol(code)
     if not tx:
         return []
