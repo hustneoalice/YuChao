@@ -21,6 +21,7 @@ from datetime import date, datetime, timedelta
 from ..util import expected_asof
 from ..writer import writer
 from . import sources
+from .normalize import guard_rows
 
 logger = logging.getLogger("yuchao.updater")
 
@@ -83,6 +84,7 @@ def update_kline(progress=None, ctx=None) -> dict:
         done = failed = 0
         rows_written = 0
         event_rows = 0
+        rejected = 0                # guard_rows 拦截数（脏行/空壳不落库）
         buf: list = []
         touched: list = []          # (symbol, last_bar) 供事件发布
         consec_fail = 0             # 整体熔断计数：所有车道都不可用时快速中止
@@ -98,6 +100,9 @@ def update_kline(progress=None, ctx=None) -> dict:
             count = _gap_count(cut, target)
             # 车道序列（1.0 kline_lanes 语义）：腾讯 4 端点轮换 → 新浪 → 东财；
             # 车道级熔断：连续 3 失败冷却 300s，冷却中直接跳过换下家，任务不中止。
+            # 半开语义：冷却到期后首次尝试若再失败，consec 已 ≥3 → 立即重新
+            # 冷却（不用重攒 3 次）；成功则 consec=0 满血恢复——熔断器完整
+            # 状态机（open → half-open → closed/re-open）由这三行天然构成。
             rows = None
             used_lane = None
             for name, fname in _KLINE_LANES:
@@ -151,6 +156,9 @@ def update_kline(progress=None, ctx=None) -> dict:
             done += 1
             if len(buf) >= 20000 or done % _COMMIT_EVERY == 0:
                 if buf:
+                    buf, bad = guard_rows(buf)   # 写前防线：脏行计数不落库
+                    rejected += bad
+                if buf:
                     c = writer.conn()            # 写批次：拿锁 → 写 → 立即释放
                     c.executemany(
                         "INSERT OR REPLACE INTO daily_ohlcv "
@@ -162,6 +170,9 @@ def update_kline(progress=None, ctx=None) -> dict:
                 progress(done=done, rows=rows_written,
                          log=f"K线增量 [{done}/{len(pending)}] 累计 {rows_written} 根")
 
+        if buf:
+            buf, bad = guard_rows(buf)
+            rejected += bad
         if buf:
             c = writer.conn()
             c.executemany(
@@ -214,7 +225,8 @@ def update_kline(progress=None, ctx=None) -> dict:
             rows=rows_written,
             error=f"{failed} 个标的拉取失败" if failed and not rows_written else "",
             detail=f"增量 {rows_written} 根 K 线（{done}/{len(pending)} 标的，"
-                   f"失败 {failed}，pct 补算 {filled} 行，事件 {event_rows} 条）")
+                   f"失败 {failed}，防错拦截 {rejected} 行，"
+                   f"pct 补算 {filled} 行，事件 {event_rows} 条）")
         if failed:
             result["failed_symbols"] = failed
     except Exception as e:

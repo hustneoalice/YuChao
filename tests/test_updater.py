@@ -19,24 +19,7 @@ from app.updater.writer import writer
 # 夹具：updater 写连接指向临时库（真实 schema，含 update_log）
 # ---------------------------------------------------------------------------
 
-@pytest.fixture()
-def updater_env(duckdb_file, tmp_path, monkeypatch):
-    """writer → 临时库（含 update_log 落账表）；总线/快照/控制通道 → 临时文件。"""
-    writer.db_path = duckdb_file
-    writer.reset()
-    writer.ensure_schema()
-    monkeypatch.setattr("app.config.settings.stream_events_path",
-                        tmp_path / "events.jsonl")
-    monkeypatch.setattr("app.config.settings.update_snapshot_path",
-                        tmp_path / "progress.json")
-    monkeypatch.setattr("app.config.settings.control_requests_path",
-                        tmp_path / "control.jsonl")
-    yield duckdb_file
-    writer.reset()
-    # 恢复指向真实库：writer 是模块级单例，db_path 残留夹具路径会让后续
-    # 走真实 lifespan 的用例（内核启动/降级）摸错库
-    writer.db_path = settings.duckdb_path
-
+# updater_env 夹具已提升至 conftest.py（采集/编排/自愈多文件共用）
 
 # ---------------------------------------------------------------------------
 # 纯函数口径

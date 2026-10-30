@@ -129,6 +129,30 @@ def _freeze_realtime(monkeypatch):
 
 
 @pytest.fixture()
+def updater_env(duckdb_file, tmp_path, monkeypatch):
+    """writer → 临时库（含 update_log 落账表）；总线/快照/控制通道 → 临时文件。
+
+    定义在 conftest（原 test_updater 本地夹具）：采集/编排/自愈多文件共用。"""
+    from app.updater.writer import writer
+
+    writer.db_path = duckdb_file
+    writer.reset()
+    writer.ensure_schema()
+    monkeypatch.setattr("app.config.settings.stream_events_path",
+                        tmp_path / "events.jsonl")
+    monkeypatch.setattr("app.config.settings.update_snapshot_path",
+                        tmp_path / "progress.json")
+    monkeypatch.setattr("app.config.settings.control_requests_path",
+                        tmp_path / "control.jsonl")
+    yield duckdb_file
+    writer.reset()
+    # 恢复指向真实库：writer 是模块级单例，db_path 残留夹具路径会让后续
+    # 走真实 lifespan 的用例（内核启动/降级）摸错库
+    from app.config import settings as _settings
+    writer.db_path = _settings.duckdb_path
+
+
+@pytest.fixture()
 def client(duckdb_file, monkeypatch):
     from fastapi.testclient import TestClient
 

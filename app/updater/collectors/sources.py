@@ -16,6 +16,7 @@ import time
 from typing import Any, Dict, List, Optional, Tuple
 
 from .http import get_json, get_json_hosts, sina_symbol, tx_symbol
+from .normalize import normalize_rows
 
 _CLIST_HOSTS = ("https://push2.eastmoney.com", "https://push2delay.eastmoney.com")
 _DATACENTER_HOSTS = ("https://datacenter-web.eastmoney.com", "https://data.eastmoney.com")
@@ -282,8 +283,7 @@ def fetch_kline_em(code: str, count: int = 3000) -> List[Dict[str, Any]]:
     """东财 push2his 日线（fqt=0 不复权）→ [{t,o,h,l,c,v,amount,pct_chg,turnover}]。
 
     一次请求带回 amount/pct_chg/turnover（腾讯车道只有价量），增量行不留空。
-    v 统一换算成**股**（东财 f56 为手 ×100；科创板 688/689 东财亦按手返回）。
-    """
+    v 原始为手，换算在 normalize_rows 单点（em 声明：手，含指数/ETF）。"""
     from .http import market_prefix, pure_of
 
     s = pure_of(code)
@@ -299,23 +299,20 @@ def fetch_kline_em(code: str, count: int = 3000) -> List[Dict[str, Any]]:
                           "https://quote.eastmoney.com/", timeout=15)
     d = data.get("data") or {}
     klines = d.get("klines") or []
-    rows: List[Dict[str, Any]] = []
+    raw = []
     for k in klines:
         p = str(k).split(",")
         if len(p) < 7:
             continue
-        try:
-            v = float(p[5]) if p[5] not in ("", "-") else 0.0
-            rows.append({
-                "t": p[0][:10],
-                "o": _num(p[1]), "c": _num(p[2]), "h": _num(p[3]), "l": _num(p[4]),
-                "v": int(v * 100) if v else 0,          # 手 → 股
-                "amount": _num(p[6]),
-                "pct_chg": _num(p[8]) if len(p) > 8 else None,
-                "turnover_rate": _num(p[10]) if len(p) > 10 else None,
-            })
-        except (TypeError, ValueError):
-            continue
+        raw.append({
+            "t": p[0][:10],
+            "o": p[1], "c": p[2], "h": p[3], "l": p[4],
+            "v": p[5],                                # 手，normalize 单点换算
+            "amount": p[6],
+            "pct_chg": p[8] if len(p) > 8 else None,
+            "turnover_rate": p[10] if len(p) > 10 else None,
+        })
+    rows, _ = normalize_rows(raw, "em")               # 出口收口+自证纠偏
     return rows
 
 
@@ -356,22 +353,13 @@ _TX_KLINE_ENDPOINTS = (
 
 
 def _tx_rows(pure: str, klines: list) -> List[Dict[str, Any]]:
-    """腾讯 klines 数组 → 统一行；科创板单位为股、其余手 ×100。"""
-    sci = pure.startswith(("688", "689"))
-    rows: List[Dict[str, Any]] = []
-    for k in klines:
-        if len(k) >= 6:
-            try:
-                v = float(k[5]) if k[5] else 0
-                rows.append({
-                    "t": str(k[0])[:10],
-                    "o": float(k[1]), "c": float(k[2]),
-                    "h": float(k[3]), "l": float(k[4]),
-                    "v": int(v if sci else v * 100),
-                    "amount": None, "pct_chg": None, "turnover_rate": None,
-                })
-            except (TypeError, ValueError):
-                continue
+    """腾讯 klines 数组 → 统一行。单位先验（科创板即股/其余手）在 normalize
+    单点声明，这里只提原始字段。"""
+    raw = [{"t": str(k[0])[:10], "o": k[1], "c": k[2], "h": k[3], "l": k[4],
+            "v": k[5], "amount": None, "pct_chg": None, "turnover_rate": None}
+           for k in klines if len(k) >= 6]
+    rows, _ = normalize_rows(raw, "tx",
+                             sci=pure.startswith(("688", "689")))
     return rows
 
 
@@ -396,13 +384,14 @@ def fetch_kline_sina(symbol: str, count: int = 3000) -> List[Dict[str, Any]]:
         try:
             rows.append({
                 "t": str(k["day"])[:10],
-                "o": float(k["open"]), "c": float(k["close"]),
-                "h": float(k["high"]), "l": float(k["low"]),
-                "v": int(float(k.get("volume") or 0)),
+                "o": k["open"], "c": k["close"],
+                "h": k["high"], "l": k["low"],
+                "v": k.get("volume") or 0,            # 股，normalize 单点收口
                 "amount": None, "pct_chg": None, "turnover_rate": None,
             })
         except (KeyError, TypeError, ValueError):
             continue
+    rows, _ = normalize_rows(rows, "sina")
     return rows
 
 
