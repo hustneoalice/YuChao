@@ -115,6 +115,16 @@ function initDevice(): void {
   });
   document.querySelectorAll<HTMLElement>("#mtabs a").forEach((a) =>
     a.addEventListener("click", () => goPage(a.dataset.page!)));
+  // 移动端行情页「图表 / 卡片」分段：卡片态隐藏 K 线列，直达信息卡片区免滚动
+  document.getElementById("m-mkt-seg")!.addEventListener("click", (e) => {
+    const b = (e.target as HTMLElement).closest<HTMLElement>("button[data-mv]");
+    if (!b) return;
+    const cards = b.dataset.mv === "cards";
+    document.body.classList.toggle("m-cards", cards);
+    document.querySelectorAll<HTMLElement>("#m-mkt-seg button").forEach((x) =>
+      x.classList.toggle("on", x === b));
+    if (!cards) klResize();
+  });
 }
 
 /* ── 启动 ── */
