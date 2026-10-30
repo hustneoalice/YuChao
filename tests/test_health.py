@@ -201,6 +201,7 @@ def sh(tmp_path, monkeypatch):
 
 
 def test_selfheal_retry_after_backoff(sh, monkeypatch):
+    monkeypatch.setattr(Selfheal, "_catch_up_missed", lambda self, orch: None)  # 本测试只测重试，屏蔽墙钟相关的链位补偿
     orch = FakeOrch()
     sh.on_record("kline_update", "failed", error="boom")
     assert sh.entry("kline_update")["fails"] == 1
@@ -217,6 +218,7 @@ def test_selfheal_retry_after_backoff(sh, monkeypatch):
 
 
 def test_selfheal_clears_on_success(sh, monkeypatch):
+    monkeypatch.setattr(Selfheal, "_catch_up_missed", lambda self, orch: None)  # 同上：屏蔽链位补偿
     orch = FakeOrch()
     sh.on_record("kline_update", "failed")
     sh.on_record("kline_update", "completed")

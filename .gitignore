@@ -14,10 +14,11 @@ data/*.duckdb.wal
 data/*.wal
 data/*.bak*
 
-# updater 运行时产物（进度快照 / 事件总线 / 控制通道）
+# updater 运行时产物（进度快照 / 事件总线 / 控制通道 / 自愈账本）
 data/update_progress.json
 data/stream_events.jsonl
 data/control_requests.jsonl
+data/selfheal_ledger.json
 
 # M3 用户态（SQLite）与数据包导出产物
 data/users.sqlite3*

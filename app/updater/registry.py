@@ -32,6 +32,10 @@ TASKS: tuple[dict, ...] = (
     {"kind": "corepicks", "label": "核心标推送",
      "fn": "app.updater.collectors.corepicks:update_corepicks",
      "description": "21:00 核心标引擎占位（应用层迁移后接入）"},
+    {"kind": "feishu_push", "label": "飞书推送",
+     "fn": "app.updater.collectors.feishu_push:push_corepicks",
+     "notify": True,
+     "description": "08:35 核心标名单 → 飞书（按用户配置，名单为空/无人启用则跳过）"},
     {"kind": "package_export", "label": "导出数据包",
      "fn": "app.updater.packaging:run_export",
      "description": "底座全量快照 → 离线数据包 + SHA256 manifest（F14，与更新互斥）"},
@@ -48,6 +52,7 @@ _KINDS = {t["kind"] for t in TASKS}
 # 调度链（北京时间；元数据单处定义，API /data/tasks 直接读这里，
 # 不 import apscheduler——API 进程与调度器解耦）
 CRON_CHAIN: tuple[tuple[str, int, int], ...] = (
+    ("feishu_push", 8, 35),       # 盘前推送最新核心标名单（F10）
     ("sector_index", 15, 35),
     ("quotes", 16, 0),
     ("valuation", 16, 20),

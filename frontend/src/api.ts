@@ -89,7 +89,21 @@ export const meApi = {
   cards: () => req<{ items: CardItem[] }>("/me/cards"),
   putCards: (items: CardItem[]) =>
     req<{ items: CardItem[] }>("/me/cards", { method: "PUT", body: { items } }),
+  /* F11 · 大模型 BYOK（key 永不回显，仅 key_set 布尔） */
+  llm: () => req<LlmCfg>("/me/llm"),
+  putLlm: (p: { base_url?: string; api_key?: string; model?: string; enabled?: boolean }) =>
+    req<LlmCfg>("/me/llm", { method: "PUT", body: p }),
+  testLlm: () => req<TestResult>("/me/llm/test", { method: "POST", body: {} }),
+  /* F10 · 飞书推送（webhook/secret 永不回显） */
+  feishu: () => req<FeishuCfg>("/me/feishu"),
+  putFeishu: (p: { webhook_url?: string; secret?: string; enabled?: boolean }) =>
+    req<FeishuCfg>("/me/feishu", { method: "PUT", body: p }),
+  testFeishu: () => req<TestResult>("/me/feishu/test", { method: "POST", body: {} }),
 };
+
+export interface LlmCfg { base_url: string; model: string; enabled: boolean; key_set: boolean }
+export interface FeishuCfg { enabled: boolean; webhook_set: boolean; has_secret: boolean }
+export interface TestResult { ok: boolean; message: string }
 
 /* ── market ── */
 export interface Bar {

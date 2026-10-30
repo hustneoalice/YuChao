@@ -1,5 +1,6 @@
-/* 设置页：数据底座（真实 API）· 外观 · VIP · 账户 · 规划中页签 */
-import { authApi, dataApi, type DataStatus, type HealthReport, type UpdateLogItem, type UpdateSnapshot } from "../api";
+/* 设置页：数据底座（真实 API）· 外观 · VIP · 账户 · 飞书推送（F10）· 大模型（F11） */
+import { authApi, dataApi, meApi, type DataStatus, type HealthReport,
+         type UpdateLogItem, type UpdateSnapshot, type LlmCfg, type FeishuCfg } from "../api";
 import { esc, fmt } from "../fmt";
 import { ic } from "../icons";
 import { getState, patch, setUser, isVip } from "../store";
@@ -41,7 +42,8 @@ async function render(): Promise<void> {
   else if (tab === "look") renderLook(body);
   else if (tab === "vip") renderVip(body);
   else if (tab === "account") renderAccount(body);
-  else renderPlanned(body, tab);
+  else if (tab === "feishu") await renderFeishu(body);
+  else if (tab === "llm") await renderLlm(body);
 }
 
 /* ── 数据底座 ── */
@@ -466,11 +468,114 @@ function renderAccount(body: HTMLElement): void {
   });
 }
 
-/* ── 规划中（飞书 / LLM：F10/F11 后端就绪后对接） ── */
-function renderPlanned(body: HTMLElement, t: string): void {
-  const name = NAV.find((n) => n[0] === t)?.[1] || t;
+/* ── F10 · 飞书推送（webhook/secret 不回显，留空 = 保持不变） ── */
+async function renderFeishu(body: HTMLElement): Promise<void> {
+  if (!getState().user) {
+    body.innerHTML =
+      `<div class="setsec"><div class="empty" style="padding:50px">${ic("paper-plane-tilt", 30)}<b>飞书推送 · 未登录</b><span>登录后把每日核心标早报推到你的飞书群</span></div></div>`;
+    return;
+  }
+  let cfg: FeishuCfg;
+  try { cfg = await meApi.feishu(); } catch (e) {
+    body.innerHTML = `<div class="setsec"><div style="font-size:12px;color:var(--up)">${esc((e as Error).message || "配置读取失败")}</div></div>`;
+    return;
+  }
+  const [tagCls, tagTxt] = cfg.enabled && cfg.webhook_set ? ["ok", "已启用"]
+    : cfg.webhook_set ? ["warn", "已配置 · 未启用"] : ["flat", "未配置"];
   body.innerHTML =
-    `<div class="setsec"><div class="empty" style="padding:50px">${ic("spark", 30)}<b>${esc(name)} · 规划中</b><span>对应功能模块（F10 / F11）尚未上线，后端就绪后在此接入</span></div></div>`;
+    `<div class="setsec"><div class="sh">${ic("paper-plane-tilt", 15)}<h3>飞书推送</h3><span class="mono">F10 · user_prefs.feishu</span><span class="sp"></span>` +
+    `<span class="tag ${tagCls}">${tagTxt}</span></div>` +
+    `<div class="setrow"><span class="lab">Webhook 地址</span><div class="ctl">` +
+    `<input class="field" id="fs-url" style="flex:1;min-width:260px" placeholder="${cfg.webhook_set ? "已配置 · 留空保持不变" : "https://open.feishu.cn/open-apis/bot/v2/hook/…"}"></div></div>` +
+    `<div class="setrow"><span class="lab">签名密钥</span><div class="ctl">` +
+    `<input class="field" id="fs-secret" type="password" style="flex:1;min-width:260px" placeholder="${cfg.has_secret ? "已配置 · 留空保持不变" : "机器人开启「加签」时才填"}"></div></div>` +
+    `<div class="setrow"><span class="lab">启用</span><div class="ctl">` +
+    `<span class="switch${cfg.enabled ? " on" : ""}" id="fs-sw"><i></i></span>` +
+    `<span style="font-size:11px;color:var(--faint)">每个交易日 08:35 推送核心标早报</span></div></div>` +
+    `<div class="setrow"><span class="lab"></span><div class="ctl">` +
+    `<button class="hbtn primary" id="fs-save">保存</button>` +
+    `<button class="hbtn" id="fs-test">发送测试消息</button></div></div>` +
+    `<div style="font-size:10.5px;color:var(--faint);line-height:1.7">获取方式：飞书群 → 设置 → 群机器人 → 添加自定义机器人 → 复制 Webhook 地址。<br>` +
+    `推送内容：核心标早报（追涨池 / 低吸池，含六分段与排名）；名单为空不打扰。</div></div>`;
+  let enabled = cfg.enabled;
+  document.getElementById("fs-sw")!.addEventListener("click", (e) => {
+    enabled = !enabled;
+    (e.currentTarget as HTMLElement).classList.toggle("on", enabled);
+  });
+  document.getElementById("fs-save")!.addEventListener("click", async () => {
+    try {
+      await meApi.putFeishu({
+        webhook_url: (document.getElementById("fs-url") as HTMLInputElement).value.trim() || undefined,
+        secret: (document.getElementById("fs-secret") as HTMLInputElement).value.trim() || undefined,
+        enabled,
+      });
+      toast("飞书推送配置已保存");
+      void render();
+    } catch (e) { toast((e as Error).message || "保存失败"); }
+  });
+  document.getElementById("fs-test")!.addEventListener("click", async () => {
+    try {
+      const r = await meApi.testFeishu();
+      toast(`${r.ok ? "✓" : "✗"} ${r.message}`);
+    } catch (e) { toast((e as Error).message || "测试请求失败"); }
+  });
+}
+
+/* ── F11 · 大模型 BYOK（key 不回显，留空 = 保持不变；"" = 清除由后端支持，前端不暴露防误触） ── */
+async function renderLlm(body: HTMLElement): Promise<void> {
+  if (!getState().user) {
+    body.innerHTML =
+      `<div class="setsec"><div class="empty" style="padding:50px">${ic("spark", 30)}<b>大模型 · 未登录</b><span>登录后配置你自己的大模型 Key（BYOK，随账户云同步）</span></div></div>`;
+    return;
+  }
+  let cfg: LlmCfg;
+  try { cfg = await meApi.llm(); } catch (e) {
+    body.innerHTML = `<div class="setsec"><div style="font-size:12px;color:var(--up)">${esc((e as Error).message || "配置读取失败")}</div></div>`;
+    return;
+  }
+  const [tagCls, tagTxt] = cfg.enabled && cfg.key_set ? ["ok", "已启用"]
+    : cfg.key_set ? ["warn", "已配置 · 未启用"] : ["flat", "未配置"];
+  body.innerHTML =
+    `<div class="setsec"><div class="sh">${ic("spark", 15)}<h3>大模型（BYOK）</h3><span class="mono">F11 · user_prefs.llm</span><span class="sp"></span>` +
+    `<span class="tag ${tagCls}">${tagTxt}</span></div>` +
+    `<div class="setrow"><span class="lab">接口地址</span><div class="ctl">` +
+    `<input class="field" id="llm-url" style="flex:1;min-width:260px" placeholder="https://api.deepseek.com/v1（OpenAI 兼容）" value="${esc(cfg.base_url)}"></div></div>` +
+    `<div class="setrow"><span class="lab">API Key</span><div class="ctl">` +
+    `<input class="field" id="llm-key" type="password" style="flex:1;min-width:260px" placeholder="${cfg.key_set ? "已配置 · 留空保持不变" : "sk-…"}">` +
+    `<span style="font-size:11px;color:var(--faint)">只存你自己的账户，永不明文回显；更换直接输入新 Key 保存</span></div></div>` +
+    `<div class="setrow"><span class="lab">模型</span><div class="ctl">` +
+    `<input class="field" id="llm-model" style="flex:1;min-width:260px" placeholder="deepseek-chat / kimi-k2 / gpt-4o-mini …" value="${esc(cfg.model)}"></div></div>` +
+    `<div class="setrow"><span class="lab">启用</span><div class="ctl">` +
+    `<span class="switch${cfg.enabled ? " on" : ""}" id="llm-sw"><i></i></span>` +
+    `<span style="font-size:11px;color:var(--faint)">启用后 Agent 中心等模块才能调用</span></div></div>` +
+    `<div class="setrow"><span class="lab"></span><div class="ctl">` +
+    `<button class="hbtn primary" id="llm-save">保存</button>` +
+    `<button class="hbtn" id="llm-test">测试连通</button></div></div>` +
+    `<div style="font-size:10.5px;color:var(--faint);line-height:1.7">任何 OpenAI chat/completions 兼容端点均可（DeepSeek / Kimi / 通义 / OpenAI 等）。` +
+    `测试会用已保存配置真实请求一次（max_tokens=1），请先保存再测试。</div></div>`;
+  let enabled = cfg.enabled;
+  document.getElementById("llm-sw")!.addEventListener("click", (e) => {
+    enabled = !enabled;
+    (e.currentTarget as HTMLElement).classList.toggle("on", enabled);
+  });
+  document.getElementById("llm-save")!.addEventListener("click", async () => {
+    try {
+      await meApi.putLlm({
+        base_url: (document.getElementById("llm-url") as HTMLInputElement).value.trim() || undefined,
+        api_key: (document.getElementById("llm-key") as HTMLInputElement).value.trim() || undefined,
+        model: (document.getElementById("llm-model") as HTMLInputElement).value.trim() || undefined,
+        enabled,
+      });
+      toast("大模型配置已保存");
+      void render();
+    } catch (e) { toast((e as Error).message || "保存失败"); }
+  });
+  document.getElementById("llm-test")!.addEventListener("click", async () => {
+    try {
+      const r = await meApi.testLlm();
+      toast(`${r.ok ? "✓" : "✗"} ${r.message}`);
+    } catch (e) { toast((e as Error).message || "测试请求失败"); }
+  });
 }
 
 /** 顶栏数据状态 chip（轮询 /data/status） */

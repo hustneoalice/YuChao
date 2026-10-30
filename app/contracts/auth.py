@@ -96,3 +96,38 @@ class CardsIn(BaseModel):
 
 class CardsOut(BaseModel):
     items: list[CardItem]
+
+
+# ── F11 · 大模型 BYOK ────────────────────────────────────────────────────
+
+class LlmIn(BaseModel):
+    base_url: Optional[str] = None           # OpenAI 兼容根地址（None=不改）
+    api_key: Optional[str] = None            # None=不改；""=清除（永不回显）
+    model: Optional[str] = None
+    enabled: Optional[bool] = None
+
+
+class LlmOut(BaseModel):
+    base_url: str = ""
+    model: str = ""
+    enabled: bool = False
+    key_set: bool = False                    # 只回「是否已配置」，不回 key 本体
+
+
+# ── F10 · 飞书推送 ────────────────────────────────────────────────────────
+
+class FeishuIn(BaseModel):
+    webhook_url: Optional[str] = None        # 自定义机器人 webhook（None=不改）
+    secret: Optional[str] = None             # 加签密钥（可选；None=不改，""=清除）
+    enabled: Optional[bool] = None
+
+
+class FeishuOut(BaseModel):
+    enabled: bool = False
+    webhook_set: bool = False                # 只回是否已配置，不回 webhook 本体
+    has_secret: bool = False
+
+
+class TestOut(BaseModel):
+    ok: bool
+    message: str

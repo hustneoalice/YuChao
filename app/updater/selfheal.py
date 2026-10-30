@@ -35,7 +35,7 @@ from pathlib import Path
 from typing import Any, Dict, Optional
 
 from ..config import settings
-from .registry import CRON_CHAIN, WEEKLY
+from .registry import CRON_CHAIN, TASKS, WEEKLY
 from .trading_calendar import is_trading_day
 from .util import now_cst
 
@@ -44,6 +44,9 @@ logger = logging.getLogger("yuchao.updater")
 _MAX_RETRIES = 3
 _BACKOFF_S = (120, 600, 1800)   # 第 n 次失败后等待再重试的秒数
 _MISFIRE_GRACE_S = 15 * 60      # 链位过点宽限：17:00:00~17:15 之间不算错过
+# 推送类任务不参与链位补偿：早报错过盘前时点无补发价值（内容是昨夜
+# 核心标，白天补发语义错乱），次日 08:35 自然恢复；失败重试路径保留。
+_NOTIFY_KINDS = {t["kind"] for t in TASKS if t.get("notify")}
 
 
 class Selfheal:
@@ -163,6 +166,8 @@ class Selfheal:
         if now.weekday() == 5:                 # 周六复权因子
             chain += list(WEEKLY)
         for kind, h, m in chain:
+            if kind in _NOTIFY_KINDS:
+                continue
             due = now.replace(hour=h, minute=m, second=0, microsecond=0)
             if now < due or (now - due).total_seconds() < _MISFIRE_GRACE_S:
                 continue

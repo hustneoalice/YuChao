@@ -127,6 +127,16 @@ def get_user(user_id: str) -> Optional[dict]:
     return _public_user(dict(row)) if row else None
 
 
+def list_users() -> list[dict]:
+    """全部账户（最小字段）。飞书推送等批量遍历用。"""
+    conn = get_conn()
+    try:
+        rows = conn.execute("SELECT id, email FROM users ORDER BY created_at").fetchall()
+    finally:
+        conn.close()
+    return [{"id": r["id"], "email": r["email"]} for r in rows]
+
+
 def effective_tier(user: dict) -> str:
     """VIP 过期自动回落 free（只读判断）。pro_expires_at 为空 = 永久 VIP。"""
     if user.get("tier") != "pro":
