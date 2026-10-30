@@ -9,7 +9,7 @@ import { openModal, toast } from "../ui";
 import { openWatchPanel } from "../watch";
 import { stockSearch, type StockSearchHandle } from "../searchbox";
 import { refreshSparksIn, sparkSvg } from "../sparks";
-import { TRENDS, mountKline, setTrendPalette, trendPaletteKey, IND_DEFS, IND_CATS, IND_BY_KEY, type KlineChartHandle, type MainKey, type SubKey } from "./kline";
+import { TRENDS, mountKline, setTrendPalette, trendPaletteKey, IND_DEFS, IND_BY_KEY, type KlineChartHandle, type MainKey, type SubKey } from "./kline";
 
 export const SEG6 = ["超卖", "低位", "弱势", "回升", "强势", "超买"];
 
@@ -482,7 +482,8 @@ export function initMarket(): void {
     localStorage.removeItem("yc_klh");
   });
   renderIpanel();
-  ipanel.addEventListener("click", (e) => {
+  // 指标/方案/配色点击处理：常显两行（#kl-indbar）与方案浮层（#kl-ipanel）共用一套委托
+  const indClick = (e: Event): void => {
     const t = e.target as HTMLElement;
     if (t.closest("i[data-pdel]")) {                       // 删除自定义方案
       const name = t.closest("i")!.dataset.pdel!;
@@ -531,14 +532,16 @@ export function initMarket(): void {
     const group = b.dataset.mi ? "main" : "sub";
     b.classList.toggle("on");
     if (group === "main")
-      mk.mainInds = [...ipanel.querySelectorAll<HTMLElement>(".iprow button[data-mi].on")].map((x) => x.dataset.mi as MainKey);
+      mk.mainInds = [...document.querySelectorAll<HTMLElement>("#kl-indbar button[data-mi].on, #kl-ipanel button[data-mi].on")].map((x) => x.dataset.mi as MainKey);
     else
-      mk.subInds = [...ipanel.querySelectorAll<HTMLElement>(".iprow button[data-si].on")].map((x) => x.dataset.si as SubKey);
+      mk.subInds = [...document.querySelectorAll<HTMLElement>("#kl-indbar button[data-si].on, #kl-ipanel button[data-si].on")].map((x) => x.dataset.si as SubKey);
     saveKPrefs();
     syncIndUI();
     renderIpanel();
     renderKline();
-  });
+  };
+  ipanel.addEventListener("click", indClick);
+  document.getElementById("kl-indbar")!.addEventListener("click", indClick);
   window.addEventListener("resize", () => {
     clearTimeout((window as unknown as { _rz?: number })._rz);
     (window as unknown as { _rz?: number })._rz = window.setTimeout(() => {
@@ -633,24 +636,25 @@ function toggleSeg(id: string, btn: HTMLElement): void {
   document.querySelectorAll(`#${id} button`).forEach((x) => x.classList.toggle("on", x === btn));
 }
 
-/** 指标显影双源同步：mk.mainInds/subInds → 指标面板 chips 的 on 态 */
+/** 指标显影双源同步：mk.mainInds/subInds → 常显两行 + 方案浮层 chips 的 on 态 */
 function syncIndUI(): void {
   const mset = new Set(mk.mainInds), sset = new Set(mk.subInds);
-  document.querySelectorAll<HTMLElement>("#kl-ipanel button[data-mi]").forEach((x) =>
+  const sel = "#kl-indbar, #kl-ipanel";               // 常显两行 + 方案/配色浮层
+  document.querySelectorAll<HTMLElement>(`${sel} button[data-mi]`).forEach((x) =>
     x.classList.toggle("on", mset.has(x.dataset.mi as MainKey)));
-  document.querySelectorAll<HTMLElement>("#kl-ipanel button[data-si]").forEach((x) =>
+  document.querySelectorAll<HTMLElement>(`${sel} button[data-si]`).forEach((x) =>
     x.classList.toggle("on", sset.has(x.dataset.si as SubKey)));
   // 通道配色选中态（单选）+ 短/中线趋势色点跟随当前调色板
   const key = trendPaletteKey();
   const pal = TRENDS[key];
-  document.querySelectorAll<HTMLElement>("#kl-ipanel button[data-tpl]").forEach((x) =>
+  document.querySelectorAll<HTMLElement>(`${sel} button[data-tpl]`).forEach((x) =>
     x.classList.toggle("on", x.dataset.tpl === key));
-  document.querySelectorAll<HTMLElement>("#kl-ipanel button[data-mi='short'],#kl-ipanel button[data-mi='mid']")
+  document.querySelectorAll<HTMLElement>(`${sel} button[data-mi='short'],${sel} button[data-mi='mid']`)
     .forEach((x) => x.style.setProperty("--ic", x.dataset.mi === "short" ? pal.fast : pal.slow));
   renderFavBar();
 }
 
-/** 指标面板动态渲染：方案行（内置+自定义+存为方案）+ 分类指标 chips（33 指标 6 分类）+ ★常用标 */
+/** 指标渲染：常显两行（主图叠加 / 副图窗格）+ 方案浮层（内置+自定义+存为方案）+ ★常用标 */
 function renderIpanel(): void {
   const pres = document.getElementById("ip-presets");
   const inds = document.getElementById("ip-inds");
@@ -670,17 +674,13 @@ function renderIpanel(): void {
   const chipOf = (d: (typeof IND_DEFS)[number]) =>
     `<button style="--ic:${CAT_IC[d.cat] || "transparent"}" data-${d.where === "main" ? "mi" : "si"}="${d.key}" title="${esc(d.desc)}"${(d.where === "main" ? mset : sset).has(d.key) ? ' class="on"' : ""}>${d.label}` +
     `<i class="star${favs.has(d.key) ? " on" : ""}" data-fav="${d.key}" title="${favs.has(d.key) ? "取消常显" : "常显：加入工具栏★常用菜单"}">★</i></button>`;
-  // 主/副图两大分组：主图叠加在 K 线上，副图每个指标独立窗格
+  // 常显两行：主图一行（叠加在 K 线上）+ 副图一行（每指标独立窗格）；
+  // 分类归属靠 chip 左侧色点（--ic）区分，不再按分类纵向分行
   const mainDefs = IND_DEFS.filter((d) => d.where === "main");
-  const subCats = IND_CATS.filter(({ cat }) => cat !== "main" && IND_DEFS.some((d) => d.cat === cat && d.where === "sub"));
+  const subDefs = IND_DEFS.filter((d) => d.where === "sub");
   inds.innerHTML =
-    `<div class="iphead">主图<span class="ipbadge">叠加在 K 线上</span></div>` +
-    `<div class="iprow"><span class="ipk">${IND_CATS.find((c) => c.cat === "main")?.label || "主图叠加"}</span>${mainDefs.map(chipOf).join("")}</div>` +
-    `<div class="iphead">副图<span class="ipbadge">每个指标独立窗格</span></div>` +
-    subCats.map(({ cat, label }) => {
-      const defs = IND_DEFS.filter((d) => d.cat === cat && d.where === "sub");
-      return `<div class="iprow"><span class="ipk">${label}</span>${defs.map(chipOf).join("")}</div>`;
-    }).join("");
+    `<div class="iprow"><span class="ipk">主图</span>${mainDefs.map(chipOf).join("")}</div>` +
+    `<div class="iprow"><span class="ipk">副图</span>${subDefs.map(chipOf).join("")}</div>`;
 }
 
 /** 日线聚合为周/月 */
@@ -771,9 +771,7 @@ function ensurePanelDom(): void {
   box.className = `kl-panels ly-${ly}`;
   box.innerHTML = slots.map((p, i) =>
     `<div class="klp${i === mk.active ? " active" : ""}" data-pi="${i}">` +
-    `<div class="klp-bar"><b class="klp-name"></b>` +
-    `<span class="klp-code num"></span><span class="klp-ind"></span>` +
-    `<span class="klp-q"></span>` +
+    `<div class="klp-bar">` +
     `<span class="klp-p" title="切换周期">${P_LABEL[p]}</span>` +
     `<span class="klp-menu">` +
     (["t", "60", "d", "w", "m", "q"] as PKey[]).map((k) => `<button data-pp="${k}">${P_LABEL[k]}</button>`).join("") +
@@ -792,22 +790,22 @@ function applyPanel(i: number): void {
   kl.setSub(SUB_OK[currentLayout()]?.[i] ? (p === "t" ? ["vol"] : mk.subInds) : []);
   kl.setData(barsFor(p));
   kl.drawLegend(p === "t" ? ["avg"] : (SUB_OK[currentLayout()]?.[i] ? [...mk.mainInds] : mk.mainInds));
-  const box = document.querySelector<HTMLElement>(`.klp[data-pi="${i}"]`);
-  if (box) renderKlpBar(box);
 }
 
-/** K 线顶栏信息条（东财网页头部同款）：名称+代码+行业 | 现价 涨跌幅 | 开 高 低 昨收 */
-function renderKlpBar(box: HTMLElement): void {
+/** 个股信息条（chartbox 最顶，东财网页头部同款）：名称+代码+行业 | 现价 涨跌幅 | 开 高 低 昨收。
+ *  多面板共享一条（同标的只显一次），面板头只留周期切换。 */
+function renderKlpBar(): void {
   const s = mk.cur, q = mk.quote;
-  if (!s) return;
-  const nb = box.querySelector(".klp-name"), cb = box.querySelector(".klp-code"),
-    ib = box.querySelector(".klp-ind"), qb = box.querySelector(".klp-q");
-  if (!nb || !cb || !qb) return;
-  nb.textContent = s.name || s.symbol;
-  cb.textContent = s.symbol.replace(/\./g, "·");
+  const bar = document.getElementById("kl-symbar");
+  if (!bar || !s) return;
+  bar.hidden = false;
+  const nb = bar.querySelector(".ksy-name"), cb = bar.querySelector(".ksy-code"),
+    ib = bar.querySelector(".ksy-ind"), qb = bar.querySelector(".ksy-q");
+  nb!.textContent = s.name || s.symbol;
+  cb!.textContent = s.symbol.replace(/\./g, "·");
   if (ib) ib.textContent = q?.industry || "";
-  // 现价/涨跌幅：实时快照优先，缺省用最后根 K 线
-  const bars = barsFor(box.querySelector(".klp-main") ? mk.panels[Number(box.dataset.pi)] : "d");
+  // 现价/涨跌幅：实时快照优先，缺省用日 K 最后一根
+  const bars = mk.bars;
   const last = bars[bars.length - 1];
   const prevBar = bars.length > 1 ? bars[bars.length - 2].close : null;
   const price = q?.rt_price ?? last?.close;
@@ -815,7 +813,7 @@ function renderKlpBar(box: HTMLElement): void {
   const pc = q?.rt_prev_close ?? prevBar;
   const cls = (pct ?? 0) >= 0 ? "up" : "down";
   const f = (v?: number | null) => v == null || !isFinite(v) ? "—" : fmt(v);
-  qb.innerHTML = price == null ? "" :
+  qb!.innerHTML = price == null ? "" :
     `<b class="${cls}">${f(price)}</b>` +
     (pct == null ? "" : `<span class="${cls}">${pct >= 0 ? "+" : ""}${pct.toFixed(2)}%</span>`) +
     `<span class="dim">开 <b class="${(q?.open ?? 0) >= pc! ? "up" : "down"}">${f(q?.open ?? last?.open)}</b></span>` +
@@ -829,11 +827,13 @@ export function renderKline(): void {
   if (!mk.cur || !mk.bars.length) {
     empty.style.display = "grid";
     kls.forEach((k) => k?.setData([]));
+    document.getElementById("kl-symbar")?.setAttribute("hidden", "");
     return;
   }
   empty.style.display = "none";
   ensurePanelDom();
   kls.forEach((_, i) => applyPanel(i));
+  renderKlpBar();
   // 分时/60分面板：换标的后缓存已清，按需补拉（策略图面：先空后满）
   const need = mk.panels.find((p) => (p === "t" && !mk.minuteData) || (p === "60" && !mk.m60));
   if (need) void ensurePeriodData(need).then(() => {

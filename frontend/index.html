@@ -55,6 +55,13 @@
       <div class="mkt-row">
         <div class="kl-col">
           <div class="chartbox" style="flex:1;min-height:0">
+            <!-- 个股信息条（最上）：名称/代码/行业 + 现价/涨跌幅/开高低昨收 -->
+            <div class="kl-symbar" id="kl-symbar" hidden>
+              <b class="ksy-name"></b>
+              <span class="ksy-code num"></span>
+              <span class="ksy-ind"></span>
+              <span class="ksy-q"></span>
+            </div>
             <div class="chartbar">
               <button class="backbtn" id="btn-back" hidden>
                 <span data-ic="arrow-left" data-sz="14"></span><span id="back-label">返回</span>
@@ -65,8 +72,10 @@
               <span class="barsep"></span>
               <span class="seg favseg" id="kl-favbar"></span>
               <span class="sp"></span>
-              <button class="hbtn" id="kl-ipanel-btn" title="指标管理：预设方案 · 分组显影">指标</button>
+              <button class="hbtn" id="kl-ipanel-btn" title="方案预设 · 通道配色">方案</button>
             </div>
+            <!-- 指标控制（常显两行）：主图叠加一行 + 副图一行 -->
+            <div class="kl-ipanel ip-inline" id="kl-indbar"><div id="ip-inds"></div></div>
             <div class="kl-stage" id="kl-stage">
               <div class="kl-panels" id="kl-panels"></div>
               <div class="empty" id="kl-empty" style="display:none">
@@ -93,11 +102,10 @@
             </div>
             <div class="kl-ipanel" id="kl-ipanel" hidden>
               <div class="iprow ip-presets" id="ip-presets"></div>
-              <div id="ip-inds"></div>
               <div class="iprow"><span class="ipk">通道配色</span>
                 <button data-tpl="A" title="A · 琥珀橙 × 皇家蓝"><i style="display:inline-block;width:8px;height:8px;border-radius:50%;margin-right:4px;background:linear-gradient(135deg,#FF9800 50%,#0A84FF 50%)"></i>A</button><button class="on" data-tpl="B" title="B · 紫罗兰 × 青绿"><i style="display:inline-block;width:8px;height:8px;border-radius:50%;margin-right:4px;background:linear-gradient(135deg,#C084FC 50%,#2DD4BF 50%)"></i>B</button><button data-tpl="C" title="C · 玫红 × 天蓝"><i style="display:inline-block;width:8px;height:8px;border-radius:50%;margin-right:4px;background:linear-gradient(135deg,#FB7185 50%,#38BDF8 50%)"></i>C</button><button data-tpl="D" title="D · 金黄 × 石墨"><i style="display:inline-block;width:8px;height:8px;border-radius:50%;margin-right:4px;background:linear-gradient(135deg,#EAB308 50%,#94A3B8 50%)"></i>D</button>
               </div>
-              <div class="ip-hint">勾选即时生效 · 当前组合可存为方案随时切换</div>
+              <div class="ip-hint">主/副图指标在图上方两行直接勾选 · 当前组合可存为方案随时切换</div>
             </div>
           </div>
 

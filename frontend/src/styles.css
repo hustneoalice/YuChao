@@ -407,19 +407,23 @@ body.mobile .rcard .cbar{opacity:1}
   background:var(--panel);cursor:pointer;overflow:hidden}
 .klp.active{z-index:2}
 .klp-main{flex:1;min-height:0;position:relative;cursor:crosshair}
+/* 个股信息条（chartbox 最顶，多面板共享）：名称+代码+行业 | 现价 涨跌幅 | 开高低昨收 */
+.kl-symbar{display:flex;align-items:center;gap:8px;padding:0 12px;height:31px;flex:none;
+  border-bottom:1px solid var(--border-soft);overflow:hidden;white-space:nowrap}
+.kl-symbar[hidden]{display:none!important}
+.ksy-name{font-size:13px;color:var(--text);font-weight:700;flex:none}
+.ksy-code{flex:none;color:var(--faint);font-size:11px;letter-spacing:.3px}
+.ksy-ind{flex:none;max-width:110px;overflow:hidden;text-overflow:ellipsis;
+  font-size:10.5px;color:var(--accent);background:var(--accent-soft);
+  border-radius:4px;padding:1px 6px}
+.ksy-q{display:flex;align-items:center;gap:10px;flex:1;min-width:0;overflow:hidden;white-space:nowrap}
+.ksy-q b{font-weight:700;font-size:14px}
+.ksy-q .up{color:var(--up)} .ksy-q .down{color:var(--down)}
+.ksy-q .dim{color:var(--faint);font-size:10.5px}
+.ksy-q .dim b{font-size:11px;font-weight:500}
 .klp-bar{display:flex;align-items:center;gap:7px;padding:0 10px;height:27px;flex:none;
   font-size:11px;color:var(--faint);border-bottom:1px solid var(--border-soft);
   background:var(--panel-2);user-select:none}
-.klp-name{font-size:12px;color:var(--text);font-weight:600;overflow:hidden;
-  text-overflow:ellipsis;white-space:nowrap;flex:none}
-/* 顶栏信息条（东财头部同款）：代码·市场 / 行业 chip / 现价·涨跌幅·开高低昨收 */
-.klp-code{flex:none;color:var(--faint);font-size:11px;letter-spacing:.3px}
-.klp-ind{flex:none;max-width:88px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;
-  padding:0 6px;border-radius:5px;background:var(--panel-3);color:var(--dim);line-height:16px}
-.klp-q{display:flex;align-items:center;gap:9px;flex:1;min-width:0;overflow:hidden;white-space:nowrap}
-.klp-q b{font-weight:600;font-size:11.5px}
-.klp-q .dim{color:var(--faint)}
-.klp-q .dim b{font-size:11px;font-weight:500}
 .klp-p{cursor:pointer;padding:1px 8px;border-radius:6px;background:var(--panel-3);
   color:var(--accent);font-weight:700;flex:none}
 .klp-menu{display:none;position:absolute;top:29px;left:52px;z-index:30;flex-direction:column;
@@ -485,19 +489,24 @@ body.mobile .rcard .cbar{opacity:1}
 .kl-ipanel{position:fixed;z-index:60;background:var(--panel);
   border:1px solid var(--border);border-radius:11px;box-shadow:var(--shadow);padding:9px 11px;
   display:flex;flex-direction:column;gap:6px;max-width:min(620px,calc(100vw - 24px))}
+/* 常显态（#kl-indbar）：chartbox 内流式区块，主/副图各一行，随 chartbar 之下直显 */
+.kl-ipanel.ip-inline{position:static;z-index:auto;background:none;border:0;border-radius:0;
+  box-shadow:none;padding:4px 8px;max-width:none;gap:3px;flex:none;
+  border-bottom:1px solid var(--border-soft);overflow-x:auto;scrollbar-width:thin}
 .kl-stage .legend{position:absolute;top:10px;right:68px;z-index:6;pointer-events:none;
   justify-content:flex-end;background:color-mix(in srgb,var(--panel) 72%,transparent);
   padding:3px 9px;border-radius:8px;backdrop-filter:blur(6px);-webkit-backdrop-filter:blur(6px)}
 .kl-ipanel[hidden]{display:none!important}
-.kl-ipanel .iprow{display:flex;align-items:flex-start;gap:4px;flex-wrap:wrap}
+.kl-ipanel .iprow{display:flex;align-items:center;gap:3px;flex-wrap:wrap}
 /* 主/副图分组头：归属一目了然 */
 .kl-ipanel .iphead{display:flex;align-items:center;gap:6px;margin:7px 0 3px;font-size:11px;
   font-weight:700;color:var(--text)}
 .kl-ipanel .iphead:first-child{margin-top:0}
 .kl-ipanel .ipbadge{padding:0 6px;border-radius:5px;background:var(--panel-3);
   font-size:10px;font-weight:400;color:var(--faint);line-height:16px}
-.kl-ipanel .ipk{flex:none;width:56px;line-height:26px;font-size:10.5px;color:var(--faint);
-  white-space:nowrap;overflow:hidden}
+.kl-ipanel .ipk{flex:none;width:56px;line-height:20px;font-size:10px;color:var(--faint);
+  white-space:nowrap;overflow:hidden;text-align:right}
+.kl-ipanel.ip-inline .ipk{width:28px}
 .kl-ipanel .ip-hint{font-size:10px;color:var(--faint);text-align:right}
 /* 指标 chip 右上角 ★ 常显标：hover 浮现，点亮常驻金色 */
 .kl-ipanel .iprow button{position:relative}
@@ -527,8 +536,8 @@ body.mobile .rcard .cbar{opacity:1}
   border-radius:50%;background:var(--ic,transparent);transition:opacity .12s,background .12s}
 .kl-ipanel button:not(.on):not([data-pre]):not([data-tpl])::before{
   background:transparent;box-shadow:inset 0 0 0 1.5px var(--ic,var(--faint))}
-.kl-ipanel button{padding:4px 9px;border-radius:8px;font-size:11.5px;color:var(--dim);
-  border:1px solid var(--border-soft);min-height:0}
+.kl-ipanel button{padding:1.5px 6px;border-radius:6px;font-size:11px;color:var(--dim);
+  border:1px solid var(--border-soft);min-height:0;line-height:1.5}
 .kl-ipanel button:hover{color:var(--text);background:var(--panel-2)}
 .kl-ipanel button.on{color:var(--text);border-color:color-mix(in srgb,var(--accent) 60%,transparent);
   background:color-mix(in srgb,var(--accent) 14%,var(--panel-2));font-weight:600}
@@ -794,6 +803,8 @@ body.mobile .bcard{max-width:100%}
 body.mobile table{max-width:100%}
 body.mobile .chartbox{min-height:60vh}
 body.mobile .chartbar{overflow-x:auto;scrollbar-width:none}
+/* 手机：常显指标两行隐藏（竖排空间宝贵，走工具栏★常用 + 方案浮层） */
+body.mobile .kl-ipanel.ip-inline{display:none}
 body.mobile .chartbar::-webkit-scrollbar{display:none}
 body.mobile .kl-stage .legend{display:none}
 body.mobile .kl-nav{height:36px}
