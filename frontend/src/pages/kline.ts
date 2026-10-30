@@ -230,6 +230,162 @@ function ensureRegistered(): void {
       figures: [{ key: "atr", title: "ATR", type: "line", styles: () => ({ color: "#F2C94C" }) }],
     });
   } catch { /* 重复注册忽略 */ }
+  // VOLX 自研成交量（v10 内置 VOL 只认 MA5/MA10，第三参数 40 会被忽略——BOLLX 同款避坑）：
+  // 量柱涨红跌绿 + MA5/MA10/MA40 三条均量线
+  try {
+    registerIndicator({
+      name: "VOLX",
+      shortName: "VOL",
+      precision: 0,
+      shouldFormatBigNumber: true,
+      calc: (kLineDataList) => {
+        const list = kLineDataList as unknown as { volume?: number }[];
+        const out: { volume: number | null; ma5: number | null; ma10: number | null; ma40: number | null }[] = [];
+        let s5 = 0, s10 = 0, s40 = 0;
+        for (let i = 0; i < list.length; i++) {
+          const v = list[i].volume ?? 0;
+          s5 += v; s10 += v; s40 += v;
+          if (i >= 5) s5 -= list[i - 5].volume ?? 0;
+          if (i >= 10) s10 -= list[i - 10].volume ?? 0;
+          if (i >= 40) s40 -= list[i - 40].volume ?? 0;
+          out.push({
+            volume: v,
+            ma5: i >= 4 ? s5 / 5 : null,
+            ma10: i >= 9 ? s10 / 10 : null,
+            ma40: i >= 39 ? s40 / 40 : null,
+          });
+        }
+        return out as never;
+      },
+      figures: [
+        {
+          key: "volume", title: "VOL", type: "bar",
+          styles: (raw: unknown) => {
+            const c = (raw as { data?: { current?: { close?: number; open?: number } } })?.data?.current;
+            return { color: c && c.close != null && c.close < (c.open ?? c.close) ? chartDown() : chartUp() };
+          },
+        },
+        { key: "ma5", title: "MA5", type: "line", styles: () => ({ color: "#FF9F43", lineWidth: 1 }) },
+        { key: "ma10", title: "MA10", type: "line", styles: () => ({ color: "#4DD0E1", lineWidth: 1 }) },
+        { key: "ma40", title: "MA40", type: "line", styles: () => ({ color: "#AB47BC", lineWidth: 1 }) },
+      ],
+    });
+  } catch { /* 重复注册忽略 */ }
+  // 超买超卖三件套（v10 内置无 80/20、70/30 阈值参考线，自研补齐）：
+  // KDJX(9,3,3) 80/20 · RSIX(6/12/24) 70/30 · WRX(10,6) 80/20 —— 阈值线作为固定值 figures 灰虚线
+  try {
+    const smaCn = (src: (number | null)[], n: number, m: number): (number | null)[] => {
+      const out: (number | null)[] = [];
+      let prev = NaN;
+      for (let i = 0; i < src.length; i++) {
+        const x = src[i];
+        if (x == null) { out.push(null); continue; }
+        prev = isNaN(prev) ? x : (m * x + (n - m) * prev) / n;
+        out.push(prev);
+      }
+      return out;
+    };
+    const dash = (key: string, title: string) => ({
+      key, title, type: "line" as const,
+      styles: () => ({ color: "rgba(142,142,147,.55)", style: "dashed" as const, lineWidth: 1 }),
+    });
+    registerIndicator({
+      name: "KDJX",
+      shortName: "KDJ",
+      precision: 2,
+      calcParams: [
+        { key: "n", value: 9 }, { key: "m1", value: 3 }, { key: "m2", value: 3 },
+      ],
+      calc: (kLineDataList, indicator) => {
+        const p: Record<string, number> = { n: 9, m1: 3, m2: 3 };
+        indicator?.calcParams?.forEach((x: { key?: string; value?: number }) => {
+          if (x.key !== undefined) p[x.key] = x.value!;
+        });
+        const list = kLineDataList as unknown as { high: number; low: number; close: number }[];
+        const n = Math.max(1, Math.round(p.n));
+        const rsv: (number | null)[] = list.map((_, i) => {
+          if (i < n - 1) return null;
+          let h = -Infinity, l = Infinity;
+          for (let j = i - n + 1; j <= i; j++) { h = Math.max(h, list[j].high); l = Math.min(l, list[j].low); }
+          return h === l ? 50 : ((list[i].close - l) / (h - l)) * 100;
+        });
+        const k = smaCn(rsv, p.m1, 1), d = smaCn(k, p.m2, 1);
+        return list.map((_, i) => ({
+          k: k[i], d: d[i], j: k[i] != null && d[i] != null ? 3 * k[i]! - 2 * d[i]! : null,
+          ob: 80, os: 20,
+        }));
+      },
+      figures: [
+        { key: "k", title: "K", type: "line", styles: () => ({ color: "#FF9F43" }) },
+        { key: "d", title: "D", type: "line", styles: () => ({ color: "#4DD0E1" }) },
+        { key: "j", title: "J", type: "line", styles: () => ({ color: "#AB47BC" }) },
+        dash("ob", "超买80"), dash("os", "超卖20"),
+      ],
+    });
+    registerIndicator({
+      name: "RSIX",
+      shortName: "RSI",
+      precision: 2,
+      calcParams: [
+        { key: "n1", value: 6 }, { key: "n2", value: 12 }, { key: "n3", value: 24 },
+      ],
+      calc: (kLineDataList, indicator) => {
+        const p: Record<string, number> = { n1: 6, n2: 12, n3: 24 };
+        indicator?.calcParams?.forEach((x: { key?: string; value?: number }) => {
+          if (x.key !== undefined) p[x.key] = x.value!;
+        });
+        const list = kLineDataList as unknown as { close: number }[];
+        const rsiOf = (n: number): (number | null)[] => {
+          const up: (number | null)[] = [], dn: (number | null)[] = [];
+          for (let i = 0; i < list.length; i++) {
+            if (!i) { up.push(null); dn.push(null); continue; }
+            const ch = list[i].close - list[i - 1].close;
+            up.push(Math.max(ch, 0)); dn.push(Math.abs(ch));
+          }
+          const su = smaCn(up, n, 1), sd = smaCn(dn, n, 1);
+          return list.map((_, i) =>
+            su[i] == null || sd[i] == null ? null : sd[i] === 0 ? 100 : (su[i]! / sd[i]!) * 100);
+        };
+        const r1 = rsiOf(p.n1), r2 = rsiOf(p.n2), r3 = rsiOf(p.n3);
+        return list.map((_, i) => ({ r1: r1[i], r2: r2[i], r3: r3[i], ob: 70, os: 30 }));
+      },
+      figures: [
+        { key: "r1", title: "RSI6", type: "line", styles: () => ({ color: "#FF9F43" }) },
+        { key: "r2", title: "RSI12", type: "line", styles: () => ({ color: "#4DD0E1" }) },
+        { key: "r3", title: "RSI24", type: "line", styles: () => ({ color: "#AB47BC" }) },
+        dash("ob", "超买70"), dash("os", "超卖30"),
+      ],
+    });
+    registerIndicator({
+      name: "WRX",
+      shortName: "WR",
+      precision: 2,
+      calcParams: [
+        { key: "n1", value: 10 }, { key: "n2", value: 6 },
+      ],
+      calc: (kLineDataList, indicator) => {
+        const p: Record<string, number> = { n1: 10, n2: 6 };
+        indicator?.calcParams?.forEach((x: { key?: string; value?: number }) => {
+          if (x.key !== undefined) p[x.key] = x.value!;
+        });
+        const list = kLineDataList as unknown as { high: number; low: number; close: number }[];
+        const wrOf = (n: number): (number | null)[] =>
+          list.map((_, i) => {
+            if (i < n - 1) return null;
+            let h = -Infinity, l = Infinity;
+            for (let j = i - n + 1; j <= i; j++) { h = Math.max(h, list[j].high); l = Math.min(l, list[j].low); }
+            return h === l ? 50 : ((h - list[i].close) / (h - l)) * 100;
+          });
+        const w1 = wrOf(Math.max(1, Math.round(p.n1))), w2 = wrOf(Math.max(1, Math.round(p.n2)));
+        return list.map((_, i) => ({ w1: w1[i], w2: w2[i], ob: 80, os: 20 }));
+      },
+      figures: [
+        { key: "w1", title: "WR10", type: "line", styles: () => ({ color: "#FF9F43" }) },
+        { key: "w2", title: "WR6", type: "line", styles: () => ({ color: "#4DD0E1" }) },
+        dash("ob", "超买80"), dash("os", "超卖20"),
+      ],
+    });
+  } catch { /* 重复注册忽略 */ }
 }
 
 /* ── 时间转换（策影 format.ts 逐字 + 分钟级 datetime 支持） ── */
@@ -266,18 +422,18 @@ export const IND_DEFS: IndDef[] = [
   { key: "emv", kc: "EMV", label: "EMV", cat: "trend", where: "sub", desc: "简易波动指标（量价趋势）" },
   { key: "dma", kc: "DMA", label: "DMA", cat: "trend", where: "sub", desc: "平均线差（快慢均线差值）" },
   // 动量类
-  { key: "kdj", kc: "KDJ", label: "KDJ", cat: "mom", where: "sub", desc: "随机指标（超买超卖交叉）" },
-  { key: "rsi", kc: "RSI", label: "RSI", cat: "mom", where: "sub", desc: "相对强弱指标" },
+  { key: "kdj", kc: "KDJX", label: "KDJ", cat: "mom", where: "sub", desc: "随机指标（超买80/超卖20参考线）" },
+  { key: "rsi", kc: "RSIX", label: "RSI", cat: "mom", where: "sub", desc: "相对强弱指标（超买70/超卖30参考线）" },
   { key: "cci", kc: "CCI", label: "CCI", cat: "mom", where: "sub", desc: "顺势指标（脱离常态范围）" },
   { key: "roc", kc: "ROC", label: "ROC", cat: "mom", where: "sub", desc: "变动率指标" },
   { key: "mtm", kc: "MTM", label: "MTM", cat: "mom", where: "sub", desc: "动量指标" },
-  { key: "wr", kc: "WR", label: "WR", cat: "mom", where: "sub", desc: "威廉指标（超买超卖）" },
+  { key: "wr", kc: "WRX", label: "WR", cat: "mom", where: "sub", desc: "威廉指标（超买80/超卖20参考线）" },
   { key: "psy", kc: "PSY", label: "PSY", cat: "mom", where: "sub", desc: "心理线（上涨天数占比）" },
   { key: "lwr", kc: "LWR", label: "LWR", cat: "mom", where: "sub", desc: "威廉随机指标（快慢随机线）" },
   { key: "osc", kc: "OSC", label: "OSC", cat: "mom", where: "sub", desc: "变动率柱（震荡量指标）" },
   { key: "udl", kc: "UDL", label: "UDL", cat: "mom", where: "sub", desc: "引力线（多周期动量合成）" },
   // 量能类
-  { key: "vol", kc: "VOL", label: "VOL", cat: "vol", where: "sub", desc: "成交量（5/10/40 日均量线）" },
+  { key: "vol", kc: "VOLX", label: "VOL", cat: "vol", where: "sub", desc: "成交量（5/10/40 日均量线）" },
   { key: "obv", kc: "OBV", label: "OBV", cat: "vol", where: "sub", desc: "能量潮（量能累积方向）" },
   { key: "vr", kc: "VR", label: "VR", cat: "vol", where: "sub", desc: "成交量比率" },
   { key: "wvad", kc: "WVAD", label: "WVAD", cat: "vol", where: "sub", desc: "威廉变异离散量（量价加权）" },
@@ -751,10 +907,10 @@ export function mountKline(el: HTMLElement): KlineChartHandle {
         const d = IND_BY_KEY[k];
         if (!d || d.where !== "sub") continue;
         if (d.key === "vol") {
-          // 策影 createSubIndicatorConfig：禁用大数格式化，轴/图例文本走万/亿；
-          // calcParams [5,10,40] = 5/10/40 日均量线（40 日均量作缩放量能基准）
+          // 自研 VOLX：MA5/MA10/MA40 三条均量线（v10 内置 VOL 忽略第三参数）；
+          // 禁用大数格式化，轴/图例文本走万/亿；量柱红绿走注册内的 figure styles
           chart.createIndicator({
-            name: "VOL", shouldFormatBigNumber: false, calcParams: [5, 10, 40],
+            name: "VOLX", shouldFormatBigNumber: false,
             styles: { bars: [{ upColor: up, downColor: dn, noChangeColor: NEUTRAL }] },
           } as never, false);
         } else if (d.key === "macd") {
