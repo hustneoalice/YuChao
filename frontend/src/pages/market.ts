@@ -335,7 +335,7 @@ export function initMarket(): void {
   window.setInterval(() => void loadTicker(), 30000);
   document.getElementById("tickerbar")!.addEventListener("click", (e) => {
     const it = (e.target as HTMLElement).closest<HTMLElement>(".tk-item");
-    if (!it) return;
+    if (!it || it.dataset.noGo !== undefined) return;   // 海外指数仅展示
     void openStock({ symbol: it.dataset.sym!, name: it.dataset.name || it.dataset.sym! });
   });
   document.getElementById("kl-main-ind")!.addEventListener("click", (e) => {
@@ -486,7 +486,8 @@ async function loadTicker(): Promise<void> {
   }
   const item = (i: IndexQuote) => {
     const up = (i.pct ?? 0) >= 0, cls = up ? "up" : "down";
-    return `<span class="tk-item" data-sym="${i.symbol}" data-name="${i.name}" title="查看 ${i.name} K线">` +
+    const aSym = i.symbol.includes(".");   // 海外指数（usDJI/hkHSI）无 K 线跳转，仅展示
+    return `<span class="tk-item" data-sym="${i.symbol}" data-name="${i.name}" title="${aSym ? `查看 ${i.name} K线` : `${i.name} · 海外指数`}"${aSym ? "" : ' data-no-go'}>` +
       `<b>${i.name}</b><span class="num tk-code">${i.symbol}</span>` +
       `<span class="num ${cls}">${i.price != null ? fmt(i.price) : "--"}</span>` +
       `<span class="num ${cls}">${i.chg != null ? fmtChg(i.chg) : ""}</span>` +

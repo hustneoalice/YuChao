@@ -23,7 +23,7 @@ from typing import Any, Dict, List, Optional
 import httpx
 
 from ..updater.collectors.http import client, _UA, pure_of
-from .symbol import INDEX_NAMES, TICKER_INDICES
+from .symbol import GLOBAL_INDICES, INDEX_NAMES, TICKER_INDICES
 
 _CACHE: Dict[str, tuple[float, Any]] = {}          # key → (到期时间戳, 数据)
 
@@ -113,12 +113,19 @@ _TX_API = "https://qt.gtimg.cn/q="
 # 扩展位（个股才有，指数为空）：38=换手% 39=PE(TTM) 43=振幅% 44=流通市值(亿) 45=总市值(亿) 46=PB
 
 
+_TX_GLOBAL_RE = re.compile(r"^(us|hk|jp|uk|de|fr|in)[A-Za-z]{2,}$", re.IGNORECASE)
+
+
 def _tx_symbol(symbol: str) -> str:
     """腾讯形式：600519→sh600519、000001.SH→sh000001、399001.SZ→sz399001。
 
     市场规则与策影一致：5/6/9→sh、4/8（含920段）→bj、其余→sz；
     带市场后缀（.SH/.SZ/.BJ）直接按后缀。"""
-    s = str(symbol).strip().upper()
+    s = str(symbol).strip()
+    # 海外腾讯码（usDJI / hkHSI 等小写市场前缀+大写词）原样直通，不做 A 股规则转换
+    if _TX_GLOBAL_RE.match(s):
+        return s
+    s = s.upper()
     code = s.split(".")[0] if "." in s else s
     if "." in s:
         mkt = s.split(".")[1].lower()
@@ -154,9 +161,11 @@ def _tx_quotes(symbols: List[str]) -> Dict[str, Dict[str, Any]]:
             if len(p) < 38 or not p[3]:
                 continue
             num = lambda k: float(p[k]) if p[k] else None    # noqa: E731
-            # p[0] 形如 v_sh000001 → 'sh000001' 反查；再以 p[2] 6位码兜底
-            sym = by_tx.get(p[0].split("_", 1)[-1]) or by_code.get(p[2]) or p[2]
-            ext = len(p) > 46
+            # p[0] 形如 v_sh000001="1 → 清洗 "=" 尾巴后反查腾讯码；再以 p[2] 兜底
+            tx_key = p[0].split("=", 1)[0].split("_", 1)[-1]
+            sym = by_tx.get(tx_key) or by_code.get(p[2]) or p[2]
+            # 海外行（usDJI/hkHSI）：核心位 3/4/5/31/32/33/34 与 A 股一致，扩展位是文本 → 关闭
+            ext = len(p) > 46 and not _TX_GLOBAL_RE.match(sym)
             out[sym] = {
                 "name": p[1], "price": num(3), "prev_close": num(4),
                 "open": num(5), "high": num(33), "low": num(34),
@@ -224,10 +233,12 @@ def realtime_quotes(symbols: List[str]) -> Dict[str, Dict[str, Any]]:
 def realtime_indices() -> Dict[str, Any]:
     """常用指数批量实时（策影同款腾讯批量源，一次 HTTP，10s 缓存）：ticker 数据源。
 
+    A 股指数 + 海外主要指数（GLOBAL_INDICES，仅展示不可点）；
     返回 {"items": [{symbol, name, price, chg, pct, amount}], "total_amount": 沪+深之和}；
     pct 为小数（0.0063），前端 ×100 显示。
     """
-    raw = _tx_quotes([s for s, _, _ in TICKER_INDICES])
+    syms = [s for s, _, _ in TICKER_INDICES] + [s for s, _ in GLOBAL_INDICES]
+    raw = _tx_quotes(syms)
     out: List[Dict[str, Any]] = []
     for sym, name, _secid in TICKER_INDICES:
         d = raw.get(sym)
@@ -237,6 +248,14 @@ def realtime_indices() -> Dict[str, Any]:
                     "chg": d["chg"],
                     "pct": d["pct"] / 100 if d["pct"] is not None else None,
                     "amount": d["amount"]})
+    for sym, name in GLOBAL_INDICES:          # 海外段：A股段之后追加展示
+        d = raw.get(sym)
+        if not d:
+            continue
+        out.append({"symbol": sym, "name": name, "price": d["price"],
+                    "chg": d["chg"],
+                    "pct": d["pct"] / 100 if d["pct"] is not None else None,
+                    "amount": None})          # 美股/港股指数成交额口径不同，ticker 不展示
     total = sum(i["amount"] for i in out
                 if i["amount"] and i["symbol"] in ("000001.SH", "399001.SZ"))
     return {"items": out, "total_amount": total}

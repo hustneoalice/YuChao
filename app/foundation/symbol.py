@@ -23,6 +23,15 @@ INDEX_NAMES: dict[str, str] = {s: n for s, n, _ in TICKER_INDICES} | {
     "000016.SH": "上证50", "399005.SZ": "中小100",
 }
 
+# 海外主要指数（滚动行情追加段）：symbol 即腾讯码（qt.gtimg.cn 的 us/hk 形态），
+# 不参与东财 secid / K 线跳转，仅 ticker 展示
+GLOBAL_INDICES: list[tuple[str, str]] = [
+    ("usDJI", "道琼斯"),
+    ("usIXIC", "纳斯达克"),
+    ("usINX", "标普500"),
+    ("hkHSI", "恒生指数"),
+]
+
 
 def index_form(symbol: str) -> str | None:
     """是指数形态（带市场后缀）则原样返回规范化形式，否则 None。"""
