@@ -9,6 +9,7 @@ class TableStatus(BaseModel):
     table: str
     rows: Optional[int] = None
     latest_date: Optional[str] = None
+    earliest_date: Optional[str] = None  # 数据起始日（前端展示数据范围年限）
     coverage: Optional[float] = None  # 0-100，最新截面覆盖的标的数 / 全市场证券数
 
 

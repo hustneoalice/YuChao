@@ -38,16 +38,19 @@ def _coverage(conn, table: str, date_col: str | None,
 def table_status(conn, table: str) -> dict:
     date_col = _DATE_COL.get(table)
     date_expr = f"MAX({date_col})" if date_col else "NULL"
+    min_expr = f"MIN({date_col})" if date_col else "NULL"
     try:
-        row = conn.execute(f"SELECT COUNT(*), {date_expr} FROM {table}").fetchone()
+        row = conn.execute(f"SELECT COUNT(*), {date_expr}, {min_expr} FROM {table}").fetchone()
     except Exception:
-        return {"table": table, "rows": None, "latest_date": None, "coverage": None}
+        return {"table": table, "rows": None, "latest_date": None,
+                "earliest_date": None, "coverage": None}
     latest = str(row[1]) if row and row[1] else None
     coverage = None
     if table in _COVERAGE_TABLES:
         coverage = _coverage(conn, table, _COVERAGE_TABLES[table], latest)
     return {"table": table, "rows": int(row[0]) if row else 0,
-            "latest_date": latest, "coverage": coverage}
+            "latest_date": latest, "earliest_date": str(row[2]) if row and row[2] else None,
+            "coverage": coverage}
 
 
 # 各表"最新日期"列名（1.0 schema 原样；无日期维度 → None）

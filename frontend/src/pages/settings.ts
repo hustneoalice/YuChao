@@ -79,14 +79,6 @@ const DATA_TYPE_ZH: Record<string, string> = {
 /** 大数 → 人话：1.2 万（数据总量/新增条数用） */
 const fmtW = (n: number): string => (n >= 10000 ? `${(n / 10000).toFixed(1)} 万` : fmt(n, 0));
 
-/** 最新数据日期 → 「就是今天 / 昨天 / X 天前」 */
-const freshHuman = (d?: string | null): string => {
-  if (!d) return "暂无数据";
-  const t = Date.parse(d);
-  if (Number.isNaN(t)) return "";
-  const n = Math.max(0, Math.floor((Date.now() - t) / 86400000));
-  return n === 0 ? "就是今天 · 新鲜" : n === 1 ? "昨天收盘后更新" : `${n} 天前更新`;
-};
 
 let upTimer: ReturnType<typeof setInterval> | null = null;
 const stopUpState = (): void => { if (upTimer) { clearInterval(upTimer); upTimer = null; } };
@@ -234,22 +226,39 @@ async function refreshHealth(): Promise<void> {
   const g = GRADE[h.grade] ?? GRADE.warn;
   chip.innerHTML = `<span class="upstat ${g[1]}">${h.score} 分 · ${g[0]}</span>`;
 
+  /* 四维卡（保留卡片式，信息升维）：每卡=分数+用户能看懂的具体事实 */
+  const f = h.freshness?.items ?? [];
+  const kline = f.find((x) => x.table === "daily_ohlcv");
+  const covItems = h.coverage?.items ?? [];
+  const covWorst = [...covItems].filter((x) => typeof x.coverage === "number")
+    .sort((a, b) => (a.coverage ?? 0) - (b.coverage ?? 0))[0];
+  const gapMiss = (h.gap?.items ?? []).filter((x) => x.missing || x.drop).length;
+  const ret = Object.values(h.selfheal?.kinds ?? {}).reduce((s, k) => s + (k.retries ?? 0), 0);
+  const facts: [string, number, string, string][] = [
+    ["新鲜度", h.freshness?.score ?? 0,
+      kline ? `行情 ${ (kline.latest || "").slice(5, 10) } · 滞后${kline.lag_days}日` : "—",
+      kline && kline.lag_days === 0 ? "ok" : kline && kline.lag_days <= 1 ? "mid" : "bad"],
+    ["覆盖率", h.coverage?.score ?? 0,
+      covWorst ? `${esc(TABLE_ZH[covWorst.table] || covWorst.table)} ${Math.round(covWorst.coverage ?? 0)}%` : "全表完整",
+      (covWorst?.coverage ?? 100) >= 90 ? "ok" : (covWorst?.coverage ?? 100) >= 50 ? "mid" : "bad"],
+    ["断档", h.gap?.score ?? 0,
+      gapMiss ? `近10日 ${gapMiss} 处异常` : "近10日无断档",
+      gapMiss ? "bad" : "ok"],
+    ["落账", h.ledger?.score ?? 0,
+      h.ledger?.updater_alive ? (ret ? `在线 · 自动重试${ret}次` : "进程在线") : "进程离线",
+      h.ledger?.updater_alive ? "ok" : "bad"],
+  ];
   const bar = (v: number, color: string): string =>
     `<div class="upbar" style="height:4px;margin-top:4px"><i style="width:${Math.max(v, 2)}%;background:${color}"></i></div>`;
-  const dims: [string, number][] = [
-    ["新鲜度", h.freshness?.score ?? 0], ["覆盖率", h.coverage?.score ?? 0],
-    ["断档", h.gap?.score ?? 0], ["落账", h.ledger?.score ?? 0],
-  ];
   const parts: string[] = [
-    `<div style="display:flex;align-items:center;gap:14px">` +
-    `<div style="flex:none;text-align:center"><div class="num" style="font-size:26px;font-weight:700;color:${g[2]};line-height:1.1">${h.score}</div>` +
-    `<div style="font-size:10.5px;color:var(--faint)">综合健康分</div></div>` +
-    `<div class="upstats" style="flex:1">` +
-    dims.map(([name, v]) => `<div><div class="k">${name}</div><div class="v num" style="color:${v >= 85 ? "var(--down)" : v >= 70 ? "var(--warn)" : "var(--up)"}">${v}</div>${bar(v, v >= 85 ? "var(--down)" : v >= 70 ? "var(--warn)" : "var(--up)")}</div>`).join("") +
-    `</div></div>`,
-    `<div class="uprow" style="font-size:11.5px">` +
-    `<i class="logdot ${h.ledger?.updater_alive ? "ok" : "bad"}"></i>` +
-    `<span style="color:var(--dim)">${h.ledger?.updater_alive ? "更新进程在线 · " + esc(selfhealSummary(h)) : "更新进程离线 — 自动更新与自愈停摆，启动：python -m app.updater"}</span></div>`,
+    `<div class="upstats">` +
+    facts.map(([name, v, fact, tone]) => {
+      const c = v >= 85 ? "var(--down)" : v >= 70 ? "var(--warn)" : "var(--up)";
+      return `<div><div class="k">${name}</div>` +
+        `<div class="v num" style="color:${c}">${v}</div>${bar(v, c)}` +
+        `<div class="num" style="font-size:10px;color:var(--faint);margin-top:3px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis">${fact}` +
+        (tone === "bad" ? ` <i class="logdot bad" style="width:5px;height:5px;display:inline-block"></i>` : "") + `</div></div>`;
+    }).join("") + `</div>`,
   ];
   const issues = (h.issues ?? []).slice(0, 6);
   if (issues.length)
@@ -262,7 +271,6 @@ async function refreshHealth(): Promise<void> {
         `</div>`).join("") + `</div>`);
   else
     parts.push(`<div style="font-size:12px;color:var(--down)">各项检查全部通过，数据底座状态良好。</div>`);
-  parts.push(`<div style="font-size:10.5px;color:var(--faint)">体检时间 ${(h.generated_at || "").replace("T", " ").slice(5, 19)} · 每 30 秒自动复评</div>`);
   box.innerHTML = parts.join("");
 }
 
@@ -293,12 +301,21 @@ async function renderData(body: HTMLElement): Promise<void> {
     tasks = tasksR.items;
   } catch { /* 展示错误态 */ }
   try {
-    logs = (await dataApi.updates(30)).items;
+    logs = (await dataApi.updates(12)).items;
   } catch { logs = []; }
   const stage = STAGE_TEXT[st?.stage ?? "uninitialized"] ?? ["未知", "bad"];
   const tables = [...(st?.tables ?? [])].sort((a, b) => (b.latest_date ?? "").localeCompare(a.latest_date ?? ""));
-  const totalRows = tables.reduce((s, t) => s + (t.rows ?? 0), 0);
-  const latest = tables.map((t) => t.latest_date).filter(Boolean).sort().pop() || "—";
+  const filled = tables.filter((t) => (t.rows ?? 0) > 0);
+  const totalRows = filled.reduce((s, t) => s + (t.rows ?? 0), 0);
+  const ohlcv = tables.find((t) => t.table === "daily_ohlcv");
+  const earliest = ohlcv?.earliest_date || "";
+  /* 数据范围：2014-05 至今 · 12.5 年（vs 策影口径近 3 年，这是我们的卖点） */
+  const spanYears = earliest
+    ? ((Date.now() - new Date(earliest).getTime()) / 31557600000).toFixed(1)
+    : null;
+  const rangeSub = spanYears
+    ? `${earliest.slice(0, 7).replace("-", " 年 ")} 月至今 · ${spanYears} 年全市场日线`
+    : "数据准备中";
 
   body.innerHTML =
     /* ① 数据更新（置顶 · 策影 UpdateProgressCard 同构）：现在更新什么/跑到哪了；没在更新时为什么不用管 */
@@ -306,26 +323,24 @@ async function renderData(body: HTMLElement): Promise<void> {
     `<span id="up-chip" style="display:inline-flex"></span><span class="sp"></span><span class="sub num" id="up-saved"></span></div>` +
     `<div class="upcard" id="up-body"><span style="color:var(--faint);font-size:11.5px">正在读取更新状态…</span></div>` +
     `<div class="setrow" style="border-top:1px solid var(--border-soft);margin-top:12px;padding-top:10px"><span class="lab">手动更新</span><div class="ctl" style="gap:8px">` +
-    tasks.map((t) => `<button class="hbtn" data-run="${t.kind}" title="${esc(t.description)}">${esc(t.label)}</button>`).join("") +
-    `</div></div>` +
-    `<div style="font-size:10.5px;color:var(--faint)">平时不需要手动操作；手动更新会在后台执行，完成后页面数据自动刷新</div></div>` +
-    /* ①.5 数据体检（P1）：四维打分 + 自愈心跳摘要 + 问题清单 + 一键修复 */
+    `<button class="hbtn primary" data-run="kline_update" title="拉取全市场日线增量（核心数据，收盘后自动执行）">立即更新</button>` +
+    `<details style="display:inline-block"><summary class="hbtn" data-sz="13" style="display:inline-flex;cursor:pointer;list-style:none">更多 ▾</summary>` +
+    `<div style="display:flex;gap:8px;flex-wrap:wrap;margin-top:8px">` +
+    tasks.filter((t) => t.kind !== "kline_update").map((t) => `<button class="hbtn" data-run="${t.kind}" title="${esc(t.description)}">${esc(t.label)}</button>`).join("") +
+    `</div></details></div></div>` +
+    `<div style="font-size:10.5px;color:var(--faint)">平时不需要手动操作；更新失败会自动重试，错过的链位自动补上</div></div>` +
+    /* ①.5 数据体检（P1）：四维卡片（分数+具体事实）+ 问题清单 + 一键修复 */
     `<div class="setsec"><div class="sh">${ic("database", 15)}<h3>数据体检</h3>` +
     `<span id="health-chip" style="display:inline-flex"></span><span class="sp"></span>` +
     `<button class="hbtn primary" id="health-repair" data-sz="13">一键修复</button></div>` +
     `<div class="upcard" id="health-body"><span style="color:var(--faint);font-size:11.5px">正在体检…</span></div>` +
     `<div style="font-size:10.5px;color:var(--faint);margin-top:8px">体检看四件事：数据新不新鲜、覆盖全不全、有没有断档、更新进程是否健康；发现的问题点「一键修复」自动补齐</div></div>` +
-    /* ② 总览：散户关心的三件事 — 更新到哪了 / 有多少 / 要不要我管 */
-    `<div class="setsec"><div class="sh">${ic("database", 15)}<h3>数据总览</h3><span class="sub">本地数据 · 自动维护，无需操作</span><span class="sp"></span>` +
+    /* ② 数据内容：每类数据更新到哪天（只展示有数据的卡；卖点 = 数据范围年限） */
+    `<div class="setsec"><div class="sh"><h3>数据内容</h3>` +
+    `<span class="sub">${esc(rangeSub)} · ${fmtW(totalRows)} 条</span><span class="sp"></span>` +
     `<span class="datachip i-${stage[1] === "ok" ? "up" : stage[1] === "warn" ? "mid" : ""}"><i></i><span>${esc(stage[0])}</span></span></div>` +
-    `<div class="setrow"><span class="lab">行情更新到</span><div class="ctl"><span class="num" style="font-weight:600">${esc(latest)}</span>` +
-    `<span style="font-size:11px;color:var(--faint)">${esc(freshHuman(latest))}</span></div></div>` +
-    `<div class="setrow"><span class="lab">数据总量</span><div class="ctl"><span class="num">${fmtW(totalRows)}</span><span style="color:var(--faint);font-size:11px">${tables.length} 类数据</span></div></div>` +
-    `<div class="setrow"><span class="lab">自动更新</span><div class="ctl"><span style="font-size:12px;color:var(--dim)">每个交易日收盘后自动补齐最新行情，错过的会自动补上<span style="color:var(--faint)"> · 也可用上方按钮手动更新</span></span></div></div></div>` +
-    /* ③ 数据内容：每类数据更新到哪天（驭潮 dscard 新鲜度色点保留） */
-    `<div class="setsec"><div class="sh"><h3>数据内容</h3><span class="sub">每类数据更新到哪天了 · 色点：绿 最新 / 黄 稍旧 / 红 该更新了</span></div>` +
     `<div class="dsgrid">` +
-    (tables.length ? tables.map((t) => {
+    (filled.length ? filled.map((t) => {
       const n = daysAgo(t.latest_date);
       const cls = freshCls(n);
       const cov = typeof t.coverage === "number" ? t.coverage : null;
@@ -342,7 +357,7 @@ async function renderData(body: HTMLElement): Promise<void> {
     /* ④ 更新记录：每天自动更新了什么、成功与否、新增多少 */
     `<div class="setsec"><div class="sh"><h3>更新记录</h3><span class="sub">最近的自动 / 手动更新历史</span></div>` +
     `<table><thead><tr><th>时间</th><th>更新内容</th><th>结果</th><th class="n">新增数据</th><th>备注</th></tr></thead><tbody>` +
-    (logs.length ? logs.map((l) => {
+    (logs.length ? logs.slice(0, 8).map((l) => {
       const [txt, cls] = STATUS_TEXT[String(l.status)] ?? [String(l.status || "—"), "flat"];
       return `<tr><td class="num">${esc(String(l.created_at || l.started_at || "—")).replace("T", " ").slice(0, 16)}</td>` +
         `<td>${esc(DATA_TYPE_ZH[String(l.data_type || "")] || String(l.data_type || "—"))}</td>` +

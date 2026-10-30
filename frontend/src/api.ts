@@ -172,7 +172,7 @@ export const corepicksApi = {
 export interface DataStatus {
   stage: "uninitialized" | "initializing" | "ready" | "updating" | "update_failed";
   duckdb_path: string;
-  tables: { table: string; rows?: number; latest_date?: string; coverage?: number | null }[];
+  tables: { table: string; rows?: number; latest_date?: string; earliest_date?: string; coverage?: number | null }[];
   generated_at: string;
 }
 /* P1 体检报告（/data/health）：四维打分 + 分级 + 带修复动作的问题清单 */
