@@ -1060,9 +1060,9 @@ function cardBody(cid: string, mode: string): string {
         `<button class="wl-x" data-wl-del="${w.symbol}" title="移出自选">${ic("x", 10)}</button>` +
         `</div>`;
     }).join("");
-    // 搜索框已内嵌进卡片头（cardHead），此处仅渲染列表
-    return `<div class="wl-list">${rows}</div>` +
-      (!wl.length ? `<div class="bempty" style="padding:14px 14px 8px">暂无自选股<br><span style="color:var(--faint)">在顶部搜索直接添加，或从左侧自选页管理</span></div>` : "");
+    // 搜索框已内嵌进卡片头（cardHead），此处仅渲染列表（固定高度滚动，空态也占位）
+    return `<div class="wl-list">${rows}${!wl.length ?
+      `<div class="bempty" style="padding:14px 14px 8px">暂无自选股<br><span style="color:var(--faint)">点右上 ＋ 搜索添加，或从自选页管理</span></div>` : ""}</div>`;
   }
   if (cid === "signals") {
     const segI = sixSegment(mk.bars, mk.bars.length - 1);
@@ -1137,10 +1137,11 @@ function cardHead(def: { id: string; name: string; icon: string }): string {
   // 模式切换收成单颗按钮（图标指示点击后进入的模式）；整组控制钮悬停卡片才浮现
   const nextIcon = p.mode === "simple" ? "faders-horizontal" : "list";
   const nextTitle = p.mode === "simple" ? "切换为详细模式" : "切换为简单模式";
-  // 自选卡：搜索内嵌进卡片头（名称右侧），紧凑不占独立行
+  // 自选卡：搜索内嵌进卡片头（名称右侧）+ 行尾「+」新增入口（打开添加弹窗）
   const headSearch = def.id === "watch"
     ? `<span class="wl-search">${ic("magnifying-glass", 12)}` +
-      `<input placeholder="搜索代码 / 名称 / 拼音" maxlength="20"><div class="wl-drop"></div></span>`
+      `<input placeholder="搜索代码 / 名称 / 拼音" maxlength="20"><div class="wl-drop"></div></span>` +
+      `<button class="cbtn" data-wl-new title="新增自选（搜索 + 选择分组）">${ic("plus", 12)}</button>`
     : "";
   return `<div class="rh">${ic(def.icon, 14)}<h4>${def.name}</h4>${headSearch}<span class="mono" style="${def.id === "watch" ? "" : "margin-left:auto"}">${mono}</span>` +
     `<span class="cbar"><button class="cbtn" data-mode-toggle title="${nextTitle}">${ic(nextIcon, 12)}</button>` +
@@ -1254,6 +1255,11 @@ export function renderRight(): void {
     b.addEventListener("click", () => {
       // 空态引导：聚焦卡内搜索直接添加（不再跳自选页）
       document.querySelector<HTMLInputElement>('#rightcol .rcard[data-cid="watch"] .wl-search input')?.focus();
+    }));
+  el.querySelectorAll<HTMLElement>("[data-wl-new]").forEach((b) =>
+    b.addEventListener("click", () => {
+      // 新增入口：打开「添加自选」弹窗（共享搜索 + 分组选择）
+      openModal("modal-add");
     }));
   el.querySelectorAll<HTMLElement>("[data-wl-del]").forEach((b) =>
     b.addEventListener("click", (e) => {
