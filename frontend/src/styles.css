@@ -176,6 +176,9 @@ svg{display:block}
 .chartbox{background:var(--panel);border:1px solid var(--border);border-radius:10px;overflow:hidden;
   display:flex;flex-direction:column;min-height:0}
 .chartbar{display:flex;align-items:center;gap:8px;padding:7px 12px;border-bottom:1px solid var(--border);min-height:42px}
+/* 图表底部控制条（策影双层布局）：布局/档位/缩放/加自选移至底部，顶栏只留周期+指标 */
+.kl-footbar{display:flex;align-items:center;gap:8px;padding:4px 12px;min-height:32px;flex:none;
+  border-top:1px solid var(--border);background:var(--panel-2)}
 .chartbar .sp{flex:1}
 .barsep{width:1px;height:14px;background:var(--border);margin:0 2px}
 .chartbar .seg button{padding:3px 10px;font-size:11.5px}
