@@ -349,8 +349,9 @@ body.mobile .rcard .cbar{opacity:1}
   display:inline-flex;align-items:center;justify-content:center;cursor:pointer;opacity:0;transition:.12s;padding:0}
 .wl-r:hover .wl-x{opacity:1}
 .wl-x:hover{color:var(--down);background:var(--panel-3)}
-/* 内嵌搜索（与顶栏同源组件）：下拉结果 + 行尾「+/已加」态钮 */
+/* 内嵌搜索（与顶栏同源组件）：下拉结果 + 行尾「+/已加」态钮；卡片顶部短框不占满行 */
 .wl-search{position:relative;display:flex;align-items:center;gap:6px;height:28px;
+  width:min(58%,230px);min-width:150px;
   padding:0 9px;margin-bottom:6px;border-radius:8px;background:var(--panel-2);border:1px solid var(--border)}
 .wl-search:focus-within{border-color:color-mix(in srgb,var(--accent) 45%,transparent)}
 .wl-search>svg{color:var(--faint);flex:none}

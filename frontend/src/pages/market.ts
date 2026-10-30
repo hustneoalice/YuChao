@@ -365,29 +365,8 @@ export function initMarket(): void {
     if (!it || it.dataset.noGo !== undefined) return;   // 海外指数仅展示
     void openStock({ symbol: it.dataset.sym!, name: it.dataset.name || it.dataset.sym! });
   });
-  document.getElementById("kl-main-ind")!.addEventListener("click", (e) => {
-    const b = (e.target as HTMLElement).closest("button") as HTMLElement | null;
-    if (b) { // 多选 toggle：主图指标可任意叠加
-      b.classList.toggle("on");
-      mk.mainInds = [...document.querySelectorAll<HTMLElement>("#kl-main-ind button.on")]
-        .map((x) => x.dataset.mi as MainKey);
-      saveKPrefs();
-      syncIndUI();
-      renderKline();
-    }
-  });
-  document.getElementById("kl-sub-ind")!.addEventListener("click", (e) => {
-    const b = (e.target as HTMLElement).closest("button") as HTMLElement | null;
-    if (b) { // 多选 toggle：副图每指标一个窗格
-      b.classList.toggle("on");
-      mk.subInds = [...document.querySelectorAll<HTMLElement>("#kl-sub-ind button.on")]
-        .map((x) => x.dataset.si as SubKey);
-      saveKPrefs();
-      syncIndUI();
-      renderKline();
-    }
-  });
   // 观察档位 / 缩放 / 重置（策影工具条同款：纯视图操作，不重载数据）
+  // 主/副图快捷组已移除：指标显影统一走「指标」面板（28 指标 6 分类 + 方案，所见即所得）
   document.getElementById("kl-view")!.addEventListener("click", (e) => {
     const b = (e.target as HTMLElement).closest("button") as HTMLElement | null;
     if (!b) return;
@@ -569,13 +548,9 @@ function toggleSeg(id: string, btn: HTMLElement): void {
   document.querySelectorAll(`#${id} button`).forEach((x) => x.classList.toggle("on", x === btn));
 }
 
-/** 指标显影双源同步：mk.mainInds/subInds → chartbar seg 与指标面板 chips 的 on 态 */
+/** 指标显影双源同步：mk.mainInds/subInds → 指标面板 chips 的 on 态 */
 function syncIndUI(): void {
   const mset = new Set(mk.mainInds), sset = new Set(mk.subInds);
-  document.querySelectorAll<HTMLElement>("#kl-main-ind button").forEach((x) =>
-    x.classList.toggle("on", mset.has(x.dataset.mi as MainKey)));
-  document.querySelectorAll<HTMLElement>("#kl-sub-ind button").forEach((x) =>
-    x.classList.toggle("on", sset.has(x.dataset.si as SubKey)));
   document.querySelectorAll<HTMLElement>("#kl-ipanel button[data-mi]").forEach((x) =>
     x.classList.toggle("on", mset.has(x.dataset.mi as MainKey)));
   document.querySelectorAll<HTMLElement>("#kl-ipanel button[data-si]").forEach((x) =>
