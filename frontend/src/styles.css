@@ -339,7 +339,9 @@ body.mobile .rcard .cbar{opacity:1}
 .sh-con.more{color:var(--faint)}
 /* 自选股卡片（首个多标的卡）：行式列表（同花顺自选同款），
    序号 | 名称代码 | 当日走势 | (成交额 换手) | 现价 | 涨跌幅 | 移除(hover) */
-.wl-list{display:flex;flex-direction:column;height:320px;overflow-y:auto;margin:0 -4px;padding:0 4px}
+/* 少量自选自适应高度不留白；超过 320px 固定限高出滚动条 */
+.wl-list{display:flex;flex-direction:column;max-height:320px;overflow-y:auto;margin:0 -4px;padding:0 4px}
+.wl-list .bempty{min-height:96px;display:flex;flex-direction:column;justify-content:center;text-align:center}
 .wl-r{display:grid;grid-template-columns:16px minmax(0,1fr) 56px auto auto 16px;align-items:center;gap:8px;
   padding:5px 6px;border-radius:8px;cursor:pointer;font-size:11.5px;position:relative}
 .wl-r:hover{background:var(--panel-2)}
