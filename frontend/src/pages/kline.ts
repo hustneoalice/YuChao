@@ -191,10 +191,10 @@ function ensureRegistered(): void {
   try {
     registerYAxis({
       name: "normal",
-      displayValueToText: (value: number, precision: number) => {
+      displayValueToText: (value: number, _precision: number) => {
         if (Math.abs(value) >= 1e8) return (value / 1e8).toFixed(2) + "亿";
         if (Math.abs(value) >= 1e4) return (value / 1e4).toFixed(0) + "万";
-        return value.toFixed(precision);
+        return value.toFixed(0);   // 刻度整数化：不带小数点（万/亿缩写除外）
       },
     });
   } catch { /* 重复注册会报错，忽略 */ }

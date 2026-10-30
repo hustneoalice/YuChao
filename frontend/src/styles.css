@@ -177,6 +177,11 @@ svg{display:block}
   display:flex;flex-direction:column;min-height:0}
 .chartbar{display:flex;align-items:center;gap:8px;padding:7px 12px;border-bottom:1px solid var(--border);min-height:42px}
 /* 图表底部控制条（策影双层布局）：布局/档位/缩放/加自选移至底部，顶栏只留周期+指标 */
+/* 图表整体高度拖拽手柄：footbar 上缘细横条，hover 变亮提示可拖 */
+.kl-vgrip{height:5px;flex:none;cursor:row-resize;position:relative;z-index:3}
+.kl-vgrip::after{content:"";position:absolute;left:50%;top:50%;transform:translate(-50%,-50%);
+  width:34px;height:3px;border-radius:2px;background:var(--border);transition:background .15s}
+.kl-vgrip:hover::after{background:var(--accent)}
 .kl-footbar{display:flex;align-items:center;gap:8px;padding:4px 12px;min-height:32px;flex:none;
   border-top:1px solid var(--border);background:var(--panel-2)}
 .chartbar .sp{flex:1}

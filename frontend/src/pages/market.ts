@@ -446,6 +446,41 @@ export function initMarket(): void {
     syncIndUI();
     renderKline();
   });
+  // 图表整体高度拖拽（footbar 上缘手柄）：向下拖增高，双击恢复默认；高度持久化
+  const vgrip = document.getElementById("kl-vgrip")!;
+  const chartbox = vgrip.closest<HTMLElement>(".chartbox")!;
+  try {
+    const saved = Number(localStorage.getItem("yc_klh"));
+    if (saved >= 320 && saved <= window.innerHeight - 160) {
+      chartbox.style.flex = "none";
+      chartbox.style.height = `${saved}px`;
+    }
+  } catch { /* 忽略坏值 */ }
+  vgrip.addEventListener("pointerdown", (e) => {
+    e.preventDefault();
+    vgrip.setPointerCapture(e.pointerId);
+    const h0 = chartbox.offsetHeight, y0 = e.clientY;
+    const onMove = (ev: PointerEvent) => {
+      const h = Math.round(Math.min(window.innerHeight - 160, Math.max(320, h0 + ev.clientY - y0)));
+      chartbox.style.flex = "none";
+      chartbox.style.height = `${h}px`;
+    };
+    const onUp = (ev: PointerEvent) => {
+      vgrip.removeEventListener("pointermove", onMove);
+      vgrip.removeEventListener("pointerup", onUp);
+      vgrip.removeEventListener("pointercancel", onUp);
+      onMove(ev);
+      localStorage.setItem("yc_klh", String(chartbox.offsetHeight));
+    };
+    vgrip.addEventListener("pointermove", onMove);
+    vgrip.addEventListener("pointerup", onUp);
+    vgrip.addEventListener("pointercancel", onUp);
+  });
+  vgrip.addEventListener("dblclick", () => {
+    chartbox.style.flex = "";
+    chartbox.style.height = "";
+    localStorage.removeItem("yc_klh");
+  });
   renderIpanel();
   ipanel.addEventListener("click", (e) => {
     const t = e.target as HTMLElement;
