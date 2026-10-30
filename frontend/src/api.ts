@@ -1,6 +1,7 @@
 /* API 客户端：fetch 封装 + JWT 存取 + 统一错误规约 {code,message,detail} */
 
 const BASE = "/api/v1";
+export const API_BASE = BASE;
 const TOKEN_KEY = "yc_token";
 
 export function getToken(): string | null {

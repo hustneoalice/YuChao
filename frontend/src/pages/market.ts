@@ -5,10 +5,7 @@ import { sma, bollSeries, kdjSeries, atrSeries, sixSegment } from "../indicators
 import { ic } from "../icons";
 import { CARD_DEFS, getState, notifyLocal, setCardPref, subscribe } from "../store";
 import { openModal, toast } from "../ui";
-import { mountKline, type KlineChartHandle, type MainKey, type SubKey } from "./kline";
-
-const CH_FAST = "#C084FC";   // 方案 B · 紫罗兰（与 kline.ts 趋势通道一致）
-const CH_SLOW = "#2DD4BF";   // 方案 B · 青绿
+import { mountKline, setTrendPalette, trendPaletteKey, type KlineChartHandle, type MainKey, type SubKey } from "./kline";
 
 export const SEG6 = ["超卖", "低位", "弱势", "回升", "强势", "超买"];
 export const SEGNAME = ["", "超卖", "低位", "弱势", "回升", "强势", "超买"];
@@ -46,7 +43,7 @@ mk.panels = [...LAYOUT_PANELS[mk.layout]];
 
 /* K线偏好持久化（F04：本地 + sync.ts 云同步）——主/副图指标集合 */
 const KMAIN_OK: MainKey[] = ["ma", "boll", "short", "mid", "avg"];
-const KSUB_OK: SubKey[] = ["vol", "macd", "kdj", "rsi"];
+const KSUB_OK: SubKey[] = ["vol", "macd", "kdj", "rsi", "obv"];
 function readInds<T extends string>(key: string, ok: T[], fb: T[]): T[] {
   try {
     const v = JSON.parse(localStorage.getItem(key) || "") as unknown;
@@ -394,6 +391,13 @@ export function initMarket(): void {
       renderKline();
       return;
     }
+    if (b.dataset.tpl) {                                   // 趋势通道配色 A/B/C/D
+      setTrendPalette(b.dataset.tpl);
+      syncIndUI();
+      renderKline();
+      notifyLocal("prefs");
+      return;
+    }
     const group = b.dataset.mi ? "main" : "sub";
     b.classList.toggle("on");
     if (group === "main")
@@ -507,6 +511,10 @@ function syncIndUI(): void {
     x.classList.toggle("on", mset.has(x.dataset.mi as MainKey)));
   document.querySelectorAll<HTMLElement>("#kl-ipanel button[data-si]").forEach((x) =>
     x.classList.toggle("on", sset.has(x.dataset.si as SubKey)));
+  // 通道配色选中态（单选）
+  const key = trendPaletteKey();
+  document.querySelectorAll<HTMLElement>("#kl-ipanel button[data-tpl]").forEach((x) =>
+    x.classList.toggle("on", x.dataset.tpl === key));
 }
 
 /** 日线聚合为周/月 */

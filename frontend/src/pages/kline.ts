@@ -13,12 +13,34 @@ import { cssv } from "../fmt";
 const UP = "#EF5350";
 const DOWN = "#519C2C";
 const NEUTRAL = "#757575";
-/* 趋势通道配色（方案 B · 紫罗兰 × 青绿）：与 K 线红绿、MA 琥珀/蓝、BOLL 灰
-   全部区隔，避免与主流机构（同花顺/东财橙蓝通道）撞色 */
-const CH_FAST = "#C084FC";
-const CH_SLOW = "#2DD4BF";
-const channelFill = (strong: boolean, alpha: number) =>
-  strong ? `rgba(192, 132, 252, ${alpha})` : `rgba(45, 212, 191, ${alpha})`;
+/* 趋势通道配色 · 四方案用户可选（本地 yc_trendpal，云同步键 trend_palette）：
+   与 K 线红绿、MA 琥珀/蓝、BOLL 灰区隔，避免与主流机构撞色 */
+export const TRENDS: Record<string, { label: string; fast: string; slow: string; fr: number[]; sr: number[] }> = {
+  A: { label: "A · 琥珀橙 × 皇家蓝", fast: "#FF9800", slow: "#0A84FF", fr: [255, 152, 0], sr: [10, 132, 255] },
+  B: { label: "B · 紫罗兰 × 青绿", fast: "#C084FC", slow: "#2DD4BF", fr: [192, 132, 252], sr: [45, 212, 191] },
+  C: { label: "C · 玫红 × 天蓝", fast: "#FB7185", slow: "#38BDF8", fr: [251, 113, 133], sr: [56, 189, 248] },
+  D: { label: "D · 金黄 × 石墨", fast: "#EAB308", slow: "#94A3B8", fr: [234, 179, 8], sr: [148, 163, 184] },
+};
+let _pal = localStorage.getItem("yc_trendpal") || "B";
+if (!TRENDS[_pal]) _pal = "B";
+
+export function setTrendPalette(p: string): void {
+  if (TRENDS[p]) {
+    _pal = p;
+    localStorage.setItem("yc_trendpal", p);
+  }
+}
+export function trendPalette(): { label: string; fast: string; slow: string; fr: number[]; sr: number[] } {
+  return TRENDS[_pal] ?? TRENDS.B;
+}
+export function trendPaletteKey(): string {
+  return TRENDS[_pal] ? _pal : "B";
+}
+const channelFill = (strong: boolean, alpha: number) => {
+  const p = trendPalette();
+  const c = strong ? p.fr : p.sr;
+  return `rgba(${c[0]}, ${c[1]}, ${c[2]}, ${alpha})`;
+};
 
 export function chartUp(): string {
   return document.documentElement.dataset.dir === "intl" ? DOWN : UP;
@@ -73,8 +95,8 @@ function registerTrendChannel(
       });
     },
     figures: [
-      { key: "fast", title: "快线", type: "line", styles: () => ({ color: CH_FAST }) },
-      { key: "slow", title: "慢线", type: "line", styles: () => ({ color: CH_SLOW }) },
+      { key: "fast", title: "快线", type: "line", styles: () => ({ color: trendPalette().fast }) },
+      { key: "slow", title: "慢线", type: "line", styles: () => ({ color: trendPalette().slow }) },
     ],
     draw: (params: { ctx?: CanvasRenderingContext2D; chart?: Chart; indicator?: { result?: unknown[] } }) => {
       const { ctx, chart, indicator } = params;
@@ -315,9 +337,10 @@ export function mountKline(el: HTMLElement): KlineChartHandle {
       const last = closes[closes.length - 1];
       const ma = closes.length >= n ? closes.slice(-n).reduce((s, v) => s + v, 0) / n : null;
       const strong = ma != null && last > ma;
-      const fill = strong ? "rgba(255,155,87,.82)" : "rgba(90,88,251,.86)";
-      parts.push(`<span><i style="background:${CH_FAST}"></i>${k === "short" ? "短线" : "中线"}快线</span>` +
-        `<span><i style="background:${CH_SLOW}"></i>慢线</span>` +
+      const p = trendPalette();
+      const fill = strong ? `rgba(${p.fr.join(",")},.82)` : `rgba(${p.sr.join(",")},.86)`;
+      parts.push(`<span><i style="background:${trendPalette().fast}"></i>${k === "short" ? "短线" : "中线"}快线</span>` +
+        `<span><i style="background:${trendPalette().slow}"></i>慢线</span>` +
         `<span><i style="background:${fill}"></i>${strong ? "多头 · 偏强" : "空头 · 偏弱"}</span>`);
     }
     legend.innerHTML = parts.join("");
