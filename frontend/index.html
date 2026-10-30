@@ -50,10 +50,6 @@
     <section class="page on" id="page-market">
       <div class="mkt-row">
         <div class="kl-col">
-          <div class="tickerbar" id="tickerbar" title="常用指数实时 · 点击查看K线 · 悬停暂停滚动">
-            <div class="tk-track" id="tk-track"></div>
-          </div>
-
           <div class="chartbox" style="flex:1;min-height:0">
             <div class="chartbar">
               <button class="backbtn" id="btn-back" hidden>
@@ -73,7 +69,7 @@
               <button class="cbtn" id="kl-zout" title="缩小（看更长周期）">－</button>
               <button class="cbtn" id="kl-vreset" title="重置视图">⟲</button>
               <button class="cbtn on" id="kl-auto" title="智能高度：主图/副图按 3.6 : 1 自适应分配（策影同款）">⤢</button>
-              <button class="hbtn" id="kl-watch" title="加自选 / 管理分组"><span data-ic="star" data-sz="12"></span><span id="kl-watch-t">加自选</span></button>
+              <button class="cbtn" id="kl-watch" title="加自选 / 管理分组"><span data-ic="star" data-sz="13"></span></button>
               <span class="barsep"></span>
               <span class="seg" id="kl-main-ind">
                 <button class="on" data-mi="ma">MA</button><button data-mi="boll">BOLL</button><button class="on" data-mi="short">短线趋势</button><button class="on" data-mi="mid">中线趋势</button>
@@ -116,6 +112,10 @@
               <button data-bt="indrep" id="brief-indrep">行业研报</button>
             </div>
             <div class="brief-body" id="brief-body"></div>
+          </div>
+
+          <div class="tickerbar" id="tickerbar" title="常用指数实时 · 点击查看K线 · 悬停暂停滚动">
+            <div class="tk-track" id="tk-track"></div>
           </div>
         </div>
 

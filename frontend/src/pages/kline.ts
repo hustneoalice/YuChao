@@ -347,6 +347,104 @@ export function mountKline(el: HTMLElement): KlineChartHandle {
     legend.style.display = parts.length ? "flex" : "none";
   };
 
+  /* ── 操盘状态颜色条（策影 SignalBars 同款）：K线上方逐柱状态带 ──
+   * 日线：日短=收盘vs MA10、日中=收盘vs MA45；周线：周短 MA10 / 周中 MA30；60分钟：60短 MA10。
+   * 收盘 > 慢线 → 偏强（趋势调色板强色），否则偏弱（弱色）；分时/月/季不显示。
+   * 逐柱对齐 convertToPixel.x，缩放平移实时跟随；左侧标签底永不被遮挡。 */
+  const SIG_ROWS: Partial<Record<TipPeriod, { label: string; n: number }[]>> = {
+    d: [{ label: "日短", n: 10 }, { label: "日中", n: 45 }],
+    w: [{ label: "周短", n: 10 }, { label: "周中", n: 30 }],
+    "60": [{ label: "60短", n: 10 }],
+  };
+  const sig = document.createElement("div");
+  sig.className = "klp-sig";
+  sig.style.display = "none";
+  sig.innerHTML = "<canvas></canvas>";
+  el.parentElement?.insertBefore(sig, el);           // klp-bar 与 klp-main 之间（文档流让位，策影同款）
+  const sigCv = sig.querySelector("canvas")!;
+  /** 显示/隐藏与行高同步：行数变化时主图重算布局，返回当前行配置 */
+  const sigSync = (): { rows: { label: string; n: number }[] } | null => {
+    const rows = SIG_ROWS[period];
+    if (!rows || !chart.getDataList().length) {
+      if (sig.style.display !== "none") {
+        sig.style.display = "none";
+        try { chart.resize(); } catch { /* 忽略 */ }
+        applyHeights();
+      }
+      return null;
+    }
+    const stripH = 3 + rows.length * 7 + (rows.length - 1) * 2 + 2;
+    if (sig.style.display === "none" || sig.dataset.h !== String(stripH)) {
+      sig.style.display = "block";
+      sig.style.height = stripH + "px";
+      sig.dataset.h = String(stripH);
+      try { chart.resize(); } catch { /* 忽略 */ }
+      applyHeights();
+    }
+    return { rows };
+  };
+  const sigDraw = () => {
+    const sync = sigSync();
+    if (!sync) return;
+    const list = chart.getDataList() as { close: number }[];
+    const w = sigCv.clientWidth || 1, h = sigCv.clientHeight || 1;
+    const dpr = window.devicePixelRatio || 1;
+    sigCv.width = Math.round(w * dpr); sigCv.height = Math.round(h * dpr);
+    const ctx = sigCv.getContext("2d")!;
+    ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
+    ctx.clearRect(0, 0, w, h);
+    const closes = list.map((b) => b.close);
+    // 逐柱 MA 状态（策影同款口径：收盘 > MA = 偏强）
+    const states = sync.rows.map(({ n }) => {
+      const st: (boolean | null)[] = [];
+      let sum = 0;
+      for (let i = 0; i < closes.length; i++) {
+        sum += closes[i];
+        if (i >= n) sum -= closes[i - n];
+        st.push(i >= n - 1 ? closes[i] > sum / n : null);
+      }
+      return st;
+    });
+    // 可见范围：realFrom/realTo 排除右侧预留幻影索引（缩放时越 Y 轴的根源）
+    const r = chart.getVisibleRange?.() as { from: number; to: number; realFrom?: number; realTo?: number } | undefined;
+    if (!r) return;
+    const from = Math.max(0, Math.floor(r.realFrom ?? r.from));
+    const to = Math.min(list.length - 1, Math.ceil(r.realTo ?? r.to));
+    const barSpace = chart.getBarSpace?.() || { bar: 8 };
+    const cw = Math.max(1, (barSpace.bar || 8) - 1);
+    const xs: number[] = [];
+    for (let i = from; i <= to; i++) {
+      try {
+        const px = chart.convertToPixel({ dataIndex: i, value: 0 }) as { x?: number };
+        if (px?.x != null) xs.push(px.x);
+      } catch { /* 忽略 */ }
+    }
+    if (!xs.length) return;
+    const rightBound = xs[xs.length - 1] + cw / 2 + 1;
+    // 先画柱（与可见 K 线一一对应），再画标签（覆盖其上永不被遮挡）
+    sync.rows.forEach((_, row) => {
+      const y = 3 + row * 9;
+      let last: boolean | null = null;
+      xs.forEach((x, k) => {
+        const s = states[row][from + k];
+        if (s != null) last = s;
+        if (last === null) return;
+        const left = x - cw / 2;
+        const right = Math.min(left + cw, rightBound);
+        if (left >= rightBound || right <= left) return;
+        ctx.fillStyle = channelFill(last === true, 0.9);
+        ctx.fillRect(left, y, right - left, 7);
+      });
+    });
+    const labelW = 36;
+    ctx.fillStyle = cssv("--panel-2") || "rgba(20,20,24,.92)";
+    ctx.fillRect(0, 0, labelW, h);
+    ctx.font = "9px monospace";
+    ctx.fillStyle = cssv("--faint") || "#8e8e93";
+    ctx.textBaseline = "middle";
+    sync.rows.forEach(({ label }, row) => ctx.fillText(label, 4, 3 + row * 9 + 3.5));
+  };
+
   const onCross = (...args: unknown[]) => {
     const ch = args[0] as { x?: number; y?: number } | null;
     if (!ch || ch.x == null || ch.y == null) { tip.style.display = "none"; return; }
@@ -448,7 +546,7 @@ export function mountKline(el: HTMLElement): KlineChartHandle {
     navWin.style.left = cvL + (from / L) * cvW + "px";
     navWin.style.width = Math.max(2, ((to - from) / L) * cvW) + "px";
   };
-  const onVisChange = () => { requestAnimationFrame(navUpdateWin); };
+  const onVisChange = () => { requestAnimationFrame(() => { navUpdateWin(); sigDraw(); }); };
   try { chart.subscribeAction("onVisibleRangeChange", onVisChange as never); } catch { /* 忽略 */ }
 
   // 窗口拖拽：只平移不缩放（策影同款），pointer capture 跟手
@@ -502,7 +600,7 @@ export function mountKline(el: HTMLElement): KlineChartHandle {
       tip.style.display = "none";                          // 数据重载时收起旧卡片
       // v10 无 applyNewData，经 DataLoader 一次性回填（策影同款）
       chart.setDataLoader({ getBars: (params) => { params.callback(list, false); } });
-      requestAnimationFrame(() => { navDraw(); try { chart.scrollToRealTime(0); } catch { /* 忽略 */ } });
+      requestAnimationFrame(() => { navDraw(); sigDraw(); try { chart.scrollToRealTime(0); } catch { /* 忽略 */ } });
     },
     setMain(inds: MainKey[]) {
       // 主图多选叠加（策影同款）：先按实例移除不再选中的，再增量补建缺失的
@@ -561,7 +659,11 @@ export function mountKline(el: HTMLElement): KlineChartHandle {
       // 窗格高度交给智能高度统一分配（含 candle_pane）
       applyHeights();
     },
-    setPeriod(p: TipPeriod) { period = p; },
+    setPeriod(p: TipPeriod) {
+      period = p;
+      // 颜色条按周期显隐（行数变化时 sigSync 内部已重排主图）
+      requestAnimationFrame(sigDraw);
+    },
     applyHeights,
     zoom(factor: number) {
       const bs = chart.getBarSpace?.() as { bar: number } | undefined;
@@ -584,16 +686,17 @@ export function mountKline(el: HTMLElement): KlineChartHandle {
     },
     navRefresh() { requestAnimationFrame(navDraw); },
     drawLegend,
-    retheme() { chart.setStyles(styles()); requestAnimationFrame(navDraw); },
+    retheme() { chart.setStyles(styles()); requestAnimationFrame(() => { navDraw(); sigDraw(); }); },
     resize() {
       chart.resize();
-      requestAnimationFrame(() => { applyHeights(); navDraw(); });
+      requestAnimationFrame(() => { applyHeights(); navDraw(); sigDraw(); });
     },
     destroy() {
       try { chart.unsubscribeAction("onCrosshairChange", onCross as never); } catch { /* 忽略 */ }
       tip.remove();
       legend.remove();
       nav.remove();
+      sig.remove();
       dispose(el);
     },
   };

@@ -3,9 +3,11 @@ import { marketApi, type Bar, type IndexQuote, type Quote } from "../api";
 import { cssv, esc, fmt, fmtChg, fmtYi } from "../fmt";
 import { sma, bollSeries, kdjSeries, atrSeries, sixSegment } from "../indicators";
 import { ic } from "../icons";
-import { CARD_DEFS, addWatch, getState, isWatched, notifyLocal, setCardPref, subscribe } from "../store";
+import { CARD_DEFS, addWatch, getState, isWatched, notifyLocal, removeWatch, setCardPref, subscribe } from "../store";
 import { openModal, toast } from "../ui";
 import { openWatchPanel } from "../watch";
+import { stockSearch, type StockSearchHandle } from "../searchbox";
+import { refreshSparksIn, sparkSvg } from "../sparks";
 import { TRENDS, mountKline, setTrendPalette, trendPaletteKey, type KlineChartHandle, type MainKey, type SubKey } from "./kline";
 
 export const SEG6 = ["超卖", "低位", "弱势", "回升", "强势", "超买"];
@@ -238,14 +240,14 @@ function renderBackbar(): void {
   else b.hidden = true;
 }
 
-/* ── 工具栏加自选按钮：未自选一键入「默认」组；已自选点击打开分组管理面板 ── */
+/* ── 工具栏加自选按钮（TradingView 同款 icon-only）：
+   未自选一键入「默认」组；已自选点击打开分组管理面板；态用高亮 + title 表达 ── */
 function updateWatchBtn(): void {
   const b = document.getElementById("kl-watch");
-  const t = document.getElementById("kl-watch-t");
-  if (!b || !t) return;
+  if (!b) return;
   const on = mk.cur ? isWatched(mk.cur.symbol) : false;
   b.classList.toggle("on", on);
-  t.textContent = on ? "已自选" : "加自选";
+  b.title = on ? "已自选 · 点击管理分组" : "加自选 / 管理分组";
 }
 
 export function initMarket(): void {
@@ -710,14 +712,72 @@ let wlQAt = 0;                        // 上次拉取时刻（节流 ≈ 后端 
 let wlQSig = "";                      // 上次拉取代码集签名（自选变更 → 绕过节流立即刷）
 let wlQBusy = false;
 
+/* ── 自选卡内嵌搜索：与顶栏同源组件（stockSearch：模糊 + 历史 + 涨跌幅回填）。
+   行尾 + 一键入「默认」组，已加 → 打开分组管理面板；点行打开个股 ── */
+let wlSearch: StockSearchHandle | null = null;
+
+function mountWatchSearch(): void {
+  const box = document.querySelector<HTMLElement>('#rightcol .rcard[data-cid="watch"] .wl-search');
+  const input = box?.querySelector<HTMLInputElement>("input");
+  const drop = box?.querySelector<HTMLElement>(".wl-drop");
+  if (!box || !input || !drop) return;
+  wlSearch = stockSearch({
+    input, list: drop, limit: 8,
+    scope: '.rcard[data-cid="watch"]',
+    setVisible: (v) => box.classList.toggle("open", v),
+    tail: (u) => isWatched(u.symbol)
+      ? `<button class="sb-tail on" data-sb-tail="${u.symbol}" data-sb-name="${esc(u.name || "")}" title="已自选 · 点击管理分组">${ic("check", 11)}</button>`
+      : `<button class="sb-tail" data-sb-tail="${u.symbol}" data-sb-name="${esc(u.name || "")}" title="加入自选（默认分组）">${ic("plus", 11)}</button>`,
+    onTail: (u, btn) => {
+      const name = u.name || u.symbol;
+      if (isWatched(u.symbol)) { openWatchPanel(u.symbol, name); return; }
+      addWatch(u.symbol, name, "默认");
+      toast(`已将 ${name} 加入自选 · 默认`);
+      btn.classList.add("on");               // 就地变已加态，不重绘下拉
+      btn.innerHTML = ic("check", 11);
+      btn.title = "已自选 · 点击管理分组";
+    },
+    onPick: (u) => {
+      input.value = "";
+      box.classList.remove("open");
+      void openStock({ symbol: u.symbol, name: u.name || u.symbol });
+    },
+  });
+}
+
+/* 轮询 renderRight（12s/20s）不打断搜索输入：重建前存值，重建后回填并重放搜索 */
+function keepWatchSearch(): { val: string; focus: boolean } | null {
+  const inp = document.querySelector<HTMLInputElement>('#rightcol .rcard[data-cid="watch"] .wl-search input');
+  if (!inp) return null;
+  return { val: inp.value, focus: document.activeElement === inp };
+}
+
+function restoreWatchSearch(kept: { val: string; focus: boolean } | null): void {
+  if (!kept) return;
+  const inp = document.querySelector<HTMLInputElement>('#rightcol .rcard[data-cid="watch"] .wl-search input');
+  if (!inp) return;
+  inp.value = kept.val;
+  if (kept.focus) { inp.focus(); inp.setSelectionRange(kept.val.length, kept.val.length); }
+  if (kept.val.trim()) inp.dispatchEvent(new Event("input"));   // 重放下拉结果
+}
+
 function redrawWatchBody(): void {
   const el = document.querySelector<HTMLElement>('#rightcol .rcard[data-cid="watch"] .fbody');
   if (!el) return;
+  const tmp = document.createElement("div");
+  tmp.innerHTML = cardBody("watch", getState().cards.watch?.mode ?? "simple");
+  const nl = tmp.querySelector<HTMLElement>(".wl-list");
+  const ol = el.querySelector<HTMLElement>(".wl-list");
+  if (nl && ol) {
+    const top = ol.scrollTop;
+    ol.replaceWith(nl);                        // 原地只换列表：搜索框与下拉不被打断
+    nl.scrollTop = top;
+  } else {
+    el.innerHTML = tmp.innerHTML;
+    mountWatchSearch();
+  }
   const list = el.querySelector<HTMLElement>(".wl-list");
-  const top = list?.scrollTop ?? 0;          // 原地刷新保留滚动位置
-  el.innerHTML = cardBody("watch", getState().cards.watch?.mode ?? "simple");
-  const nl = el.querySelector<HTMLElement>(".wl-list");
-  if (nl) nl.scrollTop = top;
+  if (list) void refreshSparksIn(list);
 }
 
 async function refreshWlQuotes(): Promise<void> {
@@ -784,10 +844,8 @@ function cardBody(cid: string, mode: string): string {
   }
   if (cid === "watch") {
     const wl = getState().watchlist;
-    if (!wl.length)
-      return `<div class="bempty">暂无自选股<br><span style="color:var(--faint)">从左侧「自选」页或顶栏搜索添加</span><br>` +
-        `<button class="hbtn primary" data-wl-add style="margin-top:10px;height:28px;padding:0 14px;font-size:11.5px">${ic("plus", 12)}添加自选</button></div>`;
     const det = mode === "detailed";
+    // 行式列表（同花顺自选同款）：序号 | 名称代码 | 当日走势 | (成交额 换手) | 现价 | 涨跌幅 | 移除
     const rows = wl.map((w, i) => {
       const wq = wlQ.get(w.symbol);
       const ch = wq?.pct_chg ?? 0;
@@ -796,13 +854,19 @@ function cardBody(cid: string, mode: string): string {
       return `<div class="wl-r${det ? " det" : ""}" data-go-stock="${w.symbol}" data-go-name="${esc(w.name)}" title="打开 ${esc(w.name)}">` +
         `<span class="wl-i num">${i + 1}</span>` +
         `<div class="wl-nm"><b>${esc(w.name)}</b><span class="num">${w.symbol}</span></div>` +
+        `<span class="wl-sp">${sparkSvg(w.symbol, 56, 18)}</span>` +
         (det ? `<span class="num wl-d">${fmtYi(wq?.amount ?? null, 1)}</span>` +
           `<span class="num wl-d">${wq?.turnover_rate != null ? fmt(wq.turnover_rate) + "%" : "—"}</span>` : "") +
         `<b class="num wl-p">${price != null ? fmt(price) : "—"}</b>` +
-        (wq ? `<b class="num ${up ? "up" : "down"}">${fmtChg(ch)}%</b>` : `<b class="num" style="color:var(--faint)">—</b>`) +
+        (wq ? `<b class="num wl-chg ${up ? "up" : "down"}">${fmtChg(ch)}%</b>` : `<b class="num wl-chg" style="color:var(--faint)">—</b>`) +
+        `<button class="wl-x" data-wl-del="${w.symbol}" title="移出自选">${ic("x", 10)}</button>` +
         `</div>`;
     }).join("");
-    return `<div class="wl-list">${rows}</div>`;
+    // 内嵌搜索与顶栏同源（stockSearch：模糊 + 历史 + 涨跌幅回填），行尾 + 直接入「默认」组
+    return `<div class="wl-search">${ic("magnifying-glass", 12)}` +
+      `<input placeholder="搜索代码 / 名称 / 拼音" maxlength="20"><div class="wl-drop"></div></div>` +
+      `<div class="wl-list">${rows}</div>` +
+      (!wl.length ? `<div class="bempty" style="padding:14px 14px 8px">暂无自选股<br><span style="color:var(--faint)">在上方搜索直接添加，或从左侧自选页管理</span></div>` : "");
   }
   if (cid === "signals") {
     const segI = sixSegment(mk.bars, mk.bars.length - 1);
@@ -874,8 +938,11 @@ function cardBody(cid: string, mode: string): string {
 function cardHead(def: { id: string; name: string; icon: string }): string {
   const p = getState().cards[def.id];
   const mono = def.id === "moneyflow" ? (mk.cur?.symbol || "") : def.id === "corepick" ? "池档案" : def.id === "watch" ? `${getState().watchlist.length}只` : "OPEN";
+  // 模式切换收成单颗按钮（图标指示点击后进入的模式）；整组控制钮悬停卡片才浮现
+  const nextIcon = p.mode === "simple" ? "faders-horizontal" : "list";
+  const nextTitle = p.mode === "simple" ? "切换为详细模式" : "切换为简单模式";
   return `<div class="rh">${ic(def.icon, 14)}<h4>${def.name}</h4><span class="mono" style="margin-left:auto">${mono}</span>` +
-    `<span class="cbar"><span class="cseg"><button class="cbtn${p.mode === "simple" ? " on" : ""}" data-mode="simple" title="简单模式">${ic("list", 12)}</button><button class="cbtn${p.mode === "detailed" ? " on" : ""}" data-mode="detailed" title="详细模式">${ic("faders-horizontal", 12)}</button></span>` +
+    `<span class="cbar"><button class="cbtn" data-mode-toggle title="${nextTitle}">${ic(nextIcon, 12)}</button>` +
     `<button class="cbtn" data-fold title="折叠 / 展开">${ic("caret-up", 12)}</button>` +
     `<span class="drag" draggable="true" title="拖动排序">${ic("dots-six-vertical", 13)}</span></span></div>`;
 }
@@ -917,9 +984,56 @@ function initRcolResize(): void {
   });
 }
 
+/* ── K线顶部信息条（东财/同花顺网页头部同款布局）：
+   名称 代码 | 现价 涨跌额 涨跌幅 | 最高 最低 开盘 昨收 | 成交额 换手 | 总市值 PE(TTM)。
+   实时快照（rt_*）优先，无 quote 时退回日线末根（盘前/快照被掐仍有内容） ── */
+function renderKlInfo(): void {
+  const bar = document.getElementById("kl-info");
+  if (!bar) return;
+  const s = mk.cur;
+  if (!s) { bar.hidden = true; return; }
+  bar.hidden = false;
+  const q = mk.quote;
+  const last = mk.bars.length ? mk.bars[mk.bars.length - 1] : null;
+  const live = q?.rt_price != null;
+  const price = live ? q!.rt_price! : (last?.close ?? q?.close ?? null);
+  const prev = live && q?.rt_prev_close != null ? q!.rt_prev_close
+    : (mk.bars.length > 1 ? mk.bars[mk.bars.length - 2].close : last?.open ?? null);
+  const chgAbs = price != null && prev ? price - prev : null;
+  const chgPct = q?.pct_chg ?? (chgAbs != null && prev ? chgAbs / prev * 100 : null);
+  const cls = chgPct == null ? "" : chgPct < 0 ? "down" : "up";
+  const rel = (v: number | null | undefined): string =>
+    v == null || !prev ? "" : v > prev ? "up" : v < prev ? "down" : "";
+  const kv = (k: string, v: number | string | null | undefined, c = ""): string => {
+    if (v == null || v === "") return "";
+    return `<span class="ki-kv">${k}<b class="num ${c}">${typeof v === "number" ? fmt(v) : v}</b></span>`;
+  };
+  const hi = q?.high ?? last?.high ?? null;
+  const lo = q?.low ?? last?.low ?? null;
+  const op = q?.open ?? last?.open ?? null;
+  const v = q?.valuation;
+  const cap = v?.total_mv != null ? (v.total_mv >= 1e12 ? fmt(v.total_mv / 1e12, 2) + "万亿" : fmtYi(v.total_mv, 0)) : null;
+  const amt = q?.amount ?? last?.amount;
+  const to = q?.turnover_rate;
+  bar.innerHTML =
+    `<b class="ki-name">${esc(q?.name || s.name)}</b><span class="num ki-code">${s.symbol}</span>` +
+    (price != null ? `<b class="ki-price num ${cls}">${fmt(price)}</b>` +
+      (chgPct != null ? `<span class="ki-chg num ${cls}">${chgAbs != null ? fmtChg(chgAbs) + " " : ""}${fmtChg(chgPct)}%</span>` : "") : "") +
+    `<span class="ki-sep"></span>` +
+    kv("最高", hi, rel(hi)) + kv("最低", lo, rel(lo)) + kv("开盘", op, rel(op)) + kv("昨收", prev) +
+    `<span class="ki-sep"></span>` +
+    kv("成交额", amt != null ? fmtYi(amt, 1) : null) +
+    kv("换手", to != null ? fmt(to) + "%" : null) +
+    `<span class="ki-sp"></span>` +
+    kv("总市值", cap) +
+    kv("PE(TTM)", v?.pe_ttm != null ? (v.pe_ttm > 0 ? fmt(v.pe_ttm, 1) : "亏损") : null);
+}
+
 export function renderRight(): void {
+  renderKlInfo();
   const el = document.getElementById("rightcol");
   if (!el || !mk.cur) return;
+  const kept = keepWatchSearch();            // 轮询重建前保留自选卡搜索态
   const st = getState();
   const defs = [...CARD_DEFS].sort((a, b) => st.cards[a.id].order - st.cards[b.id].order);
   let html = "";
@@ -937,12 +1051,20 @@ export function renderRight(): void {
     b.addEventListener("click", () => document.dispatchEvent(new CustomEvent("yc:goto-page", { detail: "corepicks" }))));
   el.querySelectorAll<HTMLElement>("[data-wl-add]").forEach((b) =>
     b.addEventListener("click", () => {
-      document.dispatchEvent(new CustomEvent("yc:goto-page", { detail: "watchlist" }));
-      window.setTimeout(() => document.getElementById("wl-add")?.click(), 60);
+      // 空态引导：聚焦卡内搜索直接添加（不再跳自选页）
+      document.querySelector<HTMLInputElement>('#rightcol .rcard[data-cid="watch"] .wl-search input')?.focus();
     }));
-  el.querySelectorAll<HTMLElement>("[data-mode]").forEach((b) =>
+  el.querySelectorAll<HTMLElement>("[data-wl-del]").forEach((b) =>
+    b.addEventListener("click", (e) => {
+      e.stopPropagation();                     // 不触发行的打开个股
+      removeWatch(b.dataset.wlDel!);
+      toast("已移出自选");
+    }));
+  el.querySelectorAll<HTMLElement>("[data-mode-toggle]").forEach((b) =>
     b.addEventListener("click", () => {
-      setCardPref(b.closest(".rcard")!.getAttribute("data-cid")!, { mode: b.dataset.mode as "simple" | "detailed" });
+      const cid = b.closest(".rcard")!.getAttribute("data-cid")!;
+      const cur = getState().cards[cid].mode;
+      setCardPref(cid, { mode: cur === "simple" ? "detailed" : "simple" });
     }));
   el.querySelectorAll<HTMLElement>("[data-fold]").forEach((b) =>
     b.addEventListener("click", () => {
@@ -993,6 +1115,10 @@ export function renderRight(): void {
       const sym = r.dataset.goStock!;
       void openStock({ symbol: sym, name: r.dataset.goName || sym });
     }));
-  // 自选股卡片：行情快照按需拉取（节流 + 自选变更即刷）
+  // 自选卡：挂搜索（保留输入态）+ 行内走势就绪缓存即画；行情快照按需拉取（节流 + 自选变更即刷）
+  mountWatchSearch();
+  restoreWatchSearch(kept);
+  const wlList = el.querySelector<HTMLElement>('.rcard[data-cid="watch"] .wl-list');
+  if (wlList) void refreshSparksIn(wlList);
   void refreshWlQuotes();
 }

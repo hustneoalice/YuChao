@@ -5,6 +5,7 @@ import { ic } from "../icons";
 import { getState, setWlGroup, removeWatch, addWatch, isWatched } from "../store";
 import { toast, openModal, closeModals } from "../ui";
 import { stockSearch, type StockSearchHandle } from "../searchbox";
+import { refreshSparksIn, sparkSvg } from "../sparks";
 
 let filter: "all" | "up" | "down" = "all";
 const chgCache = new Map<string, number>();
@@ -55,7 +56,7 @@ function renderRows(): void {
     return `<tr data-stock="${w.symbol}"><td class="num" style="color:var(--faint)">${i + 1}</td><td class="num">${w.symbol}</td><td><span style="font-weight:600">${esc(w.name)}</span></td>` +
       `<td class="n num" id="wl-price-${w.symbol}">${fmt(0)}</td>` +
       `<td class="n num ${up ? "up" : "down"}">${fmtChg(ch)}%</td>` +
-      `<td class="n"><svg class="spark" data-c="${w.symbol}" width="72" height="22"></svg></td>` +
+      `<td class="n">${sparkSvg(w.symbol, 72, 22)}</td>` +
       `<td class="n num" style="color:var(--faint)">${fmtYi(amtCache.get(w.symbol) ?? null, 1)}</td>` +
       `<td><span class="tag ${segI >= 4 ? "acc" : segI <= 1 ? "flat" : "p1"}">${["", "超卖", "低位", "看盘", "回升", "强势", "超买"][segI]}</span></td>` +
       `<td><span style="font-size:11.5px;color:var(--dim)">${esc(w.group)}</span></td>` +
@@ -76,52 +77,7 @@ function renderRows(): void {
     }));
   document.getElementById("wl-empty")!.style.display = rows.length ? "none" : "grid";
   void loadPrices(rows.map((r) => r.symbol));
-  void refreshSparks();
-}
-
-/* ── 行内走势 sparkline：/market/sparks 批量当日分时（降采样 ≈40 点 + 昨收），
-   会话级缓存 45s；重渲后按 data-c 就地回填，不整表重绘 ── */
-const sparkCache = new Map<string, { points: number[]; prev: number | null; at: number }>();
-let sparkBusy = false;
-
-function paintSparks(): void {
-  document.querySelectorAll<SVGSVGElement>("#wl-body svg.spark[data-c]").forEach((svg) => {
-    const hit = sparkCache.get(svg.dataset.c!);
-    if (!hit || svg.childNodes.length) return;
-    const pts = hit.points;
-    const W = 72, H = 22, pad = 2;
-    const lo = Math.min(...pts, hit.prev ?? Infinity);
-    const hi = Math.max(...pts, hit.prev ?? -Infinity);
-    const span = hi - lo || 1;
-    const x = (i: number) => pad + (i / (pts.length - 1)) * (W - 2 * pad);
-    const y = (v: number) => pad + (1 - (v - lo) / span) * (H - 2 * pad);
-    const d = pts.map((v, i) => `${i ? "L" : "M"}${x(i).toFixed(1)},${y(v).toFixed(1)}`).join("");
-    const up = pts[pts.length - 1] >= (hit.prev ?? pts[0]);
-    const color = up ? "var(--up)" : "var(--down)";
-    const base = hit.prev != null && hit.prev >= lo && hit.prev <= hi ?
-      `<line x1="${pad}" x2="${W - pad}" y1="${y(hit.prev).toFixed(1)}" y2="${y(hit.prev).toFixed(1)}" stroke="var(--faint)" stroke-width=".5" stroke-dasharray="2 2" opacity=".55"/>` : "";
-    svg.innerHTML = base + `<path d="${d}" fill="none" stroke="${color}" stroke-width="1.2" stroke-linejoin="round"/>`;
-  });
-}
-
-async function refreshSparks(): Promise<void> {
-  if (sparkBusy) return;
-  const rows = [...document.querySelectorAll<SVGSVGElement>("#wl-body svg.spark[data-c]")];
-  const need = rows.filter((s) => {
-    const h = sparkCache.get(s.dataset.c!);
-    return !h || Date.now() - h.at > 45_000;
-  }).map((s) => s.dataset.c!);
-  if (need.length) {
-    sparkBusy = true;
-    try {
-      const r = await marketApi.sparks(need.slice(0, 50));
-      for (const it of r.items)
-        sparkCache.set(it.symbol, { points: it.points, prev: it.prev_close, at: Date.now() });
-    } catch { /* 静默：保留旧曲线 */ } finally {
-      sparkBusy = false;
-    }
-  }
-  paintSparks();
+  void refreshSparksIn(document.getElementById("wl-body")!);
 }
 
 async function loadPrices(symbols: string[]): Promise<void> {

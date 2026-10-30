@@ -106,9 +106,9 @@ svg{display:block}
 .wm-g.on{border-color:var(--accent);color:var(--text);background:var(--accent-soft)}
 .wm-g i{width:7px;height:7px;border-radius:50%;background:var(--accent)}
 
-/* 行情页工具栏加自选按钮态 */
-#kl-watch{display:inline-flex;align-items:center;gap:5px}
-#kl-watch.on{border-color:var(--accent);color:var(--accent);background:var(--accent-soft)}
+/* 行情页工具栏加自选（icon-only，TradingView 同款）：态 .on 高亮 + title 提示 */
+#kl-watch.on{border-color:color-mix(in srgb,var(--accent) 35%,transparent);color:var(--accent);
+  background:color-mix(in srgb,var(--accent) 12%,transparent)}
 
 /* 自选列表行内走势 sparkline */
 #wl-body svg.spark{display:block;margin:0 auto;opacity:.9}
@@ -179,6 +179,18 @@ svg{display:block}
 .chartbar .sp{flex:1}
 .barsep{width:1px;height:14px;background:var(--border);margin:0 2px}
 .chartbar .seg button{padding:3px 10px;font-size:11.5px}
+/* K线顶部信息条（东财/同花顺网页头部同款）：
+   名称 代码 | 现价 涨跌 | 最高 最低 开盘 昨收 | 成交额 换手 …… 总市值 PE */
+.kl-info{display:flex;align-items:center;gap:10px;flex-wrap:wrap;min-height:40px;
+  padding:8px 14px 7px;border-bottom:1px solid var(--border);font-size:11.5px;color:var(--faint)}
+.kl-info[hidden]{display:none}
+.kl-info .ki-name{font-size:14.5px;font-weight:650;color:var(--text);letter-spacing:-.01em}
+.kl-info .ki-code{font-size:11px;color:var(--faint)}
+.kl-info .ki-price{font-size:16.5px;font-weight:700;margin-left:2px}
+.kl-info .ki-chg{font-weight:600}
+.kl-info .ki-sep{width:1px;height:12px;background:var(--border);flex:none}
+.kl-info .ki-sp{flex:1}
+.kl-info .ki-kv b{font-weight:600;color:var(--text);margin-left:3px}
 .legend{display:flex;flex-wrap:wrap;gap:10px;font-size:11px;color:var(--dim);white-space:nowrap}
 .legend span{display:inline-flex;align-items:center;gap:5px}
 .legend i{width:9px;height:2px;border-radius:2px;display:block}
@@ -274,7 +286,10 @@ td .lnk:hover{text-decoration:underline}
 .backbtn:hover{color:var(--text);border-color:var(--accent);background:var(--panel-3)}
 .backbtn[hidden]{display:none}
 .cmpl{font-size:10.5px;color:var(--faint);line-height:1.55;padding:2px 2px 0}
-.cbar{display:flex;align-items:center;gap:2px}
+/* 卡头控制钮（模式/折叠/拖拽）：默认淡出，悬停卡片浮现 —— 降低视觉噪音（触屏常显） */
+.cbar{display:flex;align-items:center;gap:2px;opacity:0;transition:opacity .14s}
+.rcard:hover .cbar,.rcard:focus-within .cbar{opacity:1}
+body.mobile .rcard .cbar{opacity:1}
 .cseg{display:inline-flex;gap:1px;background:var(--panel-2);border-radius:7px;padding:1px}
 .cbtn{width:20px;height:20px;border-radius:5px;border:0;background:none;color:var(--faint);cursor:pointer;display:inline-flex;align-items:center;justify-content:center;padding:0}
 .cbtn:hover{color:var(--text);background:var(--panel-3)}
@@ -314,19 +329,41 @@ td .lnk:hover{text-decoration:underline}
 .bi-cons{display:flex;gap:4px;flex-wrap:wrap;margin-top:8px}
 .sh-con{font-size:11px;padding:2.5px 8px;border-radius:6px;background:var(--panel-3);color:var(--dim)}
 .sh-con.more{color:var(--faint)}
-/* 自选股卡片（首个多标的卡）：行式列表，名称+代码 | (成交额 换手) | 现价 | 涨跌幅 */
+/* 自选股卡片（首个多标的卡）：行式列表（同花顺自选同款），
+   序号 | 名称代码 | 当日走势 | (成交额 换手) | 现价 | 涨跌幅 | 移除(hover) */
 .wl-list{display:flex;flex-direction:column;max-height:320px;overflow-y:auto;margin:0 -4px;padding:0 4px}
-.wl-r{display:grid;grid-template-columns:16px minmax(0,1fr) auto auto;align-items:center;gap:8px;
-  padding:5px 6px;border-radius:8px;cursor:pointer;font-size:11.5px}
+.wl-r{display:grid;grid-template-columns:16px minmax(0,1fr) 56px auto auto 16px;align-items:center;gap:8px;
+  padding:5px 6px;border-radius:8px;cursor:pointer;font-size:11.5px;position:relative}
 .wl-r:hover{background:var(--panel-2)}
-.wl-r.det{grid-template-columns:16px minmax(0,1fr) auto auto auto auto}
+.wl-r.det{grid-template-columns:16px minmax(0,1fr) 56px auto auto auto auto 16px}
 .wl-i{color:var(--faint);font-size:10px;text-align:right}
 .wl-nm{min-width:0;line-height:1.25}
 .wl-nm b{display:block;font-size:11.5px;font-weight:600;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
 .wl-nm .num{font-size:10px;color:var(--faint)}
+.wl-sp{display:flex;align-items:center}
+.wl-sp svg.spark{display:block;opacity:.9}
 .wl-d{font-size:10.5px;color:var(--dim);text-align:right}
 .wl-p{text-align:right;font-weight:650}
-.wl-r>b:last-child{text-align:right;min-width:46px}
+.wl-chg{text-align:right;min-width:46px}
+.wl-x{width:16px;height:16px;border:0;border-radius:5px;background:none;color:var(--faint);
+  display:inline-flex;align-items:center;justify-content:center;cursor:pointer;opacity:0;transition:.12s;padding:0}
+.wl-r:hover .wl-x{opacity:1}
+.wl-x:hover{color:var(--down);background:var(--panel-3)}
+/* 内嵌搜索（与顶栏同源组件）：下拉结果 + 行尾「+/已加」态钮 */
+.wl-search{position:relative;display:flex;align-items:center;gap:6px;height:28px;
+  padding:0 9px;margin-bottom:6px;border-radius:8px;background:var(--panel-2);border:1px solid var(--border)}
+.wl-search:focus-within{border-color:color-mix(in srgb,var(--accent) 45%,transparent)}
+.wl-search>svg{color:var(--faint);flex:none}
+.wl-search input{flex:1;min-width:0;background:none;border:0;outline:0;font-size:11.5px;color:var(--text)}
+.wl-search input::placeholder{color:var(--faint)}
+.wl-drop{position:absolute;top:32px;left:0;right:0;z-index:30;display:none;padding:4px;
+  background:var(--panel);border:1px solid var(--border);border-radius:10px;box-shadow:var(--shadow);
+  max-height:238px;overflow-y:auto}
+.wl-search.open .wl-drop{display:block}
+.sb-tail{width:22px;height:22px;flex:none;border-radius:6px;border:1px solid var(--border);background:var(--panel);
+  color:var(--dim);display:inline-flex;align-items:center;justify-content:center;cursor:pointer;padding:0}
+.sb-tail:hover{color:var(--accent);border-color:var(--accent)}
+.sb-tail.on{color:var(--accent);border-color:color-mix(in srgb,var(--accent) 35%,transparent);background:var(--accent-soft)}
 
 /* 指数 ticker 滚动条 */
 .tickerbar{height:34px;flex:none;overflow:hidden;border:1px solid var(--border);border-radius:10px;
@@ -355,6 +392,9 @@ td .lnk:hover{text-decoration:underline}
   background:var(--panel);cursor:pointer;overflow:hidden}
 .klp.active{z-index:2}
 .klp-main{flex:1;min-height:0;position:relative;cursor:crosshair}
+/* 操盘状态颜色条（策影 SignalBars 同款）：K线上方逐柱状态带，高度由 JS 按行数设定 */
+.klp-sig{position:relative;flex:none;display:none}
+.klp-sig canvas{position:absolute;inset:0;width:100%;height:100%;display:block}
 .klp-bar{display:flex;align-items:center;gap:7px;padding:0 10px;height:27px;flex:none;
   font-size:11px;color:var(--faint);border-bottom:1px solid var(--border-soft);
   background:var(--panel-2);user-select:none}
