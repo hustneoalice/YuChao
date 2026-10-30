@@ -361,6 +361,10 @@ body.mobile .rcard .cbar{opacity:1}
   background:var(--panel);border:1px solid var(--border);border-radius:10px;box-shadow:var(--shadow);
   max-height:238px;overflow-y:auto}
 .wl-search.open .wl-drop{display:block}
+/* 卡片头内嵌变体（自选卡）：随标题同行，flex 撑满余宽，下拉下探 */
+.rh .wl-search{flex:1;min-width:90px;height:22px;padding:0 7px;margin:0;border-radius:6px}
+.rh .wl-search input{font-size:11px}
+.rh .wl-drop{top:27px;left:-8px;right:auto;width:calc(100% + 16px);min-width:230px}
 .sb-tail{width:22px;height:22px;flex:none;border-radius:6px;border:1px solid var(--border);background:var(--panel);
   color:var(--dim);display:inline-flex;align-items:center;justify-content:center;cursor:pointer;padding:0}
 .sb-tail:hover{color:var(--accent);border-color:var(--accent)}

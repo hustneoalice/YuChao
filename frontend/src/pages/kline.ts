@@ -413,9 +413,8 @@ export function mountKline(el: HTMLElement): KlineChartHandle {
       const strong = ma != null && last > ma;
       const p = trendPalette();
       const fill = strong ? `rgba(${p.fr.join(",")},.82)` : `rgba(${p.sr.join(",")},.86)`;
-      parts.push(`<span><i style="background:${trendPalette().fast}"></i>${k === "short" ? "短线" : "中线"}快线</span>` +
-        `<span><i style="background:${trendPalette().slow}"></i>慢线</span>` +
-        `<span><i style="background:${fill}"></i>${strong ? "多头 · 偏强" : "空头 · 偏弱"}</span>`);
+      // 整合为每趋势一项：通道状态色点（紫=强 / 绿=弱，随调色板）+ 强弱语义
+      parts.push(`<span title="通道色：趋势强（当前调色板主色）与趋势弱（次色）"><i style="background:${fill}"></i>${k === "short" ? "短线" : "中线"}趋势 · ${strong ? "强" : "弱"}</span>`);
     }
     legend.innerHTML = parts.join("");
     legend.style.display = parts.length ? "flex" : "none";

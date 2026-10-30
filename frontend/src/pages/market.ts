@@ -799,7 +799,7 @@ let wlQBusy = false;
 let wlSearch: StockSearchHandle | null = null;
 
 function mountWatchSearch(): void {
-  const box = document.querySelector<HTMLElement>('#rightcol .rcard[data-cid="watch"] .wl-search');
+  const box = document.querySelector<HTMLElement>('#rightcol .rcard[data-cid="watch"] .rh .wl-search');
   const input = box?.querySelector<HTMLInputElement>("input");
   const drop = box?.querySelector<HTMLElement>(".wl-drop");
   if (!box || !input || !drop) return;
@@ -973,11 +973,9 @@ function cardBody(cid: string, mode: string): string {
         `<button class="wl-x" data-wl-del="${w.symbol}" title="移出自选">${ic("x", 10)}</button>` +
         `</div>`;
     }).join("");
-    // 内嵌搜索与顶栏同源（stockSearch：模糊 + 历史 + 涨跌幅回填），行尾 + 直接入「默认」组
-    return `<div class="wl-search">${ic("magnifying-glass", 12)}` +
-      `<input placeholder="搜索代码 / 名称 / 拼音" maxlength="20"><div class="wl-drop"></div></div>` +
-      `<div class="wl-list">${rows}</div>` +
-      (!wl.length ? `<div class="bempty" style="padding:14px 14px 8px">暂无自选股<br><span style="color:var(--faint)">在上方搜索直接添加，或从左侧自选页管理</span></div>` : "");
+    // 搜索框已内嵌进卡片头（cardHead），此处仅渲染列表
+    return `<div class="wl-list">${rows}</div>` +
+      (!wl.length ? `<div class="bempty" style="padding:14px 14px 8px">暂无自选股<br><span style="color:var(--faint)">在顶部搜索直接添加，或从左侧自选页管理</span></div>` : "");
   }
   if (cid === "signals") {
     const segI = sixSegment(mk.bars, mk.bars.length - 1);
@@ -1052,7 +1050,12 @@ function cardHead(def: { id: string; name: string; icon: string }): string {
   // 模式切换收成单颗按钮（图标指示点击后进入的模式）；整组控制钮悬停卡片才浮现
   const nextIcon = p.mode === "simple" ? "faders-horizontal" : "list";
   const nextTitle = p.mode === "simple" ? "切换为详细模式" : "切换为简单模式";
-  return `<div class="rh">${ic(def.icon, 14)}<h4>${def.name}</h4><span class="mono" style="margin-left:auto">${mono}</span>` +
+  // 自选卡：搜索内嵌进卡片头（名称右侧），紧凑不占独立行
+  const headSearch = def.id === "watch"
+    ? `<span class="wl-search">${ic("magnifying-glass", 12)}` +
+      `<input placeholder="搜索代码 / 名称 / 拼音" maxlength="20"><div class="wl-drop"></div></span>`
+    : "";
+  return `<div class="rh">${ic(def.icon, 14)}<h4>${def.name}</h4>${headSearch}<span class="mono" style="${def.id === "watch" ? "" : "margin-left:auto"}">${mono}</span>` +
     `<span class="cbar"><button class="cbtn" data-mode-toggle title="${nextTitle}">${ic(nextIcon, 12)}</button>` +
     `<button class="cbtn" data-fold title="折叠 / 展开">${ic("caret-up", 12)}</button>` +
     `<span class="drag" draggable="true" title="拖动排序">${ic("dots-six-vertical", 13)}</span></span></div>`;
