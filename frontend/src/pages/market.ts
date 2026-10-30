@@ -350,19 +350,12 @@ export function initMarket(): void {
     renderKline();
     syncPeriodSeg(mk.panels[0]);
   });
-  // 面板交互：点选焦点 / 面板头周期菜单开合 / 菜单内切周期
+  // 面板交互：点选焦点（周期切换统一在 chartbar 周期段）
   document.getElementById("kl-panels")!.addEventListener("click", (e) => {
     const t = e.target as HTMLElement;
     const klp = t.closest<HTMLElement>(".klp");
     if (!klp) return;
     const i = Number(klp.dataset.pi);
-    if (t.closest(".klp-p")) { klp.classList.toggle("pmenu-open"); return; }
-    const pp = t.closest<HTMLElement>("button[data-pp]");
-    if (pp) {
-      klp.classList.remove("pmenu-open");
-      setPanelPeriod(i, pp.dataset.pp as PKey);
-      return;
-    }
     if (i !== mk.active) {
       mk.active = i;
       document.querySelectorAll("#kl-panels .klp").forEach((x) =>
@@ -815,13 +808,10 @@ function ensurePanelDom(): void {
   kls = [];
   box.dataset.sig = sig;
   box.className = `kl-panels ly-${ly}`;
+  // 面板仅承载图表本体：周期/布局/档位/缩放全部在 chartbar，信息条全局共享
   box.innerHTML = slots.map((p, i) =>
     `<div class="klp${i === mk.active ? " active" : ""}" data-pi="${i}">` +
-    `<div class="klp-bar">` +
-    `<span class="klp-p" title="切换周期">${P_LABEL[p]}</span>` +
-    `<span class="klp-menu">` +
-    (["t", "60", "d", "w", "m", "q"] as PKey[]).map((k) => `<button data-pp="${k}">${P_LABEL[k]}</button>`).join("") +
-    `</span></div><div class="klp-main"></div></div>`).join("");
+    `<div class="klp-main"></div></div>`).join("");
   kls = [...box.querySelectorAll<HTMLElement>(".klp-main")].map((el) => mountKline(el));
 }
 
@@ -901,8 +891,6 @@ function setPanelPeriod(i: number, p: PKey): void {
   void ensurePeriodData(p).then(() => {
     if (mk.panels[i] === p) applyPanel(i);     // 数据到达后重渲（未命中缓存时）
   });
-  document.querySelector<HTMLElement>(`.klp[data-pi="${i}"] .klp-p`)
-    ?.replaceChildren(P_LABEL[p]);          // 面板头周期徽章同步
   if (i === mk.active) syncPeriodSeg(p);
 }
 
