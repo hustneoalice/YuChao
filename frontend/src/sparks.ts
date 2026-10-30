@@ -21,16 +21,26 @@ export function paintSparksIn(root: ParentNode): void {
     const W = Number(svg.getAttribute("width")) || 72;
     const H = Number(svg.getAttribute("height")) || 22;
     const pad = 2;
-    const lo = Math.min(...pts, hit.prev ?? Infinity);
-    const hi = Math.max(...pts, hit.prev ?? -Infinity);
+    // 统一昨收基准轴（同花顺自选同款）：各股以昨收为对称中心归一化，
+    // 昨收虚线恒在垂直居中——曲线「起点」（开盘相对昨收）在各行可比，不再高低错落
+    const prev = hit.prev;
+    let lo: number, hi: number;
+    if (prev != null) {
+      const amp = Math.max(...pts.map((v) => Math.abs(v - prev)), prev * 0.002);
+      lo = prev - amp;
+      hi = prev + amp;
+    } else {
+      lo = Math.min(...pts);
+      hi = Math.max(...pts);
+    }
     const span = hi - lo || 1;
     const x = (i: number) => pad + (i / (pts.length - 1)) * (W - 2 * pad);
     const y = (v: number) => pad + (1 - (v - lo) / span) * (H - 2 * pad);
     const d = pts.map((v, i) => `${i ? "L" : "M"}${x(i).toFixed(1)},${y(v).toFixed(1)}`).join("");
-    const up = pts[pts.length - 1] >= (hit.prev ?? pts[0]);
+    const up = pts[pts.length - 1] >= (prev ?? pts[0]);
     const color = up ? "var(--up)" : "var(--down)";
-    const base = hit.prev != null && hit.prev >= lo && hit.prev <= hi ?
-      `<line x1="${pad}" x2="${W - pad}" y1="${y(hit.prev).toFixed(1)}" y2="${y(hit.prev).toFixed(1)}" stroke="var(--faint)" stroke-width=".5" stroke-dasharray="2 2" opacity=".55"/>` : "";
+    const base = prev != null && prev >= lo && prev <= hi ?
+      `<line x1="${pad}" x2="${W - pad}" y1="${y(prev).toFixed(1)}" y2="${y(prev).toFixed(1)}" stroke="var(--faint)" stroke-width=".5" stroke-dasharray="2 2" opacity=".55"/>` : "";
     svg.innerHTML = base + `<path d="${d}" fill="none" stroke="${color}" stroke-width="1.2" stroke-linejoin="round"/>`;
   });
 }
