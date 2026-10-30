@@ -8,6 +8,7 @@
 import { init, dispose, registerIndicator, registerYAxis, type Chart } from "klinecharts";
 import type { Bar } from "../api";
 import { cssv } from "../fmt";
+import { SEGNAME, sixSegmentSeries } from "../indicators";
 
 /* ── 策影配色（tradingColors） ── */
 const UP = "#EF5350";
@@ -41,6 +42,17 @@ const channelFill = (strong: boolean, alpha: number) => {
   const c = strong ? p.fr : p.sr;
   return `rgba(${c[0]}, ${c[1]}, ${c[2]}, ${alpha})`;
 };
+
+/* 六段色带：段位 1..6 → 涨跌色渐变（超卖绿 → 超买红，跟随主题涨跌方向变量） */
+function hexRGB(h: string): [number, number, number] {
+  const m = h.trim().match(/^#([0-9a-f]{6})$/i);
+  return m ? [parseInt(m[1].slice(0, 2), 16), parseInt(m[1].slice(2, 4), 16), parseInt(m[1].slice(4, 6), 16)] : [136, 136, 136];
+}
+function segRGB(seg: number): [number, number, number] {
+  const lo = hexRGB(cssv("--down") || "#32D74B"), hi = hexRGB(cssv("--up") || "#FF453A");
+  const t = (Math.min(6, Math.max(1, seg)) - 1) / 5;
+  return [0, 1, 2].map((k) => Math.round(lo[k] + (hi[k] - lo[k]) * t)) as [number, number, number];
+}
 
 export function chartUp(): string {
   return document.documentElement.dataset.dir === "intl" ? DOWN : UP;
@@ -147,6 +159,17 @@ function ensureRegistered(): void {
       },
     });
   } catch { /* 重复注册会报错，忽略 */ }
+  // 六分段副图（K线下方叠加趋势图）：60 窗口分位 → 1..6 段台阶线
+  try {
+    registerIndicator({
+      name: "SIXSEG",
+      shortName: "六段",
+      precision: 0,
+      calc: (kLineDataList) =>
+        sixSegmentSeries(kLineDataList as unknown as { close: number }[]).map((v) => ({ seg: v })),
+      figures: [{ key: "seg", title: "段位", type: "line", styles: () => ({ color: "#26C6DA" }) }],
+    });
+  } catch { /* 重复注册忽略 */ }
 }
 
 /* ── 时间转换（策影 format.ts 逐字 + 分钟级 datetime 支持） ── */
@@ -158,7 +181,7 @@ function toTs(time: string): number {
 }
 
 export type MainKey = "ma" | "boll" | "short" | "mid" | "avg";
-export type SubKey = "vol" | "macd" | "kdj" | "rsi" | "obv";
+export type SubKey = "vol" | "macd" | "kdj" | "rsi" | "obv" | "sixseg";
 
 export interface KlineChartHandle {
   chart: Chart;
@@ -190,7 +213,7 @@ const MAIN_NAMES: Record<MainKey, string> = {
   ma: "MA", boll: "BOLL", short: "SHORT_TREND_CHANNEL", mid: "MID_TREND_CHANNEL",
   avg: "TIME_AVG",
 };
-const SUB_NAMES: Record<SubKey, string> = { vol: "VOL", macd: "MACD", kdj: "KDJ", rsi: "RSI", obv: "OBV" };
+const SUB_NAMES: Record<SubKey, string> = { vol: "VOL", macd: "MACD", kdj: "KDJ", rsi: "RSI", obv: "OBV", sixseg: "SIXSEG" };
 
 /* ── 智能高度（策影 computeAutoPaneHeights 同款） ──
  * 主图:单个副图 = 3.6:1（1 副图 → 主图 78%，2 → 64%，3 → 55%）；
@@ -348,13 +371,15 @@ export function mountKline(el: HTMLElement): KlineChartHandle {
   };
 
   /* ── 操盘状态颜色条（策影 SignalBars 同款）：K线上方逐柱状态带 ──
-   * 日线：日短=收盘vs MA10、日中=收盘vs MA45；周线：周短 MA10 / 周中 MA30；60分钟：60短 MA10。
+   * MA 行：日短=收盘vs MA10、日中=收盘vs MA45；周线：周短 MA10 / 周中 MA30；60分钟：60短 MA10。
+   * 六段行：60 窗口分位 → 1..6 段（超卖→超买，绿→红渐变），行尾箭头标当前段。
    * 收盘 > 慢线 → 偏强（趋势调色板强色），否则偏弱（弱色）；分时/月/季不显示。
    * 逐柱对齐 convertToPixel.x，缩放平移实时跟随；左侧标签底永不被遮挡。 */
-  const SIG_ROWS: Partial<Record<TipPeriod, { label: string; n: number }[]>> = {
-    d: [{ label: "日短", n: 10 }, { label: "日中", n: 45 }],
-    w: [{ label: "周短", n: 10 }, { label: "周中", n: 30 }],
-    "60": [{ label: "60短", n: 10 }],
+  type SigRow = { label: string; kind: "ma"; n: number } | { label: string; kind: "seg" };
+  const SIG_ROWS: Partial<Record<TipPeriod, SigRow[]>> = {
+    d: [{ label: "日短", kind: "ma", n: 10 }, { label: "日中", kind: "ma", n: 45 }, { label: "六段", kind: "seg" }],
+    w: [{ label: "周短", kind: "ma", n: 10 }, { label: "周中", kind: "ma", n: 30 }, { label: "六段", kind: "seg" }],
+    "60": [{ label: "60短", kind: "ma", n: 10 }, { label: "六段", kind: "seg" }],
   };
   const sig = document.createElement("div");
   sig.className = "klp-sig";
@@ -362,8 +387,14 @@ export function mountKline(el: HTMLElement): KlineChartHandle {
   sig.innerHTML = "<canvas></canvas>";
   el.parentElement?.insertBefore(sig, el);           // klp-bar 与 klp-main 之间（文档流让位，策影同款）
   const sigCv = sig.querySelector("canvas")!;
+  // 六段序列缓存：klinecharts 数据引用不变即复用（拖拽平移每帧触发，避免 O(n·60) 重算）
+  let segSrc: unknown = null, segArrCache: number[] = [];
+  const segsOf = (list: { close: number }[]): number[] => {
+    if (list !== segSrc) { segArrCache = sixSegmentSeries(list); segSrc = list; }
+    return segArrCache;
+  };
   /** 显示/隐藏与行高同步：行数变化时主图重算布局，返回当前行配置 */
-  const sigSync = (): { rows: { label: string; n: number }[] } | null => {
+  const sigSync = (): { rows: SigRow[] } | null => {
     const rows = SIG_ROWS[period];
     if (!rows || !chart.getDataList().length) {
       if (sig.style.display !== "none") {
@@ -394,17 +425,21 @@ export function mountKline(el: HTMLElement): KlineChartHandle {
     ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
     ctx.clearRect(0, 0, w, h);
     const closes = list.map((b) => b.close);
-    // 逐柱 MA 状态（策影同款口径：收盘 > MA = 偏强）
-    const states = sync.rows.map(({ n }) => {
+    // MA 行逐柱状态（策影同款口径：收盘 > MA = 偏强）；六段行整序列缓存（数据不变不重算）
+    const maStates = new Map<number, (boolean | null)[]>();
+    sync.rows.forEach((r, row) => {
+      if (r.kind !== "ma") return;
       const st: (boolean | null)[] = [];
       let sum = 0;
       for (let i = 0; i < closes.length; i++) {
         sum += closes[i];
-        if (i >= n) sum -= closes[i - n];
-        st.push(i >= n - 1 ? closes[i] > sum / n : null);
+        if (i >= r.n) sum -= closes[i - r.n];
+        st.push(i >= r.n - 1 ? closes[i] > sum / r.n : null);
       }
-      return st;
+      maStates.set(row, st);
     });
+    let segArr: number[] | null = null;
+    if (sync.rows.some((r) => r.kind === "seg")) segArr = segsOf(list);
     // 可见范围：realFrom/realTo 排除右侧预留幻影索引（缩放时越 Y 轴的根源）
     const r = chart.getVisibleRange?.() as { from: number; to: number; realFrom?: number; realTo?: number } | undefined;
     if (!r) return;
@@ -422,27 +457,54 @@ export function mountKline(el: HTMLElement): KlineChartHandle {
     if (!xs.length) return;
     const rightBound = xs[xs.length - 1] + cw / 2 + 1;
     // 先画柱（与可见 K 线一一对应），再画标签（覆盖其上永不被遮挡）
-    sync.rows.forEach((_, row) => {
-      const y = 3 + row * 9;
-      let last: boolean | null = null;
-      xs.forEach((x, k) => {
-        const s = states[row][from + k];
-        if (s != null) last = s;
-        if (last === null) return;
-        const left = x - cw / 2;
-        const right = Math.min(left + cw, rightBound);
-        if (left >= rightBound || right <= left) return;
-        ctx.fillStyle = channelFill(last === true, 0.9);
-        ctx.fillRect(left, y, right - left, 7);
-      });
+    sync.rows.forEach((row, ri) => {
+      const y = 3 + ri * 9;
+      if (row.kind === "ma") {
+        const st = maStates.get(ri)!;
+        let last: boolean | null = null;
+        xs.forEach((x, k) => {
+          const s = st[from + k];
+          if (s != null) last = s;
+          if (last === null) return;
+          const left = x - cw / 2;
+          const right = Math.min(left + cw, rightBound);
+          if (left >= rightBound || right <= left) return;
+          ctx.fillStyle = channelFill(last === true, 0.9);
+          ctx.fillRect(left, y, right - left, 7);
+        });
+      } else {
+        xs.forEach((x, k) => {
+          const left = x - cw / 2;
+          const right = Math.min(left + cw, rightBound);
+          if (left >= rightBound || right <= left) return;
+          const c = segRGB(segArr![from + k]);
+          ctx.fillStyle = `rgba(${c[0]},${c[1]},${c[2]},0.9)`;
+          ctx.fillRect(left, y, right - left, 7);
+        });
+      }
     });
-    const labelW = 36;
+    // 标签底 + 文本：MA 行段名；六段行画 ▲ 箭头 + 当前段号与段名
+    const labelW = 80;
     ctx.fillStyle = cssv("--panel-2") || "rgba(20,20,24,.92)";
     ctx.fillRect(0, 0, labelW, h);
     ctx.font = "9px monospace";
-    ctx.fillStyle = cssv("--faint") || "#8e8e93";
     ctx.textBaseline = "middle";
-    sync.rows.forEach(({ label }, row) => ctx.fillText(label, 4, 3 + row * 9 + 3.5));
+    sync.rows.forEach((row, ri) => {
+      const cy = 3 + ri * 9 + 3.5;
+      if (row.kind === "ma") {
+        ctx.fillStyle = cssv("--faint") || "#8e8e93";
+        ctx.fillText(row.label, 4, cy);
+      } else {
+        const seg = segArr![list.length - 1];
+        const c = segRGB(seg);
+        ctx.fillStyle = `rgba(${c[0]},${c[1]},${c[2]},1)`;
+        ctx.beginPath();                          // ▲ 指向当前段位
+        ctx.moveTo(10, cy - 3.2); ctx.lineTo(6.5, cy + 2.4); ctx.lineTo(13.5, cy + 2.4);
+        ctx.closePath(); ctx.fill();
+        ctx.fillStyle = cssv("--text") || "#f5f5f7";
+        ctx.fillText(`${seg}段·${SEGNAME[seg]}`, 17, cy);
+      }
+    });
   };
 
   const onCross = (...args: unknown[]) => {
@@ -648,6 +710,9 @@ export function mountKline(el: HTMLElement): KlineChartHandle {
             name: "MACD",
             styles: { bars: [{ upColor: up, downColor: dn, noChangeColor: NEUTRAL }] },
           } as never, false);
+        } else if (k === "sixseg") {
+          // 六分段趋势（K线下方叠加）：60 窗口分位 1..6 段台阶线
+          chart.createIndicator({ name: "SIXSEG", precision: 0 } as never, false);
         } else if (k === "rsi" || k === "obv") {
           chart.createIndicator({ name: SUB_NAMES[k] } as never, false);
         } else {

@@ -107,3 +107,19 @@ export function sixSegment(bars: Bar[], i: number, win = 60): number {
   const q = below / slice.length;      // 0 = 最低位, 1 = 最高位
   return Math.min(6, Math.floor(q * 6) + 1);
 }
+
+/** 六分段名（1..6 → 段名）；0 位占位 */
+export const SEGNAME = ["", "超卖", "低位", "弱势", "回升", "强势", "超买"];
+
+/** 六分段逐 bar 序列（批量版，色带/副图共用；窗口不足时用已有样本） */
+export function sixSegmentSeries(list: { close: number }[], win = 60): number[] {
+  const out: number[] = [];
+  for (let i = 0; i < list.length; i++) {
+    const start = Math.max(0, i - win + 1);
+    const c = list[i].close;
+    let below = 0;
+    for (let j = start; j <= i; j++) if (list[j].close < c) below++;
+    out.push(Math.min(6, Math.floor((below / (i - start + 1)) * 6) + 1));
+  }
+  return out;
+}

@@ -1,7 +1,8 @@
 /* 行情页：个股头 + klinecharts K线 + 右列功能卡 */
 import { marketApi, type Bar, type IndexQuote, type Quote } from "../api";
 import { cssv, esc, fmt, fmtChg, fmtYi } from "../fmt";
-import { sma, bollSeries, kdjSeries, atrSeries, sixSegment } from "../indicators";
+import { sma, bollSeries, kdjSeries, atrSeries, sixSegment, SEGNAME } from "../indicators";
+export { SEGNAME };
 import { ic } from "../icons";
 import { CARD_DEFS, addWatch, getState, isWatched, notifyLocal, removeWatch, setCardPref, subscribe } from "../store";
 import { openModal, toast } from "../ui";
@@ -11,7 +12,6 @@ import { refreshSparksIn, sparkSvg } from "../sparks";
 import { TRENDS, mountKline, setTrendPalette, trendPaletteKey, type KlineChartHandle, type MainKey, type SubKey } from "./kline";
 
 export const SEG6 = ["超卖", "低位", "弱势", "回升", "强势", "超买"];
-export const SEGNAME = ["", "超卖", "低位", "弱势", "回升", "强势", "超买"];
 
 export interface CurStock { symbol: string; name: string }
 /** 多周期布局：single 单屏 / h 左右双列 / v 上下两层 / quad 四宫格（策影同款） */
