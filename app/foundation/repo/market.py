@@ -161,6 +161,81 @@ def get_quote(conn, symbol: str) -> dict:
     return out
 
 
+def get_quotes(conn, symbols: list[str]) -> tuple[list[dict], list[str]]:
+    """批量快照（自选股卡片底座能力）：N 只三段 IN 查询（日线截面/估值/资金流），
+    每段 QUALIFY 取各 symbol 最新行——单只 get_quote 循环 N 次的批量版。
+
+    逐只走与 get_quote 相同的归一链路（指数形态→universe→daily_ohlcv 放行），
+    任何表都查不到的进 missing；items 顺序与入参一致（重复入参只出一次）。"""
+    items: dict[str, dict] = {}
+    missing: list[str] = []
+    for s in symbols:
+        meta = _index_entry(conn, s)
+        sym = meta["symbol"] if meta else normalize_symbol(s)
+        if meta is None:
+            meta = universe_entry(conn, sym)
+        if meta is None:
+            # 池外品种：daily_ohlcv 有数据即放行（指数等），否则 missing
+            if not conn.execute(
+                "SELECT 1 FROM daily_ohlcv WHERE symbol = ? LIMIT 1", [sym]
+            ).fetchone():
+                if s not in missing:
+                    missing.append(s)
+                continue
+            meta = {"symbol": sym, "name": None, "market": None,
+                    "industry": None, "status": None}
+        if sym in items:
+            continue
+        items[sym] = {**meta}
+    if not items:
+        return [], missing
+
+    want = list(items)
+    ph = ",".join(["?"] * len(want))
+    keys = ["date", "open", "high", "low", "close", "volume", "amount",
+            "pct_chg", "turnover_rate"]
+    for r in conn.execute(
+        f"""
+        SELECT symbol, {', '.join(keys)} FROM v_daily_ohlcv_qfq
+        WHERE symbol IN ({ph})
+        QUALIFY row_number() OVER (PARTITION BY symbol ORDER BY date DESC) = 1
+        """,
+        want,
+    ).fetchall():
+        items[r[0]].update({**dict(zip(keys, r[1:])), "date": str(r[1])})
+
+    val_keys = ["pe_ttm", "pb", "ps_ttm", "total_mv", "circ_mv"]
+    vals = {r[0]: r[1:] for r in conn.execute(
+        f"""
+        SELECT symbol, date, {', '.join(val_keys)} FROM daily_valuation
+        WHERE symbol IN ({ph})
+        QUALIFY row_number() OVER (PARTITION BY symbol ORDER BY date DESC) = 1
+        """,
+        want,
+    ).fetchall()}
+    flow_keys = ["net_main", "net_super", "net_large", "net_medium", "net_small"]
+    flows = {r[0]: r[1:] for r in conn.execute(
+        f"""
+        SELECT symbol, date, {', '.join(flow_keys)} FROM capital_flow
+        WHERE symbol IN ({ph})
+        QUALIFY row_number() OVER (PARTITION BY symbol ORDER BY date DESC) = 1
+        """,
+        want,
+    ).fetchall()}
+
+    for sym, q in items.items():
+        if "date" not in q:                       # universe 有档案但日线无行
+            missing.append(sym)
+        v = vals.get(sym)
+        if v:
+            q["valuation"] = {"date": str(v[0]), **dict(zip(val_keys, v[1:]))}
+        f = flows.get(sym)
+        if f:
+            q["capital_flow"] = {"date": str(f[0]), **dict(zip(flow_keys, f[1:]))}
+    items = {k: v for k, v in items.items() if "date" in v}
+    return list(items.values()), missing
+
+
 def search(conn, q: str, limit: int = 10) -> list[dict]:
     """代码 / 名称 / 拼音检索（代码与名称 SQL LIKE；纯字母查询叠加拼音缩写/全拼匹配）。"""
     like = f"%{q.upper()}%"

@@ -125,6 +125,7 @@ def _freeze_realtime(monkeypatch):
     （2026-10-28 实测 kline 合并会引入腾讯真实价，冲掉夹具尾根导致断言失真）。
     需要实时段的用例自行 monkeypatch 覆盖本冻结。"""
     monkeypatch.setattr("app.foundation.live.realtime_quote", lambda *a, **k: None)
+    monkeypatch.setattr("app.foundation.live.realtime_quotes", lambda *a, **k: {})
 
 
 @pytest.fixture()

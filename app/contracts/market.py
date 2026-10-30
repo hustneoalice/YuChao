@@ -82,6 +82,14 @@ class Quote(BaseModel):
     rt_prev_close: Optional[float] = None  # 东财昨收：实时涨跌额的跨源基准
 
 
+class QuotesOut(BaseModel):
+    """批量快照（自选股卡片等 N 只一次渲染）：items 顺序与入参一致，
+    missing 为任何表都查不到的入参（含归一后形式）。"""
+
+    items: list[Quote]
+    missing: list[str] = []
+
+
 class SearchHit(BaseModel):
     symbol: str
     name: Optional[str] = None

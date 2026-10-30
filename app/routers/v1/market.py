@@ -6,7 +6,7 @@ from typing import Optional
 from fastapi import APIRouter, Depends, Query
 
 from ...contracts.common import Adjust, Page, WithParam
-from ...contracts.market import Kline, Quote, SearchHit
+from ...contracts.market import Kline, Quote, QuotesOut, SearchHit
 from ...errors import vip_required
 from ...foundation import repo
 from ...foundation.db import get_conn
@@ -196,40 +196,71 @@ def kline(
     return TypeAdapter(Kline).validate_python(data)
 
 
+def _apply_rt(q: dict, rt: dict) -> None:
+    """实时快照就地叠加进库内快照（单只 /market/quote 与批量 /market/quotes 共用）。
+
+    总是带 rt_price/rt_time/rt_prev_close；盘中（快照日==今天）时价格字段改用实时值，
+    基本信息卡兜底：daily_valuation 未落库时用腾讯扩展位
+    （38=换手% 39=PE(TTM) 44/45=流通/总市值(亿) 46=PB）。"""
+    q["rt_price"] = rt["price"]
+    q["rt_time"] = rt.get("ts")
+    if rt.get("prev_close") is not None:
+        q["rt_prev_close"] = rt["prev_close"]   # 东财昨收：指数等跨源时防错位
+    if rt.get("ts") and rt["ts"][:10] == date.today().isoformat():
+        q["date"] = rt["ts"]
+        if rt.get("open") is not None: q["open"] = rt["open"]
+        if rt.get("high") is not None: q["high"] = rt["high"]
+        if rt.get("low") is not None: q["low"] = rt["low"]
+        if rt.get("price") is not None: q["close"] = rt["price"]
+        if rt.get("pct") is not None: q["pct_chg"] = rt["pct"]
+        if rt.get("volume") is not None: q["volume"] = rt["volume"]
+        if rt.get("amount") is not None: q["amount"] = rt["amount"]
+        if rt.get("turnover") and not q.get("turnover_rate"):
+            q["turnover_rate"] = rt["turnover"]
+        if rt.get("total_mv_yi") and not q.get("valuation"):
+            q["valuation"] = {
+                "date": date.today().isoformat(),
+                "pe_ttm": rt.get("pe_ttm"), "pb": rt.get("pb"),
+                "total_mv": rt["total_mv_yi"] * 1e8,
+                "circ_mv": (rt.get("circ_mv_yi") or rt["total_mv_yi"]) * 1e8,
+            }
+
+
 @router.get("/market/quote", response_model=Quote, summary="个股快照（最新日线+估值+资金流，盘中叠实时价）")
 def quote(symbol: str, conn=Depends(get_conn)):
     q = repo.market.get_quote(conn, symbol)
     try:                                    # 实时兜底：成功则带 rt_* 字段，失败静默降级
         rt = live.realtime_quote(symbol)
         if rt:
-            q["rt_price"] = rt["price"]
-            q["rt_time"] = rt["ts"]
-            if rt.get("prev_close") is not None:
-                q["rt_prev_close"] = rt["prev_close"]   # 东财昨收：指数等跨源时防错位
-            # 盘中（快照为今日）时用实时值覆盖价格字段，尾部日线日期改标实时时间
-            if rt["ts"] and rt["ts"][:10] == date.today().isoformat():
-                q["date"] = rt["ts"]
-                if rt.get("open") is not None: q["open"] = rt["open"]
-                if rt.get("high") is not None: q["high"] = rt["high"]
-                if rt.get("low") is not None: q["low"] = rt["low"]
-                if rt.get("price") is not None: q["close"] = rt["price"]
-                if rt.get("pct") is not None: q["pct_chg"] = rt["pct"]
-                if rt.get("volume") is not None: q["volume"] = rt["volume"]
-                if rt.get("amount") is not None: q["amount"] = rt["amount"]
-                # 基本信息卡兜底：daily_valuation 未落库时用腾讯扩展位
-                # （38=换手% 39=PE(TTM) 44/45=流通/总市值(亿) 46=PB；指数行为空不触发）
-                if rt.get("turnover") and not q.get("turnover_rate"):
-                    q["turnover_rate"] = rt["turnover"]
-                if rt.get("total_mv_yi") and not q.get("valuation"):
-                    q["valuation"] = {
-                        "date": date.today().isoformat(),
-                        "pe_ttm": rt.get("pe_ttm"), "pb": rt.get("pb"),
-                        "total_mv": rt["total_mv_yi"] * 1e8,
-                        "circ_mv": (rt.get("circ_mv_yi") or rt["total_mv_yi"]) * 1e8,
-                    }
+            _apply_rt(q, rt)
     except Exception:
         pass
     return q
+
+
+@router.get("/market/quotes", response_model=QuotesOut,
+            summary="批量快照（自选股卡片：N 只一次渲染，一次腾讯实时 HTTP）")
+def quotes(symbols: str = Query(
+        description="逗号分隔 ≤50 只，兼容 sh.600519 / 600519.SH / 000001.SH 指数形态"),
+        conn=Depends(get_conn)):
+    syms, seen = [], set()
+    for s in symbols.split(","):
+        s = s.strip()
+        if s and s.upper() not in seen:
+            seen.add(s.upper())
+            syms.append(s)
+    if not syms:
+        return QuotesOut(items=[], missing=[])
+    items, missing = repo.market.get_quotes(conn, syms[:50])
+    try:                                    # 批量实时兜底：一次腾讯 HTTP（10s 缓存），失败降级为纯库内截面
+        rts = live.realtime_quotes([q["symbol"] for q in items])
+        for q in items:
+            rt = rts.get(q["symbol"])
+            if rt:
+                _apply_rt(q, rt)
+    except Exception:
+        pass
+    return TypeAdapter(QuotesOut).validate_python({"items": items, "missing": missing})
 
 
 @router.get("/market/search", response_model=Page[SearchHit], summary="代码/名称搜索")

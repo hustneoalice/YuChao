@@ -59,6 +59,59 @@ def test_quote(client: TestClient):
     assert body["capital_flow"]["net_main"] == 1.2e8
 
 
+def test_quotes_batch(client: TestClient):
+    """批量快照（自选股卡片底座能力）：一次请求 N 只 + missing 归集。"""
+    r = client.get("/api/v1/market/quotes",
+                   params={"symbols": "600519,000858,999999, 600519 "})
+    assert r.status_code == 200
+    body = r.json()
+    syms = [q["symbol"] for q in body["items"]]
+    assert syms == ["600519", "000858"]            # 顺序与入参一致，重复只出一次
+    assert body["missing"] == ["999999"]
+    moutai = body["items"][0]
+    assert moutai["name"] == "贵州茅台"
+    assert abs(moutai["close"] - (1500.0 + 59 * 0.1)) < 1e-6   # 夹具最新日线收盘
+    assert moutai["valuation"]["pe_ttm"] == 22.5
+    assert moutai["capital_flow"]["net_main"] == 1.2e8
+    wly = body["items"][1]
+    assert wly["name"] == "五粮液" and wly["capital_flow"]["net_main"] == -0.5e8
+
+
+def test_quotes_batch_rt_overlay(client: TestClient, monkeypatch):
+    """盘中批量实时覆盖：一次腾讯 HTTP 后价格字段改用实时值（与单只同规约）。"""
+    monkeypatch.setattr("app.foundation.live.realtime_quotes", lambda syms: {
+        s: {"price": 888.0, "open": 880.0, "high": 890.0, "low": 875.0,
+            "prev_close": 870.0, "pct": 2.07, "volume": 12300.0, "amount": 1.1e9,
+            "turnover": 3.3, "pe_ttm": 30.0, "pb": 8.0,
+            "total_mv_yi": 9000.0, "circ_mv_yi": 9000.0, "ts": "2026-10-30 10:30"}
+        for s in syms})
+    r = client.get("/api/v1/market/quotes", params={"symbols": "600519,000858"})
+    assert r.status_code == 200
+    for q in r.json()["items"]:
+        assert q["rt_price"] == 888.0 and q["rt_time"] == "2026-10-30 10:30"
+        assert q["close"] == 888.0 and q["pct_chg"] == 2.07   # 盘中覆盖
+        assert q["rt_prev_close"] == 870.0
+
+
+def test_quotes_index_and_empty(client: TestClient, duckdb_file):
+    """指数形态批量支持；空入参宽松返回空集。"""
+    import duckdb
+    from tests.conftest import _bars
+    con = duckdb.connect(duckdb_file)
+    con.executemany(
+        "INSERT OR REPLACE INTO daily_ohlcv VALUES (?,?,?,?,?,?,?,?,?,?)",
+        _bars("000001.SH", 40, 3000.0, 0.5))
+    con.close()
+    r = client.get("/api/v1/market/quotes", params={"symbols": "000001.SH"})
+    assert r.status_code == 200
+    body = r.json()
+    assert body["items"][0]["symbol"] == "000001.SH"
+    assert body["items"][0]["name"] == "上证指数"
+    assert 3000 < body["items"][0]["close"] < 3010      # 指数价级
+    r2 = client.get("/api/v1/market/quotes", params={"symbols": ","})
+    assert r2.status_code == 200 and r2.json() == {"items": [], "missing": []}
+
+
 def test_search(client: TestClient):
     r = client.get("/api/v1/market/search", params={"q": "600519"})
     assert r.status_code == 200

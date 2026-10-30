@@ -193,6 +193,33 @@ def realtime_quote(symbol: str) -> Optional[Dict[str, Any]]:
     }
 
 
+_RTS_CACHE: Dict[str, tuple[float, Any]] = {}
+
+
+def realtime_quotes(symbols: List[str]) -> Dict[str, Dict[str, Any]]:
+    """批量实时快照（自选股卡片等 N 只一次渲染）：腾讯批量源一次 HTTP ≤50 只。
+
+    key 用排序去重后的组合（同组合 10s 内共享）；容量上限防 symbol 组合爆炸
+    （_cached 装饰器按 repr 缓存且不清理，组合自由的批量调用不能用）。"""
+    uniq = sorted({str(s).strip() for s in symbols if str(s).strip()})
+    if not uniq:
+        return {}
+    key = "live:rts|" + ",".join(uniq)
+    now = time.time()
+    hit = _RTS_CACHE.get(key)
+    if hit and hit[0] > now:
+        return hit[1]
+    raw = _tx_quotes(uniq)
+    ts = time.strftime("%Y-%m-%d %H:%M")
+    out = {s: {**raw[s], "ts": ts} for s in uniq if s in raw and raw[s].get("price") is not None}
+    if len(_RTS_CACHE) > 200:                  # 防 LEAK：清过期项
+        for k, (exp, _) in list(_RTS_CACHE.items()):
+            if exp <= now:
+                _RTS_CACHE.pop(k, None)
+    _RTS_CACHE[key] = (now + 10, out)
+    return out
+
+
 @_cached("live:idx", 10)
 def realtime_indices() -> Dict[str, Any]:
     """常用指数批量实时（策影同款腾讯批量源，一次 HTTP，10s 缓存）：ticker 数据源。
