@@ -9,7 +9,7 @@ import { openModal, toast } from "../ui";
 import { openWatchPanel } from "../watch";
 import { stockSearch, type StockSearchHandle } from "../searchbox";
 import { refreshSparksIn, sparkSvg } from "../sparks";
-import { TRENDS, mountKline, setTrendPalette, trendPaletteKey, type KlineChartHandle, type MainKey, type SubKey } from "./kline";
+import { TRENDS, mountKline, setTrendPalette, trendPaletteKey, IND_DEFS, IND_CATS, type KlineChartHandle, type MainKey, type SubKey } from "./kline";
 
 export const SEG6 = ["超卖", "低位", "弱势", "回升", "强势", "超买"];
 
@@ -45,8 +45,8 @@ if (!LAYOUT_PANELS[mk.layout]) mk.layout = "single";
 mk.panels = [...LAYOUT_PANELS[mk.layout]];
 
 /* K线偏好持久化（F04：本地 + sync.ts 云同步）——主/副图指标集合 */
-const KMAIN_OK: MainKey[] = ["ma", "boll", "short", "mid", "avg"];
-const KSUB_OK: SubKey[] = ["vol", "macd", "kdj", "rsi", "obv"];
+const KMAIN_OK: string[] = IND_DEFS.filter((d) => d.where === "main").map((d) => d.key);
+const KSUB_OK: string[] = IND_DEFS.filter((d) => d.where === "sub").map((d) => d.key);
 function readInds<T extends string>(key: string, ok: T[], fb: T[]): T[] {
   try {
     const v = JSON.parse(localStorage.getItem(key) || "") as unknown;
@@ -64,6 +64,33 @@ function saveKPrefs(): void {
   localStorage.setItem("yc_kmain", JSON.stringify(mk.mainInds));
   localStorage.setItem("yc_ksub", JSON.stringify(mk.subInds));
   notifyLocal("prefs");
+}
+
+/* ── 指标方案：内置方案一键切换 + 自定义方案增删（localStorage yc_klpresets）── */
+type Preset = { main: MainKey[]; sub: SubKey[] };
+const PRESETS: Record<string, Preset> = {
+  标准: { main: ["ma", "short", "mid"], sub: ["vol", "macd"] },
+  趋势: { main: ["ema", "boll", "short"], sub: ["macd", "dmi", "sixseg"] },
+  量价: { main: ["ma"], sub: ["vol", "obv", "vr"] },
+  动量: { main: ["ma"], sub: ["kdj", "rsi", "wr", "cci"] },
+  波段: { main: ["boll"], sub: ["kdj", "macd", "atr"] },
+  极简: { main: [], sub: ["vol"] },
+};
+function readCustomPresets(): Record<string, Preset> {
+  try {
+    const v = JSON.parse(localStorage.getItem("yc_klpresets") || "{}") as unknown;
+    if (v && typeof v === "object") return v as Record<string, Preset>;
+  } catch { /* 坏值忽略 */ }
+  return {};
+}
+/** 应用方案：过滤合法键 → 写状态 → 持久化 → K 线与面板同步（所见即所得） */
+function applyPreset(p: Preset): void {
+  mk.mainInds = (p.main || []).filter((k) => KMAIN_OK.includes(k));
+  mk.subInds = (p.sub || []).filter((k) => KSUB_OK.includes(k));
+  saveKPrefs();
+  syncIndUI();
+  renderIpanel();
+  renderKline();
 }
 
 /* ── 载入 ── */
@@ -399,20 +426,35 @@ export function initMarket(): void {
   document.addEventListener("click", (e) => {
     if (!ipanel.hidden && !(e.target as HTMLElement).closest("#kl-ipanel,#kl-ipanel-btn")) ipanel.hidden = true;
   });
+  renderIpanel();
   ipanel.addEventListener("click", (e) => {
-    const b = (e.target as HTMLElement).closest("button") as HTMLElement | null;
+    const t = e.target as HTMLElement;
+    if (t.closest("i[data-pdel]")) {                       // 删除自定义方案
+      const name = t.closest("i")!.dataset.pdel!;
+      const map = readCustomPresets();
+      if (map[name] && confirm(`删除自定义方案「${name}」？`)) {
+        delete map[name];
+        localStorage.setItem("yc_klpresets", JSON.stringify(map));
+        renderIpanel();
+      }
+      return;
+    }
+    const b = t.closest("button") as HTMLElement | null;
     if (!b) return;
-    if (b.dataset.pre) {                                   // 预设：标准 / 趋势 / 极简
-      const pre: Record<string, { m: MainKey[]; s: SubKey[] }> = {
-        default: { m: ["ma"], s: ["vol", "macd"] },
-        trend: { m: ["ma", "short", "mid"], s: ["vol"] },
-        bare: { m: [], s: ["vol"] },
-      };
-      const p = pre[b.dataset.pre];
-      mk.mainInds = [...p.m]; mk.subInds = [...p.s];
-      saveKPrefs();
-      syncIndUI();
-      renderKline();
+    if (b.dataset.psave) {                                 // 当前组合存为自定义方案
+      const name = (prompt("方案名称（将保存当前主/副图指标组合）", `我的方案${Object.keys(readCustomPresets()).length + 1}`) || "").trim();
+      if (!name) return;
+      if (PRESETS[name]) { toast("与内置方案重名，请换个名字"); return; }
+      const map = readCustomPresets();
+      map[name] = { main: [...mk.mainInds], sub: [...mk.subInds] };
+      localStorage.setItem("yc_klpresets", JSON.stringify(map));
+      toast(`已保存方案「${name}」`);
+      renderIpanel();
+      return;
+    }
+    if (b.dataset.pre) {                                   // 方案：内置 + 自定义，一键切换
+      const p = { ...PRESETS, ...readCustomPresets() }[b.dataset.pre];
+      if (p) applyPreset(p);
       return;
     }
     if (b.dataset.tpl) {                                   // 趋势通道配色 A/B/C/D
@@ -430,6 +472,7 @@ export function initMarket(): void {
       mk.subInds = [...ipanel.querySelectorAll<HTMLElement>(".iprow button[data-si].on")].map((x) => x.dataset.si as SubKey);
     saveKPrefs();
     syncIndUI();
+    renderIpanel();
     renderKline();
   });
   window.addEventListener("resize", () => {
@@ -460,6 +503,7 @@ export function initMarket(): void {
     mk.mainInds = readInds("yc_kmain", KMAIN_OK, mk.mainInds);
     mk.subInds = readInds("yc_ksub", KSUB_OK, mk.subInds);
     syncIndUI();
+    renderIpanel();
     renderKline();
   });
 }
@@ -543,6 +587,30 @@ function syncIndUI(): void {
     x.classList.toggle("on", x.dataset.tpl === key));
   document.querySelectorAll<HTMLElement>("#kl-ipanel button[data-mi='short'],#kl-ipanel button[data-mi='mid']")
     .forEach((x) => x.style.setProperty("--ic", x.dataset.mi === "short" ? pal.fast : pal.slow));
+}
+
+/** 指标面板动态渲染：方案行（内置+自定义+存为方案）+ 分类指标 chips（27 指标 6 分类） */
+function renderIpanel(): void {
+  const pres = document.getElementById("ip-presets");
+  const inds = document.getElementById("ip-inds");
+  if (!pres || !inds) return;
+  const custom = readCustomPresets();
+  const sig = JSON.stringify([mk.mainInds, mk.subInds]);
+  const on = (p: Preset) => (JSON.stringify([p.main, p.sub]) === sig ? ' class="on"' : "");
+  const chips: string[] = Object.entries(PRESETS)
+    .map(([n, p]) => `<button data-pre="${esc(n)}" title="应用内置方案${n}"${on(p)}>${n}</button>`)
+    .concat(Object.entries(custom).map(([n, p]) =>
+      `<span class="chipx"><button data-pre="${esc(n)}" title="应用自定义方案${esc(n)}"${on(p)}>${esc(n)}</button><i data-pdel="${esc(n)}" title="删除方案">×</i></span>`))
+    .concat(['<button class="psave" data-psave="1" title="把当前主/副图指标组合保存为自定义方案">＋存方案</button>']);
+  pres.innerHTML = `<span class="ipk">方案</span>${chips.join("")}`;
+  const mset = new Set(mk.mainInds), sset = new Set(mk.subInds);
+  const CAT_IC: Record<string, string> = { main: "#FF9F43", trend: "#F2C94C", mom: "#4DD0E1", vol: "#EF5350", swing: "#7E57C2", volat: "#26C6DA" };
+  inds.innerHTML = IND_CATS.map(({ cat, label }) => {
+    const defs = IND_DEFS.filter((d) => d.cat === cat);
+    if (!defs.length) return "";
+    return `<div class="iprow"><span class="ipk">${label}</span>${defs.map((d) =>
+      `<button style="--ic:${CAT_IC[cat] || "transparent"}" data-${d.where === "main" ? "mi" : "si"}="${d.key}" title="${esc(d.desc)}"${(d.where === "main" ? mset : sset).has(d.key) ? ' class="on"' : ""}>${d.label}</button>`).join("")}</div>`;
+  }).join("");
 }
 
 /** 日线聚合为周/月 */
@@ -842,6 +910,35 @@ function cardBody(cid: string, mode: string): string {
       `<div class="bi-rows">${rows}</div>` +
       (cons.length ? `<div class="bi-cons">${cons.slice(0, 6).map((c) => `<span class="sh-con">${esc(c)}</span>`).join("")}` +
         (cons.length > 6 ? `<span class="sh-con more" title="${esc(cons.slice(6).join("、"))}">+${cons.length - 6}</span>` : "") + `</div>` : "");
+  }
+  if (cid === "trend") {
+    // 颜色条信息的卡片化收纳：短/中线多空（收盘 vs MA10/45）+ 六段位位置条（低调淡色）
+    const last = closes[closes.length - 1];
+    if (!last || bars.length < 5) return `<div class="bempty">数据不足</div>`;
+    const maLast = (n: number): number | null => {
+      if (closes.length < n) return null;
+      let sum = 0;
+      for (let i = closes.length - n; i < closes.length; i++) sum += closes[i];
+      return sum / n;
+    };
+    const trLine = (label: string, n: number) => {
+      const mv = maLast(n);
+      if (mv == null) return "";
+      const dev = (last - mv) / mv * 100;
+      const up = dev >= 0;
+      return `<div class="tr-line"><span class="tr-k">${label}</span>` +
+        `<b class="${up ? "up" : "down"}">${up ? "多头" : "空头"}</b>` +
+        `<span class="num tr-dev">${up ? "+" : ""}${dev.toFixed(2)}%</span></div>`;
+    };
+    // 六段位：60 窗口分位（与色带/副图同口径）→ 段号 + 0-100% 位置条
+    const win = bars.slice(-60);
+    const below = win.filter((b) => b.close < last).length;
+    const q = below / win.length;
+    const seg = sixSegment(bars, bars.length - 1);
+    return `<div class="tr-lines">${trLine("短线", 10)}${trLine("中线", 45)}</div>` +
+      `<div class="tr-pos"><span class="tr-k">六段</span>` +
+      `<div class="tr-bar"><i style="left:${(q * 100).toFixed(1)}%"></i></div>` +
+      `<b style="color:var(--${q >= 0.5 ? "up" : "down"})">${seg}段·${SEGNAME[seg]}</b></div>`;
   }
   if (cid === "watch") {
     const wl = getState().watchlist;

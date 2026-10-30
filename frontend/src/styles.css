@@ -392,9 +392,6 @@ body.mobile .rcard .cbar{opacity:1}
   background:var(--panel);cursor:pointer;overflow:hidden}
 .klp.active{z-index:2}
 .klp-main{flex:1;min-height:0;position:relative;cursor:crosshair}
-/* 操盘状态颜色条（策影 SignalBars 同款）：K线上方逐柱状态带，高度由 JS 按行数设定 */
-.klp-sig{position:relative;flex:none;display:none}
-.klp-sig canvas{position:absolute;inset:0;width:100%;height:100%;display:block}
 .klp-bar{display:flex;align-items:center;gap:7px;padding:0 10px;height:27px;flex:none;
   font-size:11px;color:var(--faint);border-bottom:1px solid var(--border-soft);
   background:var(--panel-2);user-select:none}
@@ -464,12 +461,23 @@ body.mobile .rcard .cbar{opacity:1}
    不依赖宿主容器有无 position（曾因 .panel 无定位飞到页面右上角） */
 .kl-ipanel{position:fixed;z-index:60;background:var(--panel);
   border:1px solid var(--border);border-radius:11px;box-shadow:var(--shadow);padding:9px 11px;
-  display:flex;flex-direction:column;gap:6px}
+  display:flex;flex-direction:column;gap:6px;max-width:min(620px,calc(100vw - 24px))}
 .kl-stage .legend{position:absolute;top:10px;right:68px;z-index:6;pointer-events:none;
   justify-content:flex-end;background:color-mix(in srgb,var(--panel) 72%,transparent);
   padding:3px 9px;border-radius:8px;backdrop-filter:blur(6px);-webkit-backdrop-filter:blur(6px)}
 .kl-ipanel[hidden]{display:none!important}
-.kl-ipanel .iprow{display:flex;align-items:center;gap:4px}
+.kl-ipanel .iprow{display:flex;align-items:flex-start;gap:4px;flex-wrap:wrap}
+.kl-ipanel .ipk{flex:none;width:56px;line-height:26px;font-size:10.5px;color:var(--faint);
+  white-space:nowrap;overflow:hidden}
+.kl-ipanel .ip-hint{font-size:10px;color:var(--faint);text-align:right}
+/* 自定义方案 chip：按钮 + 行内 × 删除 */
+.kl-ipanel .chipx{display:inline-flex;align-items:stretch}
+.kl-ipanel .chipx button{border-radius:8px 0 0 8px;border-right:none}
+.kl-ipanel .chipx i{display:inline-flex;align-items:center;padding:0 6px;font-size:12px;
+  border:1px solid var(--border-soft);border-radius:0 8px 8px 0;color:var(--faint);cursor:pointer}
+.kl-ipanel .chipx i:hover{color:var(--down);background:var(--panel-2)}
+/* 存为方案：虚线边框弱化态 */
+.kl-ipanel button.psave{border-style:dashed;color:var(--accent)}
 /* 指标显影（TradingView 惯例）：每按钮左侧「指标本色」圆点，
    实心 = 已显示、空心环 = 未启用，一眼分辨；选中行另加底色+边框强化 */
 .kl-ipanel button:not([data-pre]):not([data-tpl]){display:inline-flex;align-items:center;gap:5px}
@@ -536,6 +544,21 @@ body.mobile .rcard .cbar{opacity:1}
 .bitem .bm .tag{margin:0}
 .bsec{padding:7px 14px 3px;font-size:11px;color:var(--faint);letter-spacing:.02em}
 .bempty{padding:26px 14px;text-align:center;font-size:12px;color:var(--faint)}
+/* ── 趋势卡片（原 K 线颜色条信息的卡片化收纳）：行式多空 + 六段位置条 ── */
+.rcard .tr-lines{display:flex;flex-direction:column;gap:6px;padding:10px 12px 4px}
+.rcard .tr-line{display:flex;align-items:baseline;gap:8px;font-size:12px}
+.rcard .tr-k{flex:none;width:30px;color:var(--faint);font-size:11px}
+.rcard .tr-line b{font-size:12.5px;font-weight:600}
+.rcard .tr-dev{margin-left:auto;color:var(--dim)}
+.rcard .tr-pos{display:flex;align-items:center;gap:8px;padding:8px 12px 12px;font-size:11.5px}
+.rcard .tr-bar{flex:1;height:6px;border-radius:3px;position:relative;
+  background:linear-gradient(90deg,color-mix(in srgb,var(--down) 20%,transparent),
+    color-mix(in srgb,var(--down) 14%,transparent),
+    color-mix(in srgb,var(--dim) 14%,transparent),
+    color-mix(in srgb,var(--up) 14%,transparent),
+    color-mix(in srgb,var(--up) 26%,transparent))}
+.rcard .tr-bar i{position:absolute;top:-2.5px;width:2.5px;height:11px;border-radius:2px;
+  background:var(--text);box-shadow:0 0 0 1px var(--panel);transform:translateX(-50%)}
 .kl-empty,.kl-stage .empty{position:absolute;inset:0;z-index:5;background:var(--panel)}
 
 /* 板块热力 */

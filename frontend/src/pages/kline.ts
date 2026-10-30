@@ -8,7 +8,7 @@
 import { init, dispose, registerIndicator, registerYAxis, type Chart } from "klinecharts";
 import type { Bar } from "../api";
 import { cssv } from "../fmt";
-import { SEGNAME, sixSegmentSeries } from "../indicators";
+import { sixSegmentSeries } from "../indicators";
 
 /* ── 策影配色（tradingColors） ── */
 const UP = "#EF5350";
@@ -42,17 +42,6 @@ const channelFill = (strong: boolean, alpha: number) => {
   const c = strong ? p.fr : p.sr;
   return `rgba(${c[0]}, ${c[1]}, ${c[2]}, ${alpha})`;
 };
-
-/* 六段色带：段位 1..6 → 涨跌色渐变（超卖绿 → 超买红，跟随主题涨跌方向变量） */
-function hexRGB(h: string): [number, number, number] {
-  const m = h.trim().match(/^#([0-9a-f]{6})$/i);
-  return m ? [parseInt(m[1].slice(0, 2), 16), parseInt(m[1].slice(2, 4), 16), parseInt(m[1].slice(4, 6), 16)] : [136, 136, 136];
-}
-function segRGB(seg: number): [number, number, number] {
-  const lo = hexRGB(cssv("--down") || "#32D74B"), hi = hexRGB(cssv("--up") || "#FF453A");
-  const t = (Math.min(6, Math.max(1, seg)) - 1) / 5;
-  return [0, 1, 2].map((k) => Math.round(lo[k] + (hi[k] - lo[k]) * t)) as [number, number, number];
-}
 
 export function chartUp(): string {
   return document.documentElement.dataset.dir === "intl" ? DOWN : UP;
@@ -170,6 +159,27 @@ function ensureRegistered(): void {
       figures: [{ key: "seg", title: "段位", type: "line", styles: () => ({ color: "#26C6DA" }) }],
     });
   } catch { /* 重复注册忽略 */ }
+  // ATR 自研（klinecharts v10 未内置）：14 日真实波幅均值
+  try {
+    registerIndicator({
+      name: "ATR",
+      shortName: "ATR",
+      precision: 2,
+      calc: (kLineDataList) => {
+        const list = kLineDataList as unknown as { high: number; low: number; close: number }[];
+        const n = 14;
+        const tr = list.map((b, i) =>
+          i ? Math.max(b.high - b.low, Math.abs(b.high - list[i - 1].close), Math.abs(b.low - list[i - 1].close)) : b.high - b.low);
+        let sum = 0;
+        return list.map((_, i) => {
+          sum += tr[i];
+          if (i >= n) sum -= tr[i - n];
+          return { atr: i >= n - 1 ? sum / n : NaN };
+        });
+      },
+      figures: [{ key: "atr", title: "ATR", type: "line", styles: () => ({ color: "#F2C94C" }) }],
+    });
+  } catch { /* 重复注册忽略 */ }
 }
 
 /* ── 时间转换（策影 format.ts 逐字 + 分钟级 datetime 支持） ── */
@@ -180,8 +190,55 @@ function toTs(time: string): number {
   return new Date(time + "T00:00:00").getTime();
 }
 
-export type MainKey = "ma" | "boll" | "short" | "mid" | "avg";
-export type SubKey = "vol" | "macd" | "kdj" | "rsi" | "obv" | "sixseg";
+/* ── 指标注册表：klinecharts 内置名直通 + 自研（SHORT/MID/SIXSEG/TIME_AVG）──
+ * 分类对齐主流软件（同花顺/东财/TradingView）：主图叠加 / 趋势 / 动量 / 量能 / 摆动人气 / 波动分位 */
+export type IndCat = "main" | "trend" | "mom" | "vol" | "swing" | "volat";
+export type IndDef = { key: string; kc: string; label: string; cat: IndCat; where: "main" | "sub"; desc: string };
+export const IND_CATS: { cat: IndCat; label: string }[] = [
+  { cat: "main", label: "主图叠加" }, { cat: "trend", label: "趋势" }, { cat: "mom", label: "动量" },
+  { cat: "vol", label: "量能" }, { cat: "swing", label: "摆动人气" }, { cat: "volat", label: "波动分位" },
+];
+export const IND_DEFS: IndDef[] = [
+  // 主图叠加
+  { key: "ma", kc: "MA", label: "MA", cat: "main", where: "main", desc: "移动平均线 5/10/20" },
+  { key: "ema", kc: "EMA", label: "EMA", cat: "main", where: "main", desc: "指数移动平均线" },
+  { key: "boll", kc: "BOLL", label: "BOLL", cat: "main", where: "main", desc: "布林带通道" },
+  { key: "sar", kc: "SAR", label: "SAR", cat: "main", where: "main", desc: "抛物线转向（停损点）" },
+  { key: "short", kc: "SHORT", label: "短线趋势", cat: "main", where: "main", desc: "自研快慢线趋势通道" },
+  { key: "mid", kc: "MID", label: "中线趋势", cat: "main", where: "main", desc: "自研快慢线趋势通道" },
+  { key: "avg", kc: "TIME_AVG", label: "均价线", cat: "main", where: "main", desc: "分时均价线（日内）" },
+  { key: "bbi", kc: "BBI", label: "BBI", cat: "main", where: "main", desc: "多空指数（四均线加权）" },
+  // 趋势类
+  { key: "macd", kc: "MACD", label: "MACD", cat: "trend", where: "sub", desc: "指数平滑异同移动平均" },
+  { key: "dmi", kc: "DMI", label: "DMI", cat: "trend", where: "sub", desc: "趋向指标（ADX 强弱方向）" },
+  { key: "trix", kc: "TRIX", label: "TRIX", cat: "trend", where: "sub", desc: "三重指数平滑平均线" },
+  { key: "emv", kc: "EMV", label: "EMV", cat: "trend", where: "sub", desc: "简易波动指标（量价趋势）" },
+  { key: "dma", kc: "DMA", label: "DMA", cat: "trend", where: "sub", desc: "平均线差（快慢均线差值）" },
+  // 动量类
+  { key: "kdj", kc: "KDJ", label: "KDJ", cat: "mom", where: "sub", desc: "随机指标（超买超卖交叉）" },
+  { key: "rsi", kc: "RSI", label: "RSI", cat: "mom", where: "sub", desc: "相对强弱指标" },
+  { key: "cci", kc: "CCI", label: "CCI", cat: "mom", where: "sub", desc: "顺势指标（脱离常态范围）" },
+  { key: "roc", kc: "ROC", label: "ROC", cat: "mom", where: "sub", desc: "变动率指标" },
+  { key: "mtm", kc: "MTM", label: "MTM", cat: "mom", where: "sub", desc: "动量指标" },
+  { key: "wr", kc: "WR", label: "WR", cat: "mom", where: "sub", desc: "威廉指标（超买超卖）" },
+  { key: "psy", kc: "PSY", label: "PSY", cat: "mom", where: "sub", desc: "心理线（上涨天数占比）" },
+  // 量能类
+  { key: "vol", kc: "VOL", label: "VOL", cat: "vol", where: "sub", desc: "成交量（5/10/40 日均量线）" },
+  { key: "obv", kc: "OBV", label: "OBV", cat: "vol", where: "sub", desc: "能量潮（量能累积方向）" },
+  { key: "vr", kc: "VR", label: "VR", cat: "vol", where: "sub", desc: "成交量比率" },
+  // 摆动人气类
+  { key: "brar", kc: "BRAR", label: "BRAR", cat: "swing", where: "sub", desc: "情绪指标（人气/意愿）" },
+  { key: "cr", kc: "CR", label: "CR", cat: "swing", where: "sub", desc: "能量指标（中间意愿）" },
+  { key: "bias", kc: "BIAS", label: "BIAS", cat: "swing", where: "sub", desc: "乖离率（偏离均线程度）" },
+  // 波动分位类
+  { key: "atr", kc: "ATR", label: "ATR", cat: "volat", where: "sub", desc: "真实波幅（波动强度）" },
+  { key: "sixseg", kc: "SIXSEG", label: "六段", cat: "volat", where: "sub", desc: "自研 60 日分位 1-6 段" },
+];
+export const IND_BY_KEY: Record<string, IndDef> = Object.fromEntries(IND_DEFS.map((d) => [d.key, d]));
+
+/** 合法键集合由注册表决定（放宽为 string，持久化值经 KMAIN_OK/KSUB_OK 校验） */
+export type MainKey = string;
+export type SubKey = string;
 
 export interface KlineChartHandle {
   chart: Chart;
@@ -208,12 +265,6 @@ export interface KlineChartHandle {
   resize: () => void;
   destroy: () => void;
 }
-
-const MAIN_NAMES: Record<MainKey, string> = {
-  ma: "MA", boll: "BOLL", short: "SHORT_TREND_CHANNEL", mid: "MID_TREND_CHANNEL",
-  avg: "TIME_AVG",
-};
-const SUB_NAMES: Record<SubKey, string> = { vol: "VOL", macd: "MACD", kdj: "KDJ", rsi: "RSI", obv: "OBV", sixseg: "SIXSEG" };
 
 /* ── 智能高度（策影 computeAutoPaneHeights 同款） ──
  * 主图:单个副图 = 3.6:1（1 副图 → 主图 78%，2 → 64%，3 → 55%）；
@@ -370,143 +421,6 @@ export function mountKline(el: HTMLElement): KlineChartHandle {
     legend.style.display = parts.length ? "flex" : "none";
   };
 
-  /* ── 操盘状态颜色条（策影 SignalBars 同款）：K线上方逐柱状态带 ──
-   * MA 行：日短=收盘vs MA10、日中=收盘vs MA45；周线：周短 MA10 / 周中 MA30；60分钟：60短 MA10。
-   * 六段行：60 窗口分位 → 1..6 段（超卖→超买，绿→红渐变），行尾箭头标当前段。
-   * 收盘 > 慢线 → 偏强（趋势调色板强色），否则偏弱（弱色）；分时/月/季不显示。
-   * 逐柱对齐 convertToPixel.x，缩放平移实时跟随；左侧标签底永不被遮挡。 */
-  type SigRow = { label: string; kind: "ma"; n: number } | { label: string; kind: "seg" };
-  const SIG_ROWS: Partial<Record<TipPeriod, SigRow[]>> = {
-    d: [{ label: "日短", kind: "ma", n: 10 }, { label: "日中", kind: "ma", n: 45 }, { label: "六段", kind: "seg" }],
-    w: [{ label: "周短", kind: "ma", n: 10 }, { label: "周中", kind: "ma", n: 30 }, { label: "六段", kind: "seg" }],
-    "60": [{ label: "60短", kind: "ma", n: 10 }, { label: "六段", kind: "seg" }],
-  };
-  const sig = document.createElement("div");
-  sig.className = "klp-sig";
-  sig.style.display = "none";
-  sig.innerHTML = "<canvas></canvas>";
-  el.parentElement?.insertBefore(sig, el);           // klp-bar 与 klp-main 之间（文档流让位，策影同款）
-  const sigCv = sig.querySelector("canvas")!;
-  // 六段序列缓存：klinecharts 数据引用不变即复用（拖拽平移每帧触发，避免 O(n·60) 重算）
-  let segSrc: unknown = null, segArrCache: number[] = [];
-  const segsOf = (list: { close: number }[]): number[] => {
-    if (list !== segSrc) { segArrCache = sixSegmentSeries(list); segSrc = list; }
-    return segArrCache;
-  };
-  /** 显示/隐藏与行高同步：行数变化时主图重算布局，返回当前行配置 */
-  const sigSync = (): { rows: SigRow[] } | null => {
-    const rows = SIG_ROWS[period];
-    if (!rows || !chart.getDataList().length) {
-      if (sig.style.display !== "none") {
-        sig.style.display = "none";
-        try { chart.resize(); } catch { /* 忽略 */ }
-        applyHeights();
-      }
-      return null;
-    }
-    const stripH = 3 + rows.length * 7 + (rows.length - 1) * 2 + 2;
-    if (sig.style.display === "none" || sig.dataset.h !== String(stripH)) {
-      sig.style.display = "block";
-      sig.style.height = stripH + "px";
-      sig.dataset.h = String(stripH);
-      try { chart.resize(); } catch { /* 忽略 */ }
-      applyHeights();
-    }
-    return { rows };
-  };
-  const sigDraw = () => {
-    const sync = sigSync();
-    if (!sync) return;
-    const list = chart.getDataList() as { close: number }[];
-    const w = sigCv.clientWidth || 1, h = sigCv.clientHeight || 1;
-    const dpr = window.devicePixelRatio || 1;
-    sigCv.width = Math.round(w * dpr); sigCv.height = Math.round(h * dpr);
-    const ctx = sigCv.getContext("2d")!;
-    ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
-    ctx.clearRect(0, 0, w, h);
-    const closes = list.map((b) => b.close);
-    // MA 行逐柱状态（策影同款口径：收盘 > MA = 偏强）；六段行整序列缓存（数据不变不重算）
-    const maStates = new Map<number, (boolean | null)[]>();
-    sync.rows.forEach((r, row) => {
-      if (r.kind !== "ma") return;
-      const st: (boolean | null)[] = [];
-      let sum = 0;
-      for (let i = 0; i < closes.length; i++) {
-        sum += closes[i];
-        if (i >= r.n) sum -= closes[i - r.n];
-        st.push(i >= r.n - 1 ? closes[i] > sum / r.n : null);
-      }
-      maStates.set(row, st);
-    });
-    let segArr: number[] | null = null;
-    if (sync.rows.some((r) => r.kind === "seg")) segArr = segsOf(list);
-    // 可见范围：realFrom/realTo 排除右侧预留幻影索引（缩放时越 Y 轴的根源）
-    const r = chart.getVisibleRange?.() as { from: number; to: number; realFrom?: number; realTo?: number } | undefined;
-    if (!r) return;
-    const from = Math.max(0, Math.floor(r.realFrom ?? r.from));
-    const to = Math.min(list.length - 1, Math.ceil(r.realTo ?? r.to));
-    const barSpace = chart.getBarSpace?.() || { bar: 8 };
-    const cw = Math.max(1, (barSpace.bar || 8) - 1);
-    const xs: number[] = [];
-    for (let i = from; i <= to; i++) {
-      try {
-        const px = chart.convertToPixel({ dataIndex: i, value: 0 }) as { x?: number };
-        if (px?.x != null) xs.push(px.x);
-      } catch { /* 忽略 */ }
-    }
-    if (!xs.length) return;
-    const rightBound = xs[xs.length - 1] + cw / 2 + 1;
-    // 先画柱（与可见 K 线一一对应），再画标签（覆盖其上永不被遮挡）
-    sync.rows.forEach((row, ri) => {
-      const y = 3 + ri * 9;
-      if (row.kind === "ma") {
-        const st = maStates.get(ri)!;
-        let last: boolean | null = null;
-        xs.forEach((x, k) => {
-          const s = st[from + k];
-          if (s != null) last = s;
-          if (last === null) return;
-          const left = x - cw / 2;
-          const right = Math.min(left + cw, rightBound);
-          if (left >= rightBound || right <= left) return;
-          ctx.fillStyle = channelFill(last === true, 0.9);
-          ctx.fillRect(left, y, right - left, 7);
-        });
-      } else {
-        xs.forEach((x, k) => {
-          const left = x - cw / 2;
-          const right = Math.min(left + cw, rightBound);
-          if (left >= rightBound || right <= left) return;
-          const c = segRGB(segArr![from + k]);
-          ctx.fillStyle = `rgba(${c[0]},${c[1]},${c[2]},0.9)`;
-          ctx.fillRect(left, y, right - left, 7);
-        });
-      }
-    });
-    // 标签底 + 文本：MA 行段名；六段行画 ▲ 箭头 + 当前段号与段名
-    const labelW = 80;
-    ctx.fillStyle = cssv("--panel-2") || "rgba(20,20,24,.92)";
-    ctx.fillRect(0, 0, labelW, h);
-    ctx.font = "9px monospace";
-    ctx.textBaseline = "middle";
-    sync.rows.forEach((row, ri) => {
-      const cy = 3 + ri * 9 + 3.5;
-      if (row.kind === "ma") {
-        ctx.fillStyle = cssv("--faint") || "#8e8e93";
-        ctx.fillText(row.label, 4, cy);
-      } else {
-        const seg = segArr![list.length - 1];
-        const c = segRGB(seg);
-        ctx.fillStyle = `rgba(${c[0]},${c[1]},${c[2]},1)`;
-        ctx.beginPath();                          // ▲ 指向当前段位
-        ctx.moveTo(10, cy - 3.2); ctx.lineTo(6.5, cy + 2.4); ctx.lineTo(13.5, cy + 2.4);
-        ctx.closePath(); ctx.fill();
-        ctx.fillStyle = cssv("--text") || "#f5f5f7";
-        ctx.fillText(`${seg}段·${SEGNAME[seg]}`, 17, cy);
-      }
-    });
-  };
-
   const onCross = (...args: unknown[]) => {
     const ch = args[0] as { x?: number; y?: number } | null;
     if (!ch || ch.x == null || ch.y == null) { tip.style.display = "none"; return; }
@@ -606,7 +520,7 @@ export function mountKline(el: HTMLElement): KlineChartHandle {
     navWin.style.left = cvL + (from / L) * cvW + "px";
     navWin.style.width = Math.max(2, ((to - from) / L) * cvW) + "px";
   };
-  const onVisChange = () => { requestAnimationFrame(() => { navUpdateWin(); sigDraw(); }); };
+  const onVisChange = () => { requestAnimationFrame(navUpdateWin); };
   try { chart.subscribeAction("onVisibleRangeChange", onVisChange as never); } catch { /* 忽略 */ }
 
   // 窗口拖拽：只平移不缩放（策影同款），pointer capture 跟手
@@ -660,63 +574,65 @@ export function mountKline(el: HTMLElement): KlineChartHandle {
       tip.style.display = "none";                          // 数据重载时收起旧卡片
       // v10 无 applyNewData，经 DataLoader 一次性回填（策影同款）
       chart.setDataLoader({ getBars: (params) => { params.callback(list, false); } });
-      requestAnimationFrame(() => { navDraw(); sigDraw(); try { chart.scrollToRealTime(0); } catch { /* 忽略 */ } });
+      requestAnimationFrame(() => { navDraw(); try { chart.scrollToRealTime(0); } catch { /* 忽略 */ } });
     },
     setMain(inds: MainKey[]) {
-      // 主图多选叠加（策影同款）：先按实例移除不再选中的，再增量补建缺失的
-      const want = new Set(inds.map((k) => MAIN_NAMES[k]));
+      // 主图多选叠加（策影同款）：先按实例移除不再选中的，再增量补建缺失的（注册表驱动）
+      const defs = inds.map((k) => IND_BY_KEY[k]).filter((d): d is IndDef => !!d && d.where === "main");
+      const want = new Set(defs.map((d) => d.kc));
+      const mainKcs = IND_DEFS.filter((d) => d.where === "main").map((d) => d.kc);
       chart.getIndicators({ paneId: "candle_pane" }).forEach((i) => {
-        if (Object.values(MAIN_NAMES).includes(i.name) && !want.has(i.name))
+        if (mainKcs.includes(i.name) && !want.has(i.name))
           chart.removeIndicator({ id: i.id });
       });
       const have = new Set(chart.getIndicators({ paneId: "candle_pane" }).map((i) => i.name));
-      for (const k of inds) {
-        if (have.has(MAIN_NAMES[k])) continue;
-        if (k === "ma") {
+      for (const d of defs) {
+        if (have.has(d.kc)) continue;
+        if (d.key === "ma") {
           // MA 配色与页面图例一致：MA5 琥珀 / MA10 蓝 / MA20 VIP 金
           chart.createIndicator({
             name: "MA", paneId: "candle_pane", calcParams: [5, 10, 20], isStack: true,
             styles: { lines: [{ color: cssv("--accent") || "#FF9F43" }, { color: "#0A84FF" }, { color: cssv("--vip") || "#FFD60A" }] },
           } as never, true);
-        } else if (k === "boll") {
+        } else if (d.key === "boll") {
           const dim = cssv("--dim") || "#A1A1A6";
           chart.createIndicator({
             name: "BOLL", paneId: "candle_pane", isStack: true,
             styles: { lines: [{ color: dim }, { color: dim }, { color: dim }] },
           } as never, true);
-        } else if (k === "avg") {
+        } else if (d.key === "avg") {
           chart.createIndicator({ name: "TIME_AVG", paneId: "candle_pane", isStack: true } as never, true);
         } else {
-          chart.createIndicator({ name: MAIN_NAMES[k], paneId: "candle_pane", isStack: true } as never, true);
+          chart.createIndicator({ name: d.kc, paneId: "candle_pane", isStack: true } as never, true);
         }
       }
     },
     setSub(inds: SubKey[]) {
-      // 副图多选：全清后按固定顺序重建，每指标一个窗格
+      // 副图多选：全清后按固定顺序重建，每指标一个窗格（注册表驱动）
       chart.getIndicators()
         .filter((i) => i.paneId !== "candle_pane")
         .forEach((i) => chart.removeIndicator({ id: i.id }));
       const up = chartUp(), dn = chartDown();
       for (const k of inds) {
-        if (k === "vol") {
+        const d = IND_BY_KEY[k];
+        if (!d || d.where !== "sub") continue;
+        if (d.key === "vol") {
           // 策影 createSubIndicatorConfig：禁用大数格式化，轴/图例文本走万/亿；
           // calcParams [5,10,40] = 5/10/40 日均量线（40 日均量作缩放量能基准）
           chart.createIndicator({
             name: "VOL", shouldFormatBigNumber: false, calcParams: [5, 10, 40],
             styles: { bars: [{ upColor: up, downColor: dn, noChangeColor: NEUTRAL }] },
           } as never, false);
-        } else if (k === "macd") {
+        } else if (d.key === "macd") {
           chart.createIndicator({
             name: "MACD",
             styles: { bars: [{ upColor: up, downColor: dn, noChangeColor: NEUTRAL }] },
           } as never, false);
-        } else if (k === "sixseg") {
+        } else if (d.key === "sixseg") {
           // 六分段趋势（K线下方叠加）：60 窗口分位 1..6 段台阶线
           chart.createIndicator({ name: "SIXSEG", precision: 0 } as never, false);
-        } else if (k === "rsi" || k === "obv") {
-          chart.createIndicator({ name: SUB_NAMES[k] } as never, false);
         } else {
-          chart.createIndicator({ name: "KDJ" } as never, false);
+          chart.createIndicator({ name: d.kc } as never, false);
         }
       }
       // 窗格高度交给智能高度统一分配（含 candle_pane）
@@ -724,8 +640,6 @@ export function mountKline(el: HTMLElement): KlineChartHandle {
     },
     setPeriod(p: TipPeriod) {
       period = p;
-      // 颜色条按周期显隐（行数变化时 sigSync 内部已重排主图）
-      requestAnimationFrame(sigDraw);
     },
     applyHeights,
     zoom(factor: number) {
@@ -749,17 +663,16 @@ export function mountKline(el: HTMLElement): KlineChartHandle {
     },
     navRefresh() { requestAnimationFrame(navDraw); },
     drawLegend,
-    retheme() { chart.setStyles(styles()); requestAnimationFrame(() => { navDraw(); sigDraw(); }); },
+    retheme() { chart.setStyles(styles()); requestAnimationFrame(navDraw); },
     resize() {
       chart.resize();
-      requestAnimationFrame(() => { applyHeights(); navDraw(); sigDraw(); });
+      requestAnimationFrame(() => { applyHeights(); navDraw(); });
     },
     destroy() {
       try { chart.unsubscribeAction("onCrosshairChange", onCross as never); } catch { /* 忽略 */ }
       tip.remove();
       legend.remove();
       nav.remove();
-      sig.remove();
       dispose(el);
     },
   };
