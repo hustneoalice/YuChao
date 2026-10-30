@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# 驭潮 启动脚本：后端 uvicorn(8031) + 前端 vite(5173)
+# 驭潮 启动脚本：后端 uvicorn(8031) + 前端 vite(5178，与 vite.config.ts 一致)
 set -euo pipefail
 ROOT="$(cd "$(dirname "$0")/.." && pwd)"
 LOG_DIR="$ROOT/.logs"
@@ -34,8 +34,8 @@ start_one() { # name port start_cmd
 }
 
 start_one backend 8031 "cd '$ROOT' && .venv/bin/python -m uvicorn app.main:app --host 127.0.0.1 --port 8031"
-start_one frontend 5173 "cd '$ROOT/frontend' && npm run dev"
+start_one frontend 5178 "cd '$ROOT/frontend' && npm run dev"
 
 echo
-echo "驭潮已就绪：前端 http://localhost:5173 · 后端 http://127.0.0.1:8031"
+echo "驭潮已就绪：前端 http://localhost:5178 · 后端 http://127.0.0.1:8031"
 echo "停止：./scripts/stop.sh · 日志：.logs/backend.log / .logs/frontend.log"
