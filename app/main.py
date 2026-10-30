@@ -23,6 +23,14 @@ from .stream.sse import router as stream_router
 
 logger = logging.getLogger("yuchao")
 
+# 应用日志入口配置：uvicorn 只挂自己的 handler，应用 logger 不配这里会
+# 被吞（INFO 级）或走 lastResort（无时间戳）——后台排障全靠这份输出。
+logging.basicConfig(
+    level=logging.INFO,
+    format="%(asctime)s %(levelname)-7s %(name)s %(message)s",
+    datefmt="%m-%d %H:%M:%S",
+)
+
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
