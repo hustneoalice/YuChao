@@ -231,6 +231,10 @@ def test_selfheal_clears_on_success(sh, monkeypatch):
 def test_selfheal_stops_after_max_retries(sh, monkeypatch):
     orch = FakeOrch()
     monkeypatch.setattr("app.updater.selfheal._BACKOFF_S", (0, 0, 0))
+    # 隔离真实时钟到盘中 12:00：否则盘后（>15:35）跑测试，链位补偿会混入
+    # force=False 的提交，污染重试上限计数（历史上 15:35 前跑才稳定）
+    monkeypatch.setattr("app.updater.selfheal.now_cst",
+                        lambda: datetime(2026, 10, 30, 12, 0, 0))
     for _ in range(5):                     # 连续失败 5 次（> 上限 3）
         sh.on_record("kline_update", "failed")
         sh.tick(orch, force=True)
