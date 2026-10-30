@@ -137,6 +137,8 @@ export const marketApi = {
   /* 批量快照（自选股卡片：N 只一次渲染，一次腾讯实时 HTTP；≤50 只） */
   quotes: (symbols: string[]) =>
     req<{ items: Quote[]; missing: string[] }>(`/market/quotes?symbols=${encodeURIComponent(symbols.join(","))}`),
+  sparks: (symbols: string[]) =>
+    req<{ items: { symbol: string; prev_close: number | null; points: number[] }[]; missing: string[] }>(`/market/sparks?symbols=${encodeURIComponent(symbols.join(","))}`),
   search: (q: string, limit = 10) => req<{ items: SearchHit[]; total: number }>(`/market/search?q=${encodeURIComponent(q)}&limit=${limit}`),
   indices: () => req<{ items: IndexQuote[]; total_amount?: number }>("/market/indices"),
   /* 实时资讯/研报（后端东财直连 + TTL 缓存，失败降级空列表） */

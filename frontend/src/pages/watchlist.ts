@@ -1,9 +1,10 @@
 /* 自选页（localStorage 客户端实现，F04 后端就绪后切换） */
-import { marketApi, type SearchHit } from "../api";
+import { marketApi } from "../api";
 import { esc, fmt, fmtChg, fmtYi } from "../fmt";
 import { ic } from "../icons";
 import { getState, setWlGroup, removeWatch, addWatch, isWatched } from "../store";
 import { toast, openModal, closeModals } from "../ui";
+import { stockSearch, type StockSearchHandle } from "../searchbox";
 
 let filter: "all" | "up" | "down" = "all";
 const chgCache = new Map<string, number>();
@@ -54,6 +55,7 @@ function renderRows(): void {
     return `<tr data-stock="${w.symbol}"><td class="num" style="color:var(--faint)">${i + 1}</td><td class="num">${w.symbol}</td><td><span style="font-weight:600">${esc(w.name)}</span></td>` +
       `<td class="n num" id="wl-price-${w.symbol}">${fmt(0)}</td>` +
       `<td class="n num ${up ? "up" : "down"}">${fmtChg(ch)}%</td>` +
+      `<td class="n"><svg class="spark" data-c="${w.symbol}" width="72" height="22"></svg></td>` +
       `<td class="n num" style="color:var(--faint)">${fmtYi(amtCache.get(w.symbol) ?? null, 1)}</td>` +
       `<td><span class="tag ${segI >= 4 ? "acc" : segI <= 1 ? "flat" : "p1"}">${["", "超卖", "低位", "看盘", "回升", "强势", "超买"][segI]}</span></td>` +
       `<td><span style="font-size:11.5px;color:var(--dim)">${esc(w.group)}</span></td>` +
@@ -74,6 +76,52 @@ function renderRows(): void {
     }));
   document.getElementById("wl-empty")!.style.display = rows.length ? "none" : "grid";
   void loadPrices(rows.map((r) => r.symbol));
+  void refreshSparks();
+}
+
+/* ── 行内走势 sparkline：/market/sparks 批量当日分时（降采样 ≈40 点 + 昨收），
+   会话级缓存 45s；重渲后按 data-c 就地回填，不整表重绘 ── */
+const sparkCache = new Map<string, { points: number[]; prev: number | null; at: number }>();
+let sparkBusy = false;
+
+function paintSparks(): void {
+  document.querySelectorAll<SVGSVGElement>("#wl-body svg.spark[data-c]").forEach((svg) => {
+    const hit = sparkCache.get(svg.dataset.c!);
+    if (!hit || svg.childNodes.length) return;
+    const pts = hit.points;
+    const W = 72, H = 22, pad = 2;
+    const lo = Math.min(...pts, hit.prev ?? Infinity);
+    const hi = Math.max(...pts, hit.prev ?? -Infinity);
+    const span = hi - lo || 1;
+    const x = (i: number) => pad + (i / (pts.length - 1)) * (W - 2 * pad);
+    const y = (v: number) => pad + (1 - (v - lo) / span) * (H - 2 * pad);
+    const d = pts.map((v, i) => `${i ? "L" : "M"}${x(i).toFixed(1)},${y(v).toFixed(1)}`).join("");
+    const up = pts[pts.length - 1] >= (hit.prev ?? pts[0]);
+    const color = up ? "var(--up)" : "var(--down)";
+    const base = hit.prev != null && hit.prev >= lo && hit.prev <= hi ?
+      `<line x1="${pad}" x2="${W - pad}" y1="${y(hit.prev).toFixed(1)}" y2="${y(hit.prev).toFixed(1)}" stroke="var(--faint)" stroke-width=".5" stroke-dasharray="2 2" opacity=".55"/>` : "";
+    svg.innerHTML = base + `<path d="${d}" fill="none" stroke="${color}" stroke-width="1.2" stroke-linejoin="round"/>`;
+  });
+}
+
+async function refreshSparks(): Promise<void> {
+  if (sparkBusy) return;
+  const rows = [...document.querySelectorAll<SVGSVGElement>("#wl-body svg.spark[data-c]")];
+  const need = rows.filter((s) => {
+    const h = sparkCache.get(s.dataset.c!);
+    return !h || Date.now() - h.at > 45_000;
+  }).map((s) => s.dataset.c!);
+  if (need.length) {
+    sparkBusy = true;
+    try {
+      const r = await marketApi.sparks(need.slice(0, 50));
+      for (const it of r.items)
+        sparkCache.set(it.symbol, { points: it.points, prev: it.prev_close, at: Date.now() });
+    } catch { /* 静默：保留旧曲线 */ } finally {
+      sparkBusy = false;
+    }
+  }
+  paintSparks();
 }
 
 async function loadPrices(symbols: string[]): Promise<void> {
@@ -99,48 +147,34 @@ export function initWatchlist(): void {
     document.querySelectorAll("#wl-filter button").forEach((x) => x.classList.toggle("on", x === b));
     renderRows();
   });
-  const openAdd = () => { openModal("modal-add"); (document.getElementById("add-search") as HTMLInputElement).value = ""; void renderAddList(""); };
+  /* 添加自选弹窗：共享搜索组件（与顶栏一致：代码/名称/拼音模糊 + 最近搜索历史 + 涨跌幅），
+     行尾「+ 加入」直加自选；点行打开个股 */
+  const addSearch: StockSearchHandle = stockSearch({
+    input: document.getElementById("add-search") as HTMLInputElement,
+    list: document.getElementById("add-list")!,
+    limit: 12,
+    tail: (u) => {
+      const has = getState().watchlist.some((w) => w.symbol === u.symbol);
+      return has ? `<span class="tag flat" style="flex:none">已添加</span>` :
+        `<button class="hbtn" data-sb-tail="${u.symbol}" data-sb-name="${esc(u.name || u.symbol)}" style="height:26px;padding:0 12px;font-size:11.5px;flex:none">+ 加入</button>`;
+    },
+    onTail: (u) => {
+      addWatch(u.symbol, u.name || u.symbol);
+      toast("已加入自选");
+      addSearch.redraw();
+    },
+    onPick: (u) => {
+      closeModals();
+      document.dispatchEvent(new CustomEvent("yc:open-stock", { detail: { symbol: u.symbol, name: u.name || u.symbol, from: { page: "watchlist", label: "自选股" } } }));
+    },
+  });
+  const openAdd = () => {
+    openModal("modal-add");
+    (document.getElementById("add-search") as HTMLInputElement).value = "";
+    addSearch.redraw();        // 清空输入 → 重显最近搜索历史
+  };
   document.getElementById("wl-add")!.addEventListener("click", openAdd);
   document.getElementById("wl-empty-add")!.addEventListener("click", openAdd);
-  (document.getElementById("add-search") as HTMLInputElement).addEventListener("input", (e) =>
-    void renderAddList((e.target as HTMLInputElement).value));
-}
-
-let addSeq = 0;
-async function renderAddList(q: string): Promise<void> {
-  const seq = ++addSeq;
-  const list = document.getElementById("add-list")!;
-  if (!q.trim()) {
-    list.innerHTML = `<div style="font-size:11.5px;color:var(--faint);padding:8px 10px">输入代码 / 名称搜索行情底座</div>`;
-    return;
-  }
-  let hits: SearchHit[] = [];
-  try {
-    const r = await marketApi.search(q.trim(), 12);
-    hits = r.items;
-  } catch { /* 静默 */ }
-  if (seq !== addSeq) return;
-  const wl = getState().watchlist;
-  list.innerHTML = hits.map((u) => {
-    const has = wl.some((w) => w.symbol === u.symbol);
-    return `<div style="display:flex;align-items:center;gap:10px;padding:8px 10px;border-radius:9px" class="addrow" data-c="${u.symbol}"><b style="font-size:12.5px">${esc(u.name)}</b><span class="num" style="font-size:11px;color:var(--faint)">${u.symbol}</span>` +
-      (has ? `<span class="tag flat" style="margin-left:auto">已添加</span>` : `<button class="hbtn" data-add="${u.symbol}" data-name="${esc(u.name || u.symbol)}" style="height:26px;padding:0 12px;font-size:11.5px;margin-left:auto">+ 加入</button>`) + `</div>`;
-  }).join("") || `<div style="font-size:11.5px;color:var(--faint);padding:8px 10px">未找到匹配标的</div>`;
-  list.querySelectorAll<HTMLElement>("[data-add]").forEach((b) =>
-    b.addEventListener("click", (e) => {
-      e.stopPropagation();
-      addWatch(b.dataset.add!, b.dataset.name || b.dataset.add!);
-      toast("已加入自选");
-      void renderAddList(q);
-    }));
-  list.querySelectorAll<HTMLElement>(".addrow[data-c]").forEach((r) =>
-    r.addEventListener("click", (e) => {
-      if ((e.target as HTMLElement).closest("[data-add]")) return;
-      closeModals();
-      const sym = r.dataset.c!;
-      const hit = hits.find((h) => h.symbol === sym);
-      document.dispatchEvent(new CustomEvent("yc:open-stock", { detail: { symbol: sym, name: hit?.name || sym, from: { page: "watchlist", label: "自选股" } } }));
-    }));
 }
 
 export function isInWatchlist(sym: string): boolean { return isWatched(sym); }

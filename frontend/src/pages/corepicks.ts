@@ -2,8 +2,9 @@
 import { corepicksApi, type Corepick } from "../api";
 import { esc, fmt, fmtChg } from "../fmt";
 import { ic } from "../icons";
-import { getState, isVip, addWatch, isWatched } from "../store";
-import { toast, openModal, closeModals } from "../ui";
+import { getState, isVip } from "../store";
+import { openModal, closeModals } from "../ui";
+import { openWatchPanel } from "../watch";
 
 let tab: "chase" | "dip" | "all" = "chase";
 let picks: Corepick[] = [];
@@ -123,8 +124,8 @@ async function openDetail(symbol: string, pool: string): Promise<void> {
     (document.getElementById("dt-seg-v") as HTMLElement).textContent || "—";
   const watchBtn = document.getElementById("dt-watch")!;
   watchBtn.onclick = () => {
-    if (!isWatched(symbol)) { addWatch(symbol, r.name || symbol); toast(`${r.name || symbol} 已加入自选`); }
-    else toast(`${r.name || symbol} 已在自选中`);
+    // 统一走「加入自选 / 分组管理」面板（与行情页 star 行为一致）
+    openWatchPanel(symbol, r.name || symbol);
   };
   openModal("modal-detail");
   document.querySelector<HTMLButtonElement>("[data-dt-vip]")?.addEventListener("click", () => {

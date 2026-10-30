@@ -73,6 +73,7 @@
               <button class="cbtn" id="kl-zout" title="缩小（看更长周期）">－</button>
               <button class="cbtn" id="kl-vreset" title="重置视图">⟲</button>
               <button class="cbtn on" id="kl-auto" title="智能高度：主图/副图按 3.6 : 1 自适应分配（策影同款）">⤢</button>
+              <button class="hbtn" id="kl-watch" title="加自选 / 管理分组"><span data-ic="star" data-sz="12"></span><span id="kl-watch-t">加自选</span></button>
               <span class="barsep"></span>
               <span class="seg" id="kl-main-ind">
                 <button class="on" data-mi="ma">MA</button><button data-mi="boll">BOLL</button><button class="on" data-mi="short">短线趋势</button><button class="on" data-mi="mid">中线趋势</button>
@@ -143,7 +144,7 @@
         <div class="tblwrap" style="flex:1">
           <table>
             <thead><tr><th style="width:30px"></th><th>代码</th><th>名称</th>
-              <th class="n">现价</th><th class="n">涨跌幅</th><th class="n">成交额</th>
+              <th class="n">现价</th><th class="n">涨跌幅</th><th class="n">走势</th><th class="n">成交额</th>
               <th>信号</th><th>分组</th><th style="width:52px"></th></tr></thead>
             <tbody id="wl-body"></tbody>
           </table>
@@ -342,10 +343,23 @@
 <div class="modal" id="modal-add">
   <div class="mhead"><h3>添加自选</h3><span class="sp"></span>
     <button class="mclose" data-close><span data-ic="x" data-sz="13"></span></button></div>
-  <p class="mdesc">搜索代码或名称，从行情底座加入自选。</p>
-  <input class="field" id="add-search" placeholder="代码 / 名称" style="width:100%">
+  <p class="mdesc">与顶栏搜索一致：支持代码 / 名称 / 拼音缩写，聚焦显示最近搜索。</p>
+  <input class="field" id="add-search" placeholder="代码 / 名称 / 拼音" style="width:100%">
   <div style="margin-top:10px;max-height:300px;overflow:auto" id="add-list"></div>
   <div class="acts"><button class="hbtn" data-close>完成</button></div>
+</div>
+
+<div class="modal" id="modal-watch">
+  <div class="mhead"><h3 id="wm-title">加入自选</h3><span class="sp"></span>
+    <button class="mclose" data-close><span data-ic="x" data-sz="13"></span></button></div>
+  <p class="mdesc" id="wm-stock">—</p>
+  <div class="wm-groups" id="wm-groups"></div>
+  <input class="field" id="wm-new" placeholder="新建分组名称（回车确认，留空用选中分组）" style="width:100%;margin-top:10px">
+  <div class="acts">
+    <button class="hbtn" id="wm-remove" style="color:var(--down)" hidden>移出自选</button>
+    <button class="hbtn" data-close>取消</button>
+    <button class="hbtn primary" id="wm-ok">确定</button>
+  </div>
 </div>
 
 <div class="modal" id="modal-pay-ok" style="width:min(380px,92vw);text-align:center">

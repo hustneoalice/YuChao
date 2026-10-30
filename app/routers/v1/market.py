@@ -87,6 +87,49 @@ def minute(symbol: str = Query(description="6 位代码，兼容 sh.600519 形�
     return _cached(f"m|{symbol}", 30, fetch)
 
 
+@router.get("/market/sparks", summary="批量当日走势（自选列表 sparkline：降采样价格点 + 昨收）")
+def sparks(symbols: str = Query(description="逗号分隔代码，≤50 只")):
+    """自选列表行内迷你走势：每只降采样 ≈40 点（首尾保留），昨收供涨跌着色与基线。
+
+    腾讯 minute/query 一次一只 → 线程池 8 并发；单只失败归 missing 不拖垮整批。
+    """
+    from concurrent.futures import ThreadPoolExecutor
+
+    syms = [s.strip() for s in symbols.split(",") if s.strip()][:50]
+
+    def one(sym: str):
+        try:
+            txc = tx_symbol(sym)
+            if not txc:
+                return None
+            j = _tx_fetch("https://web.ifzq.gtimg.cn/appstock/app/minute/query",
+                          params={"code": txc})
+            d = (j.get("data") or {}).get(txc) or {}
+            body = d.get("data") or {}
+            qt = list((d.get("qt") or {}).values())
+            prev = float(qt[0][4]) if qt and len(qt[0]) > 4 and qt[0][4] else None
+            pts = [float(str(it).split(" ")[1])
+                   for it in body.get("data") or [] if len(str(it).split(" ")) >= 2]
+            if len(pts) < 2:
+                return None
+            step = max(1, len(pts) // 40)               # 240 分钟 → ≈40 点
+            down = pts[::step]
+            if down[-1] != pts[-1]:
+                down.append(pts[-1])
+            return {"symbol": sym, "prev_close": prev, "points": down}
+        except Exception:
+            return None
+
+    def fetch():
+        items, missing = [], []
+        with ThreadPoolExecutor(max_workers=8) as ex:
+            for sym, r in zip(syms, ex.map(one, syms)):
+                (items.append(r) if r is not None else missing.append(sym))
+        return {"items": items, "missing": missing}
+
+    return _cached(f"sparks|{symbols}", 30, fetch)
+
+
 def _merge_live_bar(bars: list, symbol: str, adjust: Adjust) -> list:
     """盘中合并「今日未收盘 bar」（策影同款 + 三守卫，2026-10-28 用户：
     科创50 顶部已实时转涨、K 线末根还是昨日 —— 实时价此前只进 quote 不进 K 线）。

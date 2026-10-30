@@ -3,8 +3,9 @@ import { marketApi, type Bar, type IndexQuote, type Quote } from "../api";
 import { cssv, esc, fmt, fmtChg, fmtYi } from "../fmt";
 import { sma, bollSeries, kdjSeries, atrSeries, sixSegment } from "../indicators";
 import { ic } from "../icons";
-import { CARD_DEFS, getState, notifyLocal, setCardPref, subscribe } from "../store";
+import { CARD_DEFS, addWatch, getState, isWatched, notifyLocal, setCardPref, subscribe } from "../store";
 import { openModal, toast } from "../ui";
+import { openWatchPanel } from "../watch";
 import { TRENDS, mountKline, setTrendPalette, trendPaletteKey, type KlineChartHandle, type MainKey, type SubKey } from "./kline";
 
 export const SEG6 = ["超卖", "低位", "弱势", "回升", "强势", "超买"];
@@ -69,6 +70,7 @@ export async function openStock(s: CurStock, from?: { page: string; label: strin
   mk.from = from ?? null;
   localStorage.setItem("yc_last_symbol", `${s.symbol}|${s.name}`);
   renderBackbar();
+  updateWatchBtn();
   document.dispatchEvent(new CustomEvent("yc:goto-page", { detail: "market" }));
   // K线先渲染不等 quote（实时快照慢/被掐时不再拖住首屏），
   // quote 到达后单独刷新右列（基本信息卡/资金流/估值等）
@@ -236,9 +238,29 @@ function renderBackbar(): void {
   else b.hidden = true;
 }
 
+/* ── 工具栏加自选按钮：未自选一键入「默认」组；已自选点击打开分组管理面板 ── */
+function updateWatchBtn(): void {
+  const b = document.getElementById("kl-watch");
+  const t = document.getElementById("kl-watch-t");
+  if (!b || !t) return;
+  const on = mk.cur ? isWatched(mk.cur.symbol) : false;
+  b.classList.toggle("on", on);
+  t.textContent = on ? "已自选" : "加自选";
+}
+
 export function initMarket(): void {
   initRcolResize();
   initLayoutSeg();
+  // 加自选：一键入默认组；已自选 → 分组管理面板（换分组 / 新建 / 移除）
+  document.getElementById("kl-watch")!.addEventListener("click", () => {
+    const s = mk.cur;
+    if (!s) return;
+    if (!isWatched(s.symbol)) {
+      addWatch(s.symbol, s.name, "默认");
+      toast("已加入自选 · 默认（再次点击可改分组）");
+    } else openWatchPanel(s.symbol, s.name);
+  });
+  subscribe(updateWatchBtn);   // 自选增删/分组变更（含云同步回放）→ 按钮态同步
   // 实时价轮询：行情页可见时每 20s 静默刷新当前股 quote（后端 10s 缓存兜东财限流）
   window.setInterval(async () => {
     if (!mk.cur || !document.getElementById("page-market")!.classList.contains("on")) return;

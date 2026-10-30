@@ -121,6 +121,28 @@ def test_search(client: TestClient):
     assert any(h["symbol"] == "600519" for h in r2.json()["items"])
 
 
+def test_sparks_batch(client: TestClient, monkeypatch):
+    """批量当日走势（自选 sparkline 底座能力）：降采样点 + 昨收 + missing 归集。"""
+    from app.routers.v1 import market as m
+    m._m_cache.clear()
+    bars = [f"09{i:02d} {1500 + i * 0.5:.1f} {100 + i} {150000 * (i + 1)}" for i in range(30)]
+
+    def fake_fetch(url, params=None):
+        return {"data": {"sh600519": {"data": {"data": bars, "date": "20261030"},
+                "qt": {"sh600519": ["1", "贵州茅台", "1514.5", "9.8", "1490.00"]}}}}
+
+    monkeypatch.setattr(m, "_tx_fetch", fake_fetch)
+    r = client.get("/api/v1/market/sparks", params={"symbols": "600519,999999"})
+    assert r.status_code == 200
+    body = r.json()
+    assert [i["symbol"] for i in body["items"]] == ["600519"]   # 顺序与入参一致
+    assert body["missing"] == ["999999"]
+    it = body["items"][0]
+    assert it["prev_close"] == 1490.0
+    assert 2 <= len(it["points"]) <= 31
+    assert it["points"][-1] == 1514.5                           # 首尾保留
+
+
 def test_sectors_list(client: TestClient):
     r = client.get("/api/v1/sectors", params={"type": "industry"})
     assert r.status_code == 200

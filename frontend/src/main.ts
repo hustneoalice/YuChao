@@ -1,10 +1,10 @@
 /* 入口：导航 / 全局搜索 / 主题 / SSE 接线 / 启动 */
 import "./styles.css";
 import { ic, injectIcons } from "./icons";
-import { authApi, getToken, marketApi } from "./api";
-import { fmtChg } from "./fmt";
+import { authApi, getToken } from "./api";
 import { applyAppearance, getState, patch, setUser, subscribe } from "./store";
 import { toast } from "./ui";
+import { stockSearch } from "./searchbox";
 import { initAuth, refreshVipUI } from "./auth";
 import { initMarket, klResize, openStock, renderKline, renderRight } from "./pages/market";
 import { initWatchlist, renderWatchlist } from "./pages/watchlist";
@@ -14,6 +14,7 @@ import { initCards, renderCards } from "./pages/cards";
 import { initSettings, refreshDatachip, openSettingsTab } from "./pages/settings";
 import { initSync, pullOnLogin } from "./sync";
 import { SseClient } from "./sse";
+import { initWatchPanel } from "./watch";
 
 const loaded = { watchlist: false, sectors: false, corepicks: false };
 
@@ -28,115 +29,24 @@ function goPage(p: string): void {
   if (p === "cards") renderCards();
 }
 
-/* ── 全局搜索 ── */
+/* ── 全局搜索（共享组件：代码/名称/拼音模糊 + 最近搜索历史 + 涨跌幅回填） ── */
 function initSearch(): void {
   const input = document.getElementById("ginput") as HTMLInputElement;
   const drop = document.getElementById("gdrop")!;
-  let seq = 0;
-  let hits: { symbol: string; name?: string }[] = [];
-  const chgCache = new Map<string, number | null>(); // symbol → pct_chg（会话级缓存，避免重复请求）
-  // 搜索历史（全局，最近 10 条，新的在前）
-  const HKEY = "yc_search_history";
-  const loadHist = (): { symbol: string; name?: string }[] => {
-    try { return JSON.parse(localStorage.getItem(HKEY) || "[]") as typeof hits; } catch { return []; }
-  };
-  const saveHist = (u: { symbol: string; name?: string }) => {
-    const list = loadHist().filter((x) => x.symbol !== u.symbol);
-    list.unshift({ symbol: u.symbol, name: u.name });
-    localStorage.setItem(HKEY, JSON.stringify(list.slice(0, 10)));
-  };
-  const itemHtml = (u: { symbol: string; name?: string }) => {
-    const chg = chgCache.get(u.symbol);
-    const chgHtml = chg == null ? "" :
-      `<span class="chg num ${chg >= 0 ? "up" : "down"}">${fmtChg(chg)}%</span>`;
-    return `<div class="gitem" data-c="${u.symbol}" data-n="${u.name || ""}"><b>${u.name || u.symbol}</b><span class="num">${u.symbol}</span>${chgHtml}</div>`;
-  };
-  const draw = () => {
-    drop.innerHTML = hits.map(itemHtml).join("") ||
-      `<div class="gitem" style="color:var(--faint)">未找到匹配标的</div>`;
-    drop.classList.add("on");
-  };
-  // 空输入 / 聚焦 → 历史下拉（复用 hits 与涨跌幅回填通道）
-  const drawHist = () => {
-    hits = loadHist();
-    if (!hits.length) { drop.classList.remove("on"); return; }
-    drop.innerHTML = `<div class="ghead">最近搜索<span id="ghist-clear">清空</span></div>` +
-      hits.map(itemHtml).join("");
-    drop.classList.add("on");
-    fetchChg(seq);
-  };
-  // 事件委托绑定一次：fetchChg 回填涨跌幅会就地插入 .chg span，
-  // 绝不整体重绘 innerHTML——mousedown/mouseup 之间 DOM 被替换会让 click 被吞
-  drop.addEventListener("click", (e) => {
-    const t = e.target as HTMLElement;
-    if (t.closest("#ghist-clear")) {
-      localStorage.removeItem(HKEY);
+  stockSearch({
+    input,
+    list: drop,
+    scope: ".gsearch",
+    setVisible: (v) => drop.classList.toggle("on", v),
+    onPick: (u) => {
+      input.value = "";
+      input.blur();
       drop.classList.remove("on");
-      return;
-    }
-    const it = t.closest<HTMLElement>(".gitem[data-c]");
-    if (!it) return;
-    const sym = it.dataset.c!, name = it.dataset.n || sym;
-    saveHist({ symbol: sym, name });
-    void openStock({ symbol: sym, name });
-    input.value = "";
-    input.blur();
-    drop.classList.remove("on");
-    toast(`已切换至 ${name}`);
+      void openStock({ symbol: u.symbol, name: u.name || u.symbol });
+      toast(`已切换至 ${u.name || u.symbol}`);
+    },
   });
-  // 并发补拉涨跌幅（quote 未命中/失败时缓存 null，不阻塞首屏下拉）。
-  // 回填时只就地插入 .chg span，绝不整体重绘 innerHTML——
-  // mousedown/mouseup 之间 DOM 被替换会让 click 落到容器上被丢弃（点击被吞）
-  const fetchChg = (mySeq: number) => {
-    void Promise.allSettled(
-      hits.map(async (u) => {
-        if (chgCache.has(u.symbol)) return;
-        try {
-          const qt = await marketApi.quote(u.symbol);
-          chgCache.set(u.symbol, qt.pct_chg ?? null);
-        } catch { chgCache.set(u.symbol, null); }
-      })
-    ).then(() => {
-      if (mySeq !== seq) return;
-      hits.forEach((u) => {
-        const chg = chgCache.get(u.symbol);
-        if (chg == null) return;
-        const el = drop.querySelector<HTMLElement>(`.gitem[data-c="${u.symbol}"]`);
-        if (!el || el.querySelector(".chg")) return;
-        el.insertAdjacentHTML("beforeend",
-          `<span class="chg num ${chg >= 0 ? "up" : "down"}">${fmtChg(chg)}%</span>`);
-      });
-    });
-  };
-  const filter = async () => {
-    const q = input.value.trim();
-    const mySeq = ++seq;
-    if (!q) { drawHist(); return; }
-    try {
-      const r = await marketApi.search(q, 10);
-      if (mySeq !== seq) return;
-      hits = r.items;
-      draw();
-      fetchChg(mySeq);
-    } catch {
-      if (mySeq === seq) {
-        drop.innerHTML = `<div class="gitem" style="color:var(--faint)">搜索服务不可达</div>`;
-        drop.classList.add("on");
-      }
-    }
-  };
-  input.addEventListener("input", filter);
-  input.addEventListener("focus", () => { if (!input.value.trim()) drawHist(); });
-  input.addEventListener("keydown", (e) => {
-    if (e.key === "Enter") {
-      const f = drop.querySelector<HTMLElement>(".gitem[data-c]");
-      if (f) f.click();
-    }
-    if (e.key === "Escape") drop.classList.remove("on");
-  });
-  document.addEventListener("click", (e) => {
-    if (!(e.target as HTMLElement).closest(".gsearch")) drop.classList.remove("on");
-  });
+  // Cmd/Ctrl+K 聚焦全局搜索
   document.addEventListener("keydown", (e) => {
     if ((e.metaKey || e.ctrlKey) && e.key.toLowerCase() === "k") {
       e.preventDefault();
@@ -216,6 +126,7 @@ function boot(): void {
   initSectors();
   initCards();
   initSettings();
+  initWatchPanel();           // 加自选/分组管理面板（modal-watch）：行情页 star 与核心标明细共用
   initSync();                 // F04：本地变更→云推送；带 token 启动→静默拉取合并
 
   // 主题按钮
