@@ -5,7 +5,7 @@ import { sma, bollSeries, kdjSeries, atrSeries, sixSegment } from "../indicators
 import { ic } from "../icons";
 import { CARD_DEFS, getState, notifyLocal, setCardPref, subscribe } from "../store";
 import { openModal, toast } from "../ui";
-import { mountKline, setTrendPalette, trendPaletteKey, type KlineChartHandle, type MainKey, type SubKey } from "./kline";
+import { TRENDS, mountKline, setTrendPalette, trendPaletteKey, type KlineChartHandle, type MainKey, type SubKey } from "./kline";
 
 export const SEG6 = ["超卖", "低位", "弱势", "回升", "强势", "超买"];
 export const SEGNAME = ["", "超卖", "低位", "弱势", "回升", "强势", "超买"];
@@ -511,10 +511,13 @@ function syncIndUI(): void {
     x.classList.toggle("on", mset.has(x.dataset.mi as MainKey)));
   document.querySelectorAll<HTMLElement>("#kl-ipanel button[data-si]").forEach((x) =>
     x.classList.toggle("on", sset.has(x.dataset.si as SubKey)));
-  // 通道配色选中态（单选）
+  // 通道配色选中态（单选）+ 短/中线趋势色点跟随当前调色板
   const key = trendPaletteKey();
+  const pal = TRENDS[key];
   document.querySelectorAll<HTMLElement>("#kl-ipanel button[data-tpl]").forEach((x) =>
     x.classList.toggle("on", x.dataset.tpl === key));
+  document.querySelectorAll<HTMLElement>("#kl-ipanel button[data-mi='short'],#kl-ipanel button[data-mi='mid']")
+    .forEach((x) => x.style.setProperty("--ic", x.dataset.mi === "short" ? pal.fast : pal.slow));
 }
 
 /** 日线聚合为周/月 */

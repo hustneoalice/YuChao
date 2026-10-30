@@ -398,11 +398,19 @@ td .lnk:hover{text-decoration:underline}
   padding:3px 9px;border-radius:8px;backdrop-filter:blur(6px);-webkit-backdrop-filter:blur(6px)}
 .kl-ipanel[hidden]{display:none!important}
 .kl-ipanel .iprow{display:flex;align-items:center;gap:4px}
+/* 指标显影（TradingView 惯例）：每按钮左侧「指标本色」圆点，
+   实心 = 已显示、空心环 = 未启用，一眼分辨；选中行另加底色+边框强化 */
+.kl-ipanel button:not([data-pre]):not([data-tpl]){display:inline-flex;align-items:center;gap:5px}
+.kl-ipanel button:not([data-pre]):not([data-tpl])::before{content:"";flex:none;width:7px;height:7px;
+  border-radius:50%;background:var(--ic,transparent);transition:opacity .12s,background .12s}
+.kl-ipanel button:not(.on):not([data-pre]):not([data-tpl])::before{
+  background:transparent;box-shadow:inset 0 0 0 1.5px var(--ic,var(--faint))}
 .kl-ipanel button{padding:4px 9px;border-radius:8px;font-size:11.5px;color:var(--dim);
   border:1px solid var(--border-soft);min-height:0}
 .kl-ipanel button:hover{color:var(--text);background:var(--panel-2)}
-.kl-ipanel button.on{color:var(--accent);border-color:color-mix(in srgb,var(--accent) 45%,transparent);
-  background:var(--accent-soft);font-weight:600}
+.kl-ipanel button.on{color:var(--text);border-color:color-mix(in srgb,var(--accent) 60%,transparent);
+  background:color-mix(in srgb,var(--accent) 14%,var(--panel-2));font-weight:600}
+.kl-ipanel button.on::before{opacity:1}
 .kl-ipanel .iprow:first-child button{color:var(--dim)}
 .kl-ipanel .iprow:first-child button:hover{color:var(--text)}
 
