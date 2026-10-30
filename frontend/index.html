@@ -70,12 +70,17 @@
                 <button data-p="t">分时</button><button data-p="60">60分</button><button class="on" data-p="d">日K</button><button data-p="w">周K</button><button data-p="m">月K</button>
               </span>
               <span class="barsep"></span>
-              <span class="seg favseg" id="kl-favbar"></span>
               <span class="sp"></span>
               <button class="hbtn" id="kl-ipanel-btn" title="方案预设 · 通道配色">方案</button>
             </div>
             <!-- 指标控制（常显两行）：主图叠加一行 + 副图一行 -->
             <div class="kl-ipanel ip-inline" id="kl-indbar"><div id="ip-inds"></div></div>
+            <!-- 「更多」指标配置面板：搜索 + 分类全量；点行=显影切换，★=常显切换 -->
+            <div class="kl-more" id="kl-more" hidden>
+              <div class="im-search"><input type="text" placeholder="搜索指标：名称 / 说明 / 分类" autocomplete="off"></div>
+              <div class="im-list" id="kl-more-list"></div>
+              <div class="im-foot">点行 = 叠加 / 移除显影 · ★ = 常显到工具栏</div>
+            </div>
             <div class="kl-stage" id="kl-stage">
               <div class="kl-panels" id="kl-panels"></div>
               <div class="empty" id="kl-empty" style="display:none">

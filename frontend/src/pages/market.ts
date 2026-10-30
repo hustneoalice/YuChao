@@ -9,7 +9,7 @@ import { openModal, toast } from "../ui";
 import { openWatchPanel } from "../watch";
 import { stockSearch, type StockSearchHandle } from "../searchbox";
 import { refreshSparksIn, sparkSvg } from "../sparks";
-import { TRENDS, mountKline, setTrendPalette, trendPaletteKey, IND_DEFS, IND_BY_KEY, type KlineChartHandle, type MainKey, type SubKey } from "./kline";
+import { TRENDS, mountKline, setTrendPalette, trendPaletteKey, IND_DEFS, IND_CATS, IND_BY_KEY, type KlineChartHandle, type MainKey, type SubKey } from "./kline";
 
 export const SEG6 = ["超卖", "低位", "弱势", "回升", "强势", "超买"];
 
@@ -83,7 +83,7 @@ function readCustomPresets(): Record<string, Preset> {
   } catch { /* 坏值忽略 */ }
   return {};
 }
-/** ★ 常用指标（常显设置）：localStorage 持久化，坏键/缺失回退默认六项 */
+/** ★ 常显指标（工具栏两行只渲染这个集合）：localStorage 持久化，坏键/缺失回退默认六项 */
 const IND_FAV_DEF = ["ma", "boll", "vol", "macd", "kdj", "rsi"];
 function readIndFavs(): string[] {
   try {
@@ -92,17 +92,8 @@ function readIndFavs(): string[] {
   } catch { /* 无值/坏值走默认 */ }
   return [...IND_FAV_DEF];
 }
-/** 工具栏常显指标按钮组（策影同款）：直接可点一键显影，与面板勾选同源；★ 在面板里增删常显集合 */
-function renderFavBar(): void {
-  const bar = document.getElementById("kl-favbar");
-  if (!bar) return;
-  const mset = new Set(mk.mainInds), sset = new Set(mk.subInds);
-  bar.innerHTML = readIndFavs().map((k) => {
-    const d = IND_BY_KEY[k];
-    if (!d) return "";
-    const on = (d.where === "main" ? mset : sset).has(k);
-    return `<button data-fk="${k}" class="${on ? "on" : ""}" title="${esc(d.desc)}（${d.where === "main" ? "主图" : "副图"}）· 在指标面板点 ★ 调整常显">${d.label}</button>`;
-  }).join("");
+function writeIndFavs(favs: string[]): void {
+  localStorage.setItem("yc_indfav", JSON.stringify([...new Set(favs)]));
 }
 /** 应用方案：过滤合法键 → 写状态 → 持久化 → K 线与面板同步（所见即所得） */
 function applyPreset(p: Preset): void {
@@ -426,25 +417,17 @@ export function initMarket(): void {
   });
   document.addEventListener("click", (e) => {
     if (!ipanel.hidden && !(e.target as HTMLElement).closest("#kl-ipanel,#kl-ipanel-btn")) ipanel.hidden = true;
+    // 「更多」面板：点击面板与「＋更多」按钮之外的区域时关闭
+    const more = document.getElementById("kl-more");
+    if (more && !more.hidden && !(e.target as HTMLElement).closest("#kl-more,#kl-indbar")) more.hidden = true;
   });
-  // 工具栏常显指标按钮组（策影同款）：点击即切换显影，与面板勾选同源
-  document.getElementById("kl-favbar")!.addEventListener("click", (e) => {
-    const b = (e.target as HTMLElement).closest<HTMLButtonElement>("button[data-fk]");
-    if (!b) return;
-    const k = b.dataset.fk!, d = IND_BY_KEY[k];
-    if (!d) return;
-    if (d.where === "main") {
-      const s = new Set(mk.mainInds);
-      s.has(k) ? s.delete(k) : s.add(k);
-      mk.mainInds = [...s];
-    } else {
-      const s = new Set(mk.subInds);
-      s.has(k) ? s.delete(k) : s.add(k);
-      mk.subInds = [...s];
+  // 更多面板搜索：输入即过滤（列表重渲染保住焦点）；Esc 清空
+  document.querySelector<HTMLInputElement>("#kl-more input")?.addEventListener("input", () => renderIndMore());
+  document.querySelector<HTMLInputElement>("#kl-more input")?.addEventListener("keydown", (e) => {
+    if (e.key === "Escape") {
+      (e.target as HTMLInputElement).value = "";
+      renderIndMore();
     }
-    saveKPrefs();
-    syncIndUI();
-    renderKline();
   });
   // 图表整体高度拖拽（footbar 上缘手柄）：向下拖增高，双击恢复默认；高度持久化
   const vgrip = document.getElementById("kl-vgrip")!;
@@ -520,13 +503,41 @@ export function initMarket(): void {
       notifyLocal("prefs");
       return;
     }
-    if (t.closest("i[data-fav]")) {                        // ★ 常显标：切换收藏，不影响显影
+    if (b.dataset.more) {                                  // 「＋更多」：开合配置面板
+      const more = document.getElementById("kl-more")!;
+      more.hidden = !more.hidden;
+      if (!more.hidden) {
+        renderIndMore();
+        more.querySelector<HTMLInputElement>("input")?.focus();
+      }
+      return;
+    }
+    if (t.closest("i[data-fav]")) {                        // ★ 常显标：切换常显集合，不影响当前显影
       const k = t.closest("i")!.dataset.fav!;
       const favs = new Set(readIndFavs());
       if (favs.has(k)) favs.delete(k); else favs.add(k);
-      localStorage.setItem("yc_indfav", JSON.stringify([...favs]));
+      writeIndFavs([...favs]);
       renderIpanel();
-      renderFavBar();
+      return;
+    }
+    if (t.dataset.xshow || t.closest("i[data-xshow]")) {   // chip 悬停 ×：移出常显（显影不变）
+      const k = ((t.closest<HTMLElement>("i[data-xshow]") ?? t) as HTMLElement).dataset.xshow;
+      if (k) {
+        writeIndFavs(readIndFavs().filter((x) => x !== k));
+        renderIndBar();
+      }
+      return;
+    }
+    // 更多面板行（.imr）：整行点击 = 显影切换
+    const imr = t.closest<HTMLElement>(".imr[data-mi], .imr[data-si]");
+    if (imr) {
+      const k = imr.dataset.mi ?? imr.dataset.si!;
+      const s = new Set(imr.dataset.mi ? mk.mainInds : mk.subInds);
+      s.has(k) ? s.delete(k) : s.add(k);
+      if (imr.dataset.mi) mk.mainInds = [...s]; else mk.subInds = [...s];
+      saveKPrefs();
+      syncIndUI();
+      renderKline();
       return;
     }
     const group = b.dataset.mi ? "main" : "sub";
@@ -542,6 +553,7 @@ export function initMarket(): void {
   };
   ipanel.addEventListener("click", indClick);
   document.getElementById("kl-indbar")!.addEventListener("click", indClick);
+  document.getElementById("kl-more")!.addEventListener("click", indClick);
   window.addEventListener("resize", () => {
     clearTimeout((window as unknown as { _rz?: number })._rz);
     (window as unknown as { _rz?: number })._rz = window.setTimeout(() => {
@@ -651,14 +663,14 @@ function syncIndUI(): void {
     x.classList.toggle("on", x.dataset.tpl === key));
   document.querySelectorAll<HTMLElement>(`${sel} button[data-mi='short'],${sel} button[data-mi='mid']`)
     .forEach((x) => x.style.setProperty("--ic", x.dataset.mi === "short" ? pal.fast : pal.slow));
-  renderFavBar();
+  renderIndBar();
+  renderIndMore();
 }
 
 /** 指标渲染：常显两行（主图叠加 / 副图窗格）+ 方案浮层（内置+自定义+存为方案）+ ★常用标 */
 function renderIpanel(): void {
   const pres = document.getElementById("ip-presets");
-  const inds = document.getElementById("ip-inds");
-  if (!pres || !inds) return;
+  if (!pres) return;
   const custom = readCustomPresets();
   const sig = JSON.stringify([mk.mainInds, mk.subInds]);
   const on = (p: Preset) => (JSON.stringify([p.main, p.sub]) === sig ? ' class="on"' : "");
@@ -668,19 +680,53 @@ function renderIpanel(): void {
       `<span class="chipx"><button data-pre="${esc(n)}" title="应用自定义方案${esc(n)}"${on(p)}>${esc(n)}</button><i data-pdel="${esc(n)}" title="删除方案">×</i></span>`))
     .concat(['<button class="psave" data-psave="1" title="把当前主/副图指标组合保存为自定义方案">＋存方案</button>']);
   pres.innerHTML = `<span class="ipk">方案</span>${chips.join("")}`;
+  renderIndBar();
+  renderIndMore();
+}
+
+/** 分类色点：chip/更多列表共用（分类归属一眼可辨） */
+const CAT_IC: Record<string, string> = { main: "#FF9F43", trend: "#F2C94C", mom: "#4DD0E1", vol: "#EF5350", swing: "#7E57C2", volat: "#26C6DA" };
+
+/** 常显两行（#ip-inds）：只渲染 yc_indfav 常显集合；chip 点击=显影切换、悬停 × =移出常显；
+ *  副图行尾「＋更多」开配置面板（搜索 + 全量 33 指标）。 */
+function renderIndBar(): void {
+  const inds = document.getElementById("ip-inds");
+  if (!inds) return;
+  const mset = new Set(mk.mainInds), sset = new Set(mk.subInds);
+  const favs = readIndFavs();
+  const chipOf = (d: (typeof IND_DEFS)[number]) =>
+    `<button style="--ic:${CAT_IC[d.cat] || "transparent"}" data-${d.where === "main" ? "mi" : "si"}="${d.key}" title="${esc(d.desc)}（${d.where === "main" ? "主图" : "副图"}）· 点击显影/隐藏" ${(d.where === "main" ? mset : sset).has(d.key) ? 'class="on"' : ""}>${d.label}` +
+    `<i class="x" data-xshow="${d.key}" title="移出常显（不影响当前显影）">×</i></button>`;
+  const main = favs.map((k) => IND_BY_KEY[k]).filter((d) => d?.where === "main");
+  const sub = favs.map((k) => IND_BY_KEY[k]).filter((d) => d?.where === "sub");
+  const hint = `<span class="ipempty">在「＋更多」里勾选 ★ 常显</span>`;
+  inds.innerHTML =
+    `<div class="iprow"><span class="ipk">主图</span>${main.map(chipOf).join("") || hint}</div>` +
+    `<div class="iprow"><span class="ipk">副图</span>${sub.map(chipOf).join("") || hint}` +
+    `<button class="imore-open" data-more="1" title="全部指标：搜索 / 配置常显 / 临时叠加">＋更多</button></div>`;
+}
+
+/** 更多面板列表（#kl-more-list）：搜索过滤 + 分类分组；点行=显影切换，★=常显切换。
+ *  搜索框/底注是 index.html 静态壳，这里只填列表（保住输入焦点）。 */
+function renderIndMore(): void {
+  const list = document.getElementById("kl-more-list");
+  if (!list) return;
+  const q = (document.querySelector<HTMLInputElement>("#kl-more input")?.value || "").trim().toLowerCase();
   const mset = new Set(mk.mainInds), sset = new Set(mk.subInds);
   const favs = new Set(readIndFavs());
-  const CAT_IC: Record<string, string> = { main: "#FF9F43", trend: "#F2C94C", mom: "#4DD0E1", vol: "#EF5350", swing: "#7E57C2", volat: "#26C6DA" };
-  const chipOf = (d: (typeof IND_DEFS)[number]) =>
-    `<button style="--ic:${CAT_IC[d.cat] || "transparent"}" data-${d.where === "main" ? "mi" : "si"}="${d.key}" title="${esc(d.desc)}"${(d.where === "main" ? mset : sset).has(d.key) ? ' class="on"' : ""}>${d.label}` +
-    `<i class="star${favs.has(d.key) ? " on" : ""}" data-fav="${d.key}" title="${favs.has(d.key) ? "取消常显" : "常显：加入工具栏★常用菜单"}">★</i></button>`;
-  // 常显两行：主图一行（叠加在 K 线上）+ 副图一行（每指标独立窗格）；
-  // 分类归属靠 chip 左侧色点（--ic）区分，不再按分类纵向分行
-  const mainDefs = IND_DEFS.filter((d) => d.where === "main");
-  const subDefs = IND_DEFS.filter((d) => d.where === "sub");
-  inds.innerHTML =
-    `<div class="iprow"><span class="ipk">主图</span>${mainDefs.map(chipOf).join("")}</div>` +
-    `<div class="iprow"><span class="ipk">副图</span>${subDefs.map(chipOf).join("")}</div>`;
+  const hit = (d: (typeof IND_DEFS)[number]) =>
+    !q || d.label.toLowerCase().includes(q) || d.desc.toLowerCase().includes(q) || d.key.includes(q) || d.kc.toLowerCase().includes(q);
+  const row = (d: (typeof IND_DEFS)[number]) => {
+    const isOn = (d.where === "main" ? mset : sset).has(d.key);
+    return `<div class="imr${isOn ? " on" : ""}" data-${d.where === "main" ? "mi" : "si"}="${d.key}" title="${esc(d.desc)} · 点击${isOn ? "移除显影" : "叠加显影"}">` +
+      `<i class="dot" style="--ic:${CAT_IC[d.cat] || "transparent"}"></i><b>${d.label}</b>` +
+      `<span class="im-desc">${esc(d.desc)}</span>` +
+      `<i class="star${favs.has(d.key) ? " on" : ""}" data-fav="${d.key}" title="${favs.has(d.key) ? "取消常显" : "常显到工具栏"}">★</i></div>`;
+  };
+  list.innerHTML = IND_CATS.map(({ cat, label }) => {
+    const defs = IND_DEFS.filter((d) => d.cat === cat && hit(d));
+    return defs.length ? `<div class="im-cat">${label}</div>${defs.map(row).join("")}` : "";
+  }).join("") || `<div class="im-none">没有匹配「${esc(q)}」的指标</div>`;
 }
 
 /** 日线聚合为周/月 */

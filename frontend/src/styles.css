@@ -174,7 +174,7 @@ svg{display:block}
 .phead2 .sub{font-size:11px;color:var(--faint)}
 .phead2 .sp{flex:1}
 .chartbox{background:var(--panel);border:1px solid var(--border);border-radius:10px;overflow:hidden;
-  display:flex;flex-direction:column;min-height:0}
+  display:flex;flex-direction:column;min-height:0;position:relative}
 .chartbar{display:flex;align-items:center;gap:8px;padding:7px 12px;border-bottom:1px solid var(--border);min-height:42px}
 /* 图表底部控制条（策影双层布局）：布局/档位/缩放/加自选移至底部，顶栏只留周期+指标 */
 /* 图表整体高度拖拽手柄：footbar 上缘细横条，hover 变亮提示可拖 */
@@ -493,6 +493,37 @@ body.mobile .rcard .cbar{opacity:1}
 .kl-ipanel.ip-inline{position:static;z-index:auto;background:none;border:0;border-radius:0;
   box-shadow:none;padding:4px 8px;max-width:none;gap:3px;flex:none;
   border-bottom:1px solid var(--border-soft);overflow-x:auto;scrollbar-width:thin}
+/* 常显两行：chip 悬停 ×（移出常显）与空提示 */
+.kl-ipanel.ip-inline .iprow button .x{display:none;margin-left:3px;color:var(--faint);font-style:normal;font-size:11px}
+.kl-ipanel.ip-inline .iprow button:hover .x{display:inline}
+.kl-ipanel.ip-inline .iprow button .x:hover{color:var(--down)}
+.kl-ipanel.ip-inline .ipempty{font-size:10px;color:var(--faint);line-height:19px}
+.more-open,.imore-open{flex:none;color:var(--accent);font-size:11px;padding:1.5px 8px}
+.more-open:hover,.imore-open:hover{border-color:var(--accent)}
+/* 「更多」指标配置面板：搜索 + 分类分组列表（chartbox 内浮层） */
+.kl-more{position:absolute;z-index:70;top:66px;left:8px;width:340px;max-width:calc(100% - 16px);
+  max-height:min(420px,60%);display:flex;flex-direction:column;background:var(--panel);
+  border:1px solid var(--border);border-radius:11px;box-shadow:var(--shadow);overflow:hidden}
+.kl-more[hidden]{display:none!important}
+.kl-more .im-search{padding:8px 10px;border-bottom:1px solid var(--border-soft)}
+.kl-more .im-search input{width:100%;box-sizing:border-box;padding:5px 9px;border-radius:8px;
+  border:1px solid var(--border-soft);background:var(--panel-2);color:var(--text);font-size:12px;outline:none}
+.kl-more .im-search input:focus{border-color:var(--accent)}
+.kl-more .im-list{flex:1;min-height:0;overflow-y:auto;padding:4px 6px 8px}
+.im-cat{padding:8px 6px 3px;font-size:10px;font-weight:700;color:var(--faint);letter-spacing:.5px}
+.imr{display:flex;align-items:center;gap:7px;padding:4px 7px;border-radius:7px;cursor:pointer;font-size:12px}
+.imr:hover{background:var(--panel-3)}
+.imr.on{background:var(--accent-soft)}
+.imr .dot{flex:none;width:7px;height:7px;border-radius:50%;background:var(--ic,transparent)}
+.imr b{flex:none;font-size:11.5px;color:var(--text);font-weight:600;min-width:52px}
+.imr .im-desc{flex:1;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;
+  font-size:10.5px;color:var(--faint)}
+.imr .star{flex:none;font-style:normal;font-size:12px;color:var(--faint);opacity:.45;padding:2px 3px}
+.imr .star:hover{opacity:1}
+.imr .star.on{color:#F2C94C;opacity:1}
+.im-none{padding:18px 10px;text-align:center;font-size:11px;color:var(--faint)}
+.kl-more .im-foot{flex:none;padding:6px 10px;border-top:1px solid var(--border-soft);
+  font-size:10px;color:var(--faint)}
 .kl-stage .legend{position:absolute;top:10px;right:68px;z-index:6;pointer-events:none;
   justify-content:flex-end;background:color-mix(in srgb,var(--panel) 72%,transparent);
   padding:3px 9px;border-radius:8px;backdrop-filter:blur(6px);-webkit-backdrop-filter:blur(6px)}
