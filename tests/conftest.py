@@ -131,12 +131,8 @@ def _freeze_realtime(monkeypatch):
 def client(duckdb_file, monkeypatch):
     from fastapi.testclient import TestClient
 
-    from app.foundation import db as fdb
-
-    fdb.close_all()
     monkeypatch.setattr(settings, "duckdb_path", duckdb_file)
     from app.main import app
 
     with TestClient(app) as c:
         yield c
-    fdb.close_all()

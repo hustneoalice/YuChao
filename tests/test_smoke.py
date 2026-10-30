@@ -199,13 +199,10 @@ def test_data_not_ready_503(tmp_path, monkeypatch):
     from fastapi.testclient import TestClient
 
     from app.config import settings
-    from app.foundation import db as fdb
 
-    fdb.reset_conn()
     monkeypatch.setattr(settings, "duckdb_path", tmp_path / "missing.duckdb")
     from app.main import app
 
     with TestClient(app) as c:
         r = c.get("/api/v1/data/status")
         assert r.status_code == 503 and r.json()["code"] == "data_not_ready"
-    fdb.reset_conn()

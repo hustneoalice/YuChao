@@ -12,7 +12,7 @@ from ...auth.deps import current_user, require_vip, resolve_token
 from ...contracts.common import Pool
 from ...contracts.corepicks import Corepick, CorepickFactors
 from ...foundation import repo
-from ...foundation.db import get_conn
+from ...foundation.db import get_conn, open_conn
 
 router = APIRouter(tags=["corepicks"])
 
@@ -38,6 +38,12 @@ def corepick_factors(
     token: str | None = Depends(resolve_token),
 ):
     require_vip(current_user(token))
-    conn = get_conn()
-    data = repo.corepicks.get_factors(conn, symbol, date, pool.value)
+    conn = open_conn()
+    try:
+        data = repo.corepicks.get_factors(conn, symbol, date, pool.value)
+    finally:
+        try:
+            conn.close()
+        except Exception:
+            pass
     return TypeAdapter(CorepickFactors).validate_python(data)

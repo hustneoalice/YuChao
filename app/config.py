@@ -15,6 +15,7 @@ class Settings(BaseSettings):
     control_requests_path: Path = Path(__file__).resolve().parent.parent / "data" / "control_requests.jsonl"
     scheduler_enabled: bool = True          # updater 进程内 APScheduler 开关
     control_poll_s: float = 2.0             # 控制请求轮询间隔
+    selfheal_ledger_path: Path = Path(__file__).resolve().parent.parent / "data" / "selfheal_ledger.json"
 
     # M3 用户态 / license（SQLite，按账户隔离，与行情底座分库）
     userdb_path: Path = Path(__file__).resolve().parent.parent / "data" / "users.sqlite3"

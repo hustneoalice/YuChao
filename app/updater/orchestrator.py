@@ -153,6 +153,9 @@ class UpdateOrchestrator:
         self._loaded = False
         self._last_persist = 0.0
         self.cooldown_s = 600
+        # 自愈挂点：落账后通知 Selfheal.on_record（updater 进程 __main__ 注入；
+        # API 进程不 import selfheal，恒为 None）
+        self.on_record = None
         self.snapshot_path = Path(snapshot_path or settings.update_snapshot_path)
         self.bus = bus or StreamBus(settings.stream_events_path)
 
@@ -277,7 +280,19 @@ class UpdateOrchestrator:
                 self._wake.wait(timeout=5)
                 self._wake.clear()
                 continue
-            self._run_task(tid)
+            try:
+                self._run_task(tid)
+            except Exception:
+                # 任务级异常已在 _run_task 内收口；这里兜底防线程死亡
+                # （worker 一死队列冻结、running 状态永远悬挂——2026-10-30 教训）
+                logger.exception("[Orchestrator] 任务执行框架异常（worker 存活）")
+                with self._lock:
+                    self._running_id = None
+                    t = self._tasks.get(tid)
+                    if t is not None and t.status == "running":
+                        t.status = "failed"
+                        t.error = (t.error or "internal worker error")[:300]
+                writer.reset()
 
     def _run_task(self, task_id: str):
         with self._lock:
@@ -382,13 +397,25 @@ class UpdateOrchestrator:
             )
         self._persist(force=True)
 
-        # 落账：任何一次触发都必须在 update_log 留一行（1.0 record_update 语义）
+        # 落账：任何一次触发都必须在 update_log 留一行（1.0 record_update 语义）。
+        # 落账失败只告警、绝不外抛——2026-10-30 实测：写锁等待耗尽时这里抛异常
+        # 会杀死 worker 线程，队列里剩余任务永远无人消费且 writer.reset() 被跳过。
         if t is not None:
-            writer.record_update(
-                data_type=t.kind, status=t.status, rows=t.rows,
-                error=t.error, detail=t.detail or t.message,
-                duration_s=float(t.elapsed_s() or 0), trigger=t.trigger,
-            )
+            try:
+                writer.record_update(
+                    data_type=t.kind, status=t.status, rows=t.rows,
+                    error=t.error, detail=t.detail or t.message,
+                    duration_s=float(t.elapsed_s() or 0), trigger=t.trigger,
+                )
+            except Exception:
+                logger.error("[Orchestrator] 落账失败（update_log 缺一行）",
+                             exc_info=True)
+            # 自愈心跳记账（失败重试 / 链位补偿的判定依据）
+            if self.on_record:
+                try:
+                    self.on_record(t.kind, t.status, t.error)
+                except Exception:
+                    logger.debug("[Orchestrator] on_record 回调失败", exc_info=True)
         # 释放写锁：DuckDB 写连接是排他的——持有期间连 read_only 连接都会被拒，
         # API 进程将完全不可用。锁只在任务执行窗口持有，空闲期让位给 API。
         writer.reset()

@@ -15,6 +15,8 @@ from ...config import settings
 from ...errors import invalid_param
 from ...foundation import repo
 from ...foundation.db import get_conn
+from ...foundation.repo.health import assess as health_assess
+from ...foundation.repo.health import updater_alive
 from ...stream.bus import ControlRequests
 from ...updater import registry
 
@@ -103,26 +105,8 @@ def update_state():
 
 
 def _updater_alive(max_age_s: float = 20.0) -> bool:
-    """updater 心跳探测：进度快照 saved_at 距今 < 20s 视为在线。
-
-    控制通道请求在 updater 停机期间写入的行重启后被 offset 跳过（不重放），
-    即静默丢失——提交前必须探测，不在线要明确 503，而不是让用户等一个
-    永远不会执行的任务。快照由编排器持续刷新（空闲也每 ~5s 落一次）。
-    """
-    try:
-        snap = json.loads(settings.update_snapshot_path.read_text(encoding="utf-8"))
-        saved = snap.get("saved_at")
-        if not saved:
-            return False
-        from datetime import datetime
-        t = datetime.fromisoformat(str(saved).replace("Z", "+00:00"))
-        age = (datetime.now(tz=t.tzinfo or None) - t).total_seconds() \
-            if t.tzinfo else (datetime.now() - t).total_seconds()
-        return 0 <= age < max_age_s
-    except FileNotFoundError:
-        return False
-    except Exception:
-        return False
+    """deprecated shim：判定逻辑收编至 foundation/repo/health.updater_alive。"""
+    return updater_alive()
 
 
 @router.get("/data/updates", summary="更新落账查询（updater 写入的 update_log）")
@@ -189,4 +173,90 @@ def export(body: ExportTrigger):
         "request_id": rid,
         "out_dir": out_dir,
         "note": "导出与更新互斥（编排器排队）；产物 yuchao_data_*.duckdb + .manifest.json",
+    }
+
+
+# ---------------------------------------------------------------------------
+# P1 数据底座三件套：体检评估 + 一键修复
+# ---------------------------------------------------------------------------
+
+@router.get("/data/health", summary="数据体检评估（新鲜度/覆盖率/断档/落账 → 综合分）")
+def health(conn=Depends(get_conn)):
+    """四维打分 0-100，分级 healthy/warn/poor；issues 带修复动作建议。
+
+    写锁持有期间只读连接会被拒（DuckDB 跨进程互斥）——此时返回
+    unavailable=true 而非 500，前端展示「体检暂时不可用，任务结束后重试」。
+    """
+    try:
+        report = health_assess(conn)
+    except Exception:
+        return {"unavailable": True,
+                "note": "DuckDB 写锁持有中（更新任务执行窗口），体检稍后自动恢复",
+                "updater_alive": updater_alive()}
+    report["selfheal"] = _selfheal_snapshot()
+    return report
+
+
+def _selfheal_snapshot() -> dict:
+    """自愈账本快照（data/selfheal_ledger.json，updater 进程维护，这里只读）。"""
+    try:
+        return json.loads(
+            settings.selfheal_ledger_path.read_text(encoding="utf-8"))
+    except FileNotFoundError:
+        return {}
+    except Exception:
+        return {}
+
+
+@router.post("/data/repair", status_code=202,
+             summary="一键修复：按体检结果生成修复计划并经控制通道提交")
+def repair():
+    """体检 → 生成 actions（新鲜度落后→补触发对应任务、断档→历史回补、
+    失败落账→force 重试）→ 逐条落控制通道交 updater 执行（与手动触发
+    同一链路，编排器去重/冷却兜底）。一次最多提交 4 个动作（队列串行）。"""
+    if not _updater_alive():
+        raise HTTPException(
+            status_code=503,
+            detail="更新进程未运行（修复请求不会被消费）— 启动：python -m app.updater")
+    from ...foundation.db import open_conn
+    conn = open_conn()
+    try:
+        report = health_assess(conn)
+    except Exception as e:
+        raise HTTPException(status_code=503,
+                            detail=f"体检暂不可用（写锁持有中），请稍后重试：{e}")
+    finally:
+        try:
+            conn.close()
+        except Exception:
+            pass
+
+    actions: list[dict] = []
+    seen: set[str] = set()
+    for it in report.get("issues", []):
+        act = it.get("action")
+        if not act or act["kind"] in seen:
+            continue
+        seen.add(act["kind"])
+        actions.append({"kind": act["kind"], "force": bool(act.get("force")),
+                        "reason": it["message"]})
+        if len(actions) >= 4:
+            break
+    if not actions:
+        return {"accepted": True, "submitted": [], "plan": [],
+                "message": f"体检 {report['score']} 分（{report['grade']}），无需修复"}
+
+    submitted = []
+    for act in actions:
+        try:
+            rid = ControlRequests(settings.control_requests_path).submit(
+                act["kind"], force=act["force"])
+            submitted.append({**act, "request_id": rid})
+        except Exception as e:
+            submitted.append({**act, "error": str(e)})
+    return {
+        "accepted": True,
+        "submitted": submitted,
+        "score": report["score"],
+        "note": "updater 进程约 2s 内消费；执行结果以 GET /data/updates 与体检复评（GET /data/health）为准",
     }

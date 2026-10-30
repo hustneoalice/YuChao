@@ -3,8 +3,14 @@
 进程模型（设计文档 03/05 节）：
   - API 进程对 DuckDB 一律 READ_ONLY 挂载（DuckDB 多进程只允许全 read_only），
     写全部收敛进 updater 进程（M1 暂单进程只读跑通，updater 属 M2）。
-  - 连接按线程缓存：FastAPI 同步端点跑在线程池里，DuckDB 连接非线程安全，
-    每线程一条只读连接，读与读互不排队。
+  - 连接生命周期：每请求新建、读完即关（get_conn 生成器依赖 + finally close）。
+
+为什么是「每请求开关」而不是「线程缓存 + 空闲 reaper」（2026-10-30 实测教训）：
+  看盘工具永远在被前端轮询（行情/状态每 3s 一次），线程缓存连接的
+  「空闲 90s 让锁」被轮询无限刷新——updater 写连接重试 150s 仍拿不到锁，
+  增量更新永远失败。改为每请求开关后，请求间隙天然存在无锁窗口
+  （连接仅存活毫秒级），updater 的 3s 重试必能拿到写锁；
+  代价是每请求一次 connect 开销（实测 ~10ms 量级，单用户 QPS 下可忽略）。
 
 复权口径（自 1.0 database.py 原样继承，单处定义）：
   - 底层 daily_ohlcv 一律存不复权原始价；
@@ -12,7 +18,6 @@
     由 PRICE_VIEW_DDL 中的 ASOF 派生视图实现；
   - 无因子品种（指数等）由 COALESCE 自动退化为原始价。
 """
-import threading
 from pathlib import Path
 
 import duckdb
@@ -84,101 +89,50 @@ def source_for(adjust: str) -> str:
     return _ADJUST_VIEW[adjust]
 
 
-_local = threading.local()
-
 # -- 跨进程锁协调 -----------------------------------------------------------
-# DuckDB 跨进程：一个写者 或 多个读者，互斥。API 的只读连接若常驻持有共享锁，
-# updater 的写连接永远拿不到锁（真实踩坑：uvicorn 活着 → updater 起不来 →
-# 自动更新失效）。因此：① 空闲连接由 reaper 自动关闭让锁；② 连接失败短重试
-# 等待对方释放（updater 写任务限时，API 读重试足以等到写锁释放）。
-_IDLE_CLOSE_S = 90.0     # 只读连接空闲超时（超过即关闭让锁）
+# DuckDB 跨进程：一个写者 或 多个读者，互斥。API 只读连接若跨请求常驻持有
+# 共享锁，updater 的写连接永远拿不到锁（真实踩坑两轮：① uvicorn 常驻连接
+# → updater 起不来；② 线程缓存 + 空闲 reaper → 被前端 3s 轮询钉死 → 增量
+# 更新 150s 重试耗尽）。因此：① 连接每请求开关（见模块 docstring）；
+# ② 连接失败短重试等待写锁释放（updater 写任务限时，API 读重试足以等到）。
 _READ_RETRY = (2.0, 12)  # 读连接被写锁挡住：间隔 2s × 至多 12 次（覆盖写任务尾段）
-_registry: dict[int, tuple[duckdb.DuckDBPyConnection, float]] = {}
-_registry_lock = threading.Lock()
-_reaper_started = False
-
-
-def _start_reaper() -> None:
-    global _reaper_started
-    with _registry_lock:
-        if _reaper_started:
-            return
-        _reaper_started = True
-
-    def _reap() -> None:
-        import time
-        while True:
-            time.sleep(15)
-            now = time.monotonic()
-            with _registry_lock:
-                for key in list(_registry):
-                    conn, used = _registry[key]
-                    if now - used > _IDLE_CLOSE_S and key != threading.get_ident():
-                        try:
-                            conn.close()
-                        except Exception:
-                            pass
-                        _registry.pop(key, None)
-
-    threading.Thread(target=_reap, daemon=True, name="duckdb-conn-reaper").start()
 
 
 class DataSourceMissing(RuntimeError):
     """DuckDB 文件不存在 —— API 进程只读挂载无法自建，需先初始化/导入数据包。"""
 
 
-def get_conn() -> duckdb.DuckDBPyConnection:
-    """当前线程的只读连接（懒建 + 空闲自动关闭，被写锁挡住时短重试）。"""
-    _start_reaper()
-    import time
-    key = threading.get_ident()
-    with _registry_lock:
-        entry = _registry.get(key)
-        if entry is not None:
-            _registry[key] = (entry[0], time.monotonic())
-            return entry[0]
+def open_conn() -> duckdb.DuckDBPyConnection:
+    """新建只读连接（被写锁挡住时短重试）。调用方负责 close()。
+
+    API 端点请用 get_conn（FastAPI 依赖，自动关闭）；
+    open_conn 供非请求上下文（后台任务、测试）显式管理连接时使用。
+    """
     path = Path(settings.duckdb_path)
     if not path.exists():
         raise DataSourceMissing(f"DuckDB 文件不存在：{path}")
+    import time
     gap, tries = _READ_RETRY
     for i in range(tries):
         try:
-            conn = duckdb.connect(str(path), read_only=True)
-            break
+            return duckdb.connect(str(path), read_only=True)
         except duckdb.IOException as e:      # 写锁持有中（updater 任务执行窗口）
             if "Could not set lock" not in str(e) or i == tries - 1:
                 raise
             time.sleep(gap)
-    with _registry_lock:
-        _registry[key] = (conn, time.monotonic())
-    return conn
+    raise duckdb.IOException("unreachable")  # 循环内必 return 或 raise
 
 
-def reset_conn() -> None:
-    """关闭当前线程连接（测试换库 / 换路径时用）。"""
-    key = threading.get_ident()
-    with _registry_lock:
-        entry = _registry.pop(key, None)
-    if entry is not None:
-        try:
-            entry[0].close()
-        except Exception:
-            pass
-    _local.conn = None
-
-
-def close_all() -> None:
-    """关闭所有线程的只读连接（测试隔离：线程池线程的连接会跨测试残留，
-    仅 reset_conn 当前线程不够——连接指向旧路径的库，读到脏数据）。"""
-    with _registry_lock:
-        entries = list(_registry.values())
-        _registry.clear()
-    for conn, _used in entries:
+def get_conn():
+    """FastAPI 依赖：每请求一条只读连接，请求结束即关（让锁给 updater）。"""
+    conn = open_conn()
+    try:
+        yield conn
+    finally:
         try:
             conn.close()
         except Exception:
             pass
-    _local.conn = None
 
 
 def ensure_schema(conn: duckdb.DuckDBPyConnection) -> None:

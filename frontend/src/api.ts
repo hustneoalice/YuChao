@@ -175,6 +175,27 @@ export interface DataStatus {
   tables: { table: string; rows?: number; latest_date?: string; coverage?: number | null }[];
   generated_at: string;
 }
+/* P1 体检报告（/data/health）：四维打分 + 分级 + 带修复动作的问题清单 */
+export interface HealthReport {
+  score: number;
+  grade: "healthy" | "warn" | "poor";
+  freshness: { score: number; items: { table: string; kind: string; latest?: string | null; expected?: string | null; lag_days: number; score: number; lenient?: boolean }[] };
+  coverage: { score: number; items: { table: string; latest?: string | null; coverage?: number | null; score: number }[] };
+  gap: { score: number; items: { date: string; symbols: number; missing: boolean; drop: boolean }[] };
+  ledger: { score: number; updater_alive: boolean; failed_7d: { kind: string; failed: number }[] };
+  issues: { level: string; code: string; kind: string | null; message: string; action?: { kind: string; force: boolean } | null }[];
+  selfheal?: { date?: string; kinds?: Record<string, { ok_at?: string; fails?: number; retries?: number; error?: string }> };
+  generated_at: string;
+  unavailable?: boolean;
+  note?: string;
+}
+export interface RepairResult {
+  accepted: boolean;
+  submitted: { kind: string; force: boolean; reason: string; request_id?: string; error?: string }[];
+  message?: string;
+  score?: number;
+  note?: string;
+}
 export interface UpdateLogItem {
   run_id?: string; data_type?: string; status?: string; started_at?: string;
   finished_at?: string; rows?: number; message?: string; [k: string]: unknown;
@@ -203,6 +224,9 @@ export const dataApi = {
   cancel: () =>
     req<{ accepted: boolean; request_id: string }>("/data/update/cancel", { method: "POST", body: {} }),
   updates: (limit = 50) => req<{ items: UpdateLogItem[]; note?: string }>(`/data/updates?limit=${limit}`),
+  /* P1 体检评估 + 一键修复 */
+  health: () => req<HealthReport>("/data/health"),
+  repair: () => req<RepairResult>("/data/repair", { method: "POST", body: {} }),
 };
 
 /* ── license ── */

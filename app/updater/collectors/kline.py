@@ -75,6 +75,7 @@ def update_kline(progress=None, ctx=None) -> dict:
         event_rows = 0
         buf: list = []
         touched: list = []          # (symbol, last_bar) 供事件发布
+        consec_fail = 0             # 熔断计数：数据源硬不可用时快速中止
 
         for i, (sym, cut) in enumerate(pending):
             if cancel and cancel():
@@ -95,8 +96,25 @@ def update_kline(progress=None, ctx=None) -> dict:
             if not rows:
                 failed += 1
                 done += 1
+                consec_fail += 1
+                # 进度必须照报：失败路径若静默，前端进度条冻结在 0%，
+                # 看起来像任务卡死（2026-10-30 tx 501 + em 断连实测）。
+                if done % _COMMIT_EVERY == 0:
+                    progress(done=done, rows=rows_written,
+                             log=f"K线增量 [{done}/{len(pending)}] 失败 {failed}")
+                # 熔断：开头连续 40 只全失败 = 数据源硬不可用（封禁/断网），
+                # 逐个烧完 5665 只要 2 小时且结果注定全败——立即中止，
+                # 交给自愈退避重试（每次代价 30s 而不是 2 小时）。
+                if consec_fail >= 40 and done == consec_fail:
+                    result.update(status="failed",
+                                  error=f"数据源连续 {consec_fail} 只全失败，"
+                                        f"疑似不可用（封禁/断网），已熔断中止")
+                    result["detail"] = f"熔断于 {done}/{len(pending)}"
+                    logger.warning("[Kline] %s", result["error"])
+                    return result
                 continue
 
+            consec_fail = 0
             new = [r for r in rows if (cut is None or r["t"] > cut)]
             if new:
                 buf.extend((sym, r["t"], r["o"], r["h"], r["l"], r["c"],

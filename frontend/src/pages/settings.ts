@@ -1,5 +1,5 @@
 /* 设置页：数据底座（真实 API）· 外观 · VIP · 账户 · 规划中页签 */
-import { authApi, dataApi, type DataStatus, type UpdateLogItem, type UpdateSnapshot } from "../api";
+import { authApi, dataApi, type DataStatus, type HealthReport, type UpdateLogItem, type UpdateSnapshot } from "../api";
 import { esc, fmt } from "../fmt";
 import { ic } from "../icons";
 import { getState, patch, setUser, isVip } from "../store";
@@ -195,8 +195,96 @@ async function refreshUpState(): Promise<void> {
   bodyBox.innerHTML = parts.join("");
 }
 
+/* ── 数据体检（P1：四维打分 + 一键修复 + 自愈心跳摘要） ── */
+
+let healthTimer: ReturnType<typeof setInterval> | null = null;
+const stopHealthState = (): void => { if (healthTimer) { clearInterval(healthTimer); healthTimer = null; } };
+
+const GRADE: Record<string, [string, string, string]> = {
+  healthy: ["健康", "ok", "var(--down)"],
+  warn: ["需关注", "warn", "var(--warn)"],
+  poor: ["待修复", "bad", "var(--up)"],
+};
+
+/** 自愈心跳一句话摘要：账本里数今日完成 / 自动重试 / 待重试 */
+const selfhealSummary = (h: HealthReport): string => {
+  const kinds = Object.values(h.selfheal?.kinds ?? {});
+  if (!kinds.length) return "自愈心跳 · 今日无异常";
+  const ok = kinds.filter((k) => k.ok_at).length;
+  const retried = kinds.reduce((s, k) => s + (k.retries ?? 0), 0);
+  const pending = kinds.filter((k) => (k.fails ?? 0) > 0).length;
+  const seg = [`今日完成 ${ok} 项`];
+  if (retried) seg.push(`自动重试 ${retried} 次`);
+  if (pending) seg.push(`${pending} 项待重试`);
+  return "自愈心跳 · " + seg.join(" / ");
+};
+
+async function refreshHealth(): Promise<void> {
+  const box = document.getElementById("health-body");
+  const chip = document.getElementById("health-chip");
+  if (!box || !chip) { stopHealthState(); return; }
+  let h: HealthReport | null = null;
+  try { h = await dataApi.health(); } catch { /* 不可达保持原样 */ }
+  if (!h) return;
+  if (h.unavailable) {
+    chip.innerHTML = `<span class="upstat warn">稍后复评</span>`;
+    box.innerHTML = `<div style="font-size:12px;color:var(--dim)">${esc(h.note || "体检暂时不可用")}</div>`;
+    return;
+  }
+  const g = GRADE[h.grade] ?? GRADE.warn;
+  chip.innerHTML = `<span class="upstat ${g[1]}">${h.score} 分 · ${g[0]}</span>`;
+
+  const bar = (v: number, color: string): string =>
+    `<div class="upbar" style="height:4px;margin-top:4px"><i style="width:${Math.max(v, 2)}%;background:${color}"></i></div>`;
+  const dims: [string, number][] = [
+    ["新鲜度", h.freshness?.score ?? 0], ["覆盖率", h.coverage?.score ?? 0],
+    ["断档", h.gap?.score ?? 0], ["落账", h.ledger?.score ?? 0],
+  ];
+  const parts: string[] = [
+    `<div style="display:flex;align-items:center;gap:14px">` +
+    `<div style="flex:none;text-align:center"><div class="num" style="font-size:26px;font-weight:700;color:${g[2]};line-height:1.1">${h.score}</div>` +
+    `<div style="font-size:10.5px;color:var(--faint)">综合健康分</div></div>` +
+    `<div class="upstats" style="flex:1">` +
+    dims.map(([name, v]) => `<div><div class="k">${name}</div><div class="v num" style="color:${v >= 85 ? "var(--down)" : v >= 70 ? "var(--warn)" : "var(--up)"}">${v}</div>${bar(v, v >= 85 ? "var(--down)" : v >= 70 ? "var(--warn)" : "var(--up)")}</div>`).join("") +
+    `</div></div>`,
+    `<div class="uprow" style="font-size:11.5px">` +
+    `<i class="logdot ${h.ledger?.updater_alive ? "ok" : "bad"}"></i>` +
+    `<span style="color:var(--dim)">${h.ledger?.updater_alive ? "更新进程在线 · " + esc(selfhealSummary(h)) : "更新进程离线 — 自动更新与自愈停摆，启动：python -m app.updater"}</span></div>`,
+  ];
+  const issues = (h.issues ?? []).slice(0, 6);
+  if (issues.length)
+    parts.push(`<div style="display:flex;flex-direction:column;gap:5px">` +
+      issues.map((i) =>
+        `<div class="uprow" style="font-size:11.5px">` +
+        `<i class="logdot ${i.level === "error" ? "bad" : "warn"}"></i>` +
+        `<span style="color:var(--dim);overflow:hidden;text-overflow:ellipsis;white-space:nowrap">${esc(i.message)}</span>` +
+        (i.action ? `<span class="upstat info" style="font-size:10px">可修复</span>` : "") +
+        `</div>`).join("") + `</div>`);
+  else
+    parts.push(`<div style="font-size:12px;color:var(--down)">各项检查全部通过，数据底座状态良好。</div>`);
+  parts.push(`<div style="font-size:10.5px;color:var(--faint)">体检时间 ${(h.generated_at || "").replace("T", " ").slice(5, 19)} · 每 30 秒自动复评</div>`);
+  box.innerHTML = parts.join("");
+}
+
+async function repairNow(): Promise<void> {
+  try {
+    const r = await dataApi.repair();
+    if (r.submitted?.length) {
+      const labels = r.submitted.map((s) => DATA_TYPE_ZH[s.kind] || s.kind).join("、");
+      toast(`已提交 ${r.submitted.length} 项修复：${labels}`);
+      void refreshUpState();
+    } else {
+      toast(r.message || "底座健康，无需修复");
+    }
+    void refreshHealth();
+  } catch (e) {
+    toast((e as Error).message || "修复请求失败");
+  }
+}
+
 async function renderData(body: HTMLElement): Promise<void> {
   stopUpState();
+  stopHealthState();
   let st: DataStatus | null = null;
   let tasksR: Awaited<ReturnType<typeof dataApi.tasks>> | null = null;
   let logs: UpdateLogItem[] = [];
@@ -221,6 +309,12 @@ async function renderData(body: HTMLElement): Promise<void> {
     tasks.map((t) => `<button class="hbtn" data-run="${t.kind}" title="${esc(t.description)}">${esc(t.label)}</button>`).join("") +
     `</div></div>` +
     `<div style="font-size:10.5px;color:var(--faint)">平时不需要手动操作；手动更新会在后台执行，完成后页面数据自动刷新</div></div>` +
+    /* ①.5 数据体检（P1）：四维打分 + 自愈心跳摘要 + 问题清单 + 一键修复 */
+    `<div class="setsec"><div class="sh">${ic("database", 15)}<h3>数据体检</h3>` +
+    `<span id="health-chip" style="display:inline-flex"></span><span class="sp"></span>` +
+    `<button class="hbtn primary" id="health-repair" data-sz="13">一键修复</button></div>` +
+    `<div class="upcard" id="health-body"><span style="color:var(--faint);font-size:11.5px">正在体检…</span></div>` +
+    `<div style="font-size:10.5px;color:var(--faint);margin-top:8px">体检看四件事：数据新不新鲜、覆盖全不全、有没有断档、更新进程是否健康；发现的问题点「一键修复」自动补齐</div></div>` +
     /* ② 总览：散户关心的三件事 — 更新到哪了 / 有多少 / 要不要我管 */
     `<div class="setsec"><div class="sh">${ic("database", 15)}<h3>数据总览</h3><span class="sub">本地数据 · 自动维护，无需操作</span><span class="sp"></span>` +
     `<span class="datachip i-${stage[1] === "ok" ? "up" : stage[1] === "warn" ? "mid" : ""}"><i></i><span>${esc(stage[0])}</span></span></div>` +
@@ -282,6 +376,10 @@ async function renderData(body: HTMLElement): Promise<void> {
   });
   void refreshUpState();
   upTimer = setInterval(() => void refreshUpState(), 3000);
+  /* 数据体检：立即 + 30s 轮询；一键修复按钮（header 静态区，只绑一次） */
+  document.getElementById("health-repair")!.addEventListener("click", () => void repairNow());
+  void refreshHealth();
+  healthTimer = setInterval(() => void refreshHealth(), 30000);
 }
 
 /* ── 外观 ── */

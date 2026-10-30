@@ -40,12 +40,15 @@ def main() -> None:
 
     # 2. 注册任务 → 启动编排器工作线程（backplane：Redis 优先，缺省文件总线）
     from ..stream.bus import make_publisher
+    from .selfheal import Selfheal
     orchestrator.bus = make_publisher()
     for spec in TASKS:
         orchestrator.register(spec["kind"], spec["label"], resolve_fn(spec),
                               description=spec["description"])
     orchestrator.start()
-    logger.info("编排器就绪：%d 种任务", len(TASKS))
+    selfheal = Selfheal()
+    orchestrator.on_record = selfheal.on_record
+    logger.info("编排器就绪：%d 种任务（自愈心跳开启）", len(TASKS))
 
     # 3. 调度链
     sched = None
@@ -101,6 +104,7 @@ def main() -> None:
         _beat += 1
         if _beat % 3 == 0:                       # ~6s 空闲心跳，维持 saved_at
             orchestrator.heartbeat()
+        selfheal.tick(orchestrator)              # 内部节流 ~60s：失败重试 + 链位补偿
         stop.wait(settings.control_poll_s)
 
     if sched:

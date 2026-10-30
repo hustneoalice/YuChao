@@ -28,7 +28,8 @@ def build_scheduler(orchestrator, control: ControlRequests | None = None):
                       hour=h, minute=m, args=[orchestrator, kind],
                       id=f"cron:{kind}", replace_existing=True)
     for kind, h, m in WEEKLY:
-        sched.add_job(_cron_submit, "cron", day_of_week="sat",
+        # 周任务不走交易日守卫：周六本身非交易日，套用守卫 = 永不触发
+        sched.add_job(_cron_submit_weekly, "cron", day_of_week="sat",
                       hour=h, minute=m, args=[orchestrator, kind],
                       id=f"cron:{kind}", replace_existing=True)
     return sched
@@ -40,6 +41,14 @@ def _cron_submit(orchestrator, kind: str):
         # 采了只会给快照盖幽灵日期——1.0 2026-09-25 中秋实测教训）
         orchestrator.log_event(f"非交易日，跳过 {kind}", "info", kind=kind)
         return
+    _submit(orchestrator, kind)
+
+
+def _cron_submit_weekly(orchestrator, kind: str):
+    _submit(orchestrator, kind)
+
+
+def _submit(orchestrator, kind: str):
     r = orchestrator.submit(kind, trigger="cron")
     if r.get("ok"):
         logger.info("[Scheduler] 已触发 %s → task=%s", kind, r["task"]["id"])
