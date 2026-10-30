@@ -5,11 +5,14 @@
 """
 from __future__ import annotations
 
+import logging
 import time
 
 from ..util import expected_asof
 from ..writer import writer
 from . import sources
+
+logger = logging.getLogger("yuchao.updater")
 
 
 def update_quotes(progress=None, ctx=None) -> dict:
@@ -33,7 +36,7 @@ def update_quotes(progress=None, ctx=None) -> dict:
 
         conn = writer.conn()    # 抓完再拿锁，写完立即释放
         # 换手率：当日 daily_ohlcv 行的 turnover_rate 补写（K线车道不带换手率）
-        turn_rows = [(v[7], s) for s, v in raw.items()
+        turn_rows = [(v[7], s, day) for s, v in raw.items()
                      if v[7] is not None]
         n_turn = 0
         if turn_rows:

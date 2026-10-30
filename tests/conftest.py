@@ -133,6 +133,8 @@ def client(duckdb_file, monkeypatch):
     from fastapi.testclient import TestClient
 
     monkeypatch.setattr(settings, "duckdb_path", duckdb_file)
+    # 测试不启动内置更新内核（编排器/调度链/控制线程），保持夹具库只被请求只读访问
+    monkeypatch.setattr(settings, "api_embedded_updater", False)
     from app.main import app
 
     with TestClient(app) as c:

@@ -276,6 +276,10 @@ def test_data_not_ready_503(tmp_path, monkeypatch):
     from app.config import settings
 
     monkeypatch.setattr(settings, "duckdb_path", tmp_path / "missing.duckdb")
+    # 必须关内置内核：否则 lifespan 真启动调度链，已过点的 cron 任务被当
+    # misfire 立即补跑 → 泄漏的编排器线程在后续测试窗口真跑全市场采集
+    # （qt 夹具测试被第二个真实 URL 污染的 flake 根因）
+    monkeypatch.setattr(settings, "api_embedded_updater", False)
     from app.main import app
 
     with TestClient(app) as c:

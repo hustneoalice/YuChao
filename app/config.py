@@ -13,7 +13,8 @@ class Settings(BaseSettings):
     update_snapshot_path: Path = Path(__file__).resolve().parent.parent / "data" / "update_progress.json"
     stream_events_path: Path = Path(__file__).resolve().parent.parent / "data" / "stream_events.jsonl"
     control_requests_path: Path = Path(__file__).resolve().parent.parent / "data" / "control_requests.jsonl"
-    scheduler_enabled: bool = True          # updater 进程内 APScheduler 开关
+    scheduler_enabled: bool = True          # updater CLI 的 APScheduler 开关（api_embedded_updater=true 时 CLI 不启调度）
+    api_embedded_updater: bool = True       # 更新内核内置 API 进程（策影模式：编排器+调度+自愈并入 uvicorn）
     control_poll_s: float = 2.0             # 控制请求轮询间隔
     selfheal_ledger_path: Path = Path(__file__).resolve().parent.parent / "data" / "selfheal_ledger.json"
 

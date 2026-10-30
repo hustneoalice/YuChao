@@ -1,6 +1,10 @@
 """YuChao 数据底座 · FastAPI 装配。
 
-M1 进程模型：API 进程对 DuckDB 只读挂载；写（更新编排）属 M2 updater 进程。
+进程模型（2.1 起默认内置更新内核，api_embedded_updater=true）：
+  · 本进程同时承担 只读 API + 更新内核（编排器/调度链/自愈，见 updater/embedded）；
+    DuckDB 连接全部读写模式打开（同实例共享），无跨进程锁协调；
+  · 回退模式（YUCHAO_API_EMBEDDED_UPDATER=false）：本进程只读挂载，写属
+    独立 updater 进程（python -m app.updater）。
 """
 import logging
 from contextlib import asynccontextmanager
@@ -22,8 +26,22 @@ logger = logging.getLogger("yuchao")
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
-    logger.info("YuChao %s · duckdb=%s (read_only)", __version__, settings.duckdb_path)
+    logger.info("YuChao %s · duckdb=%s", __version__, settings.duckdb_path)
+    core = None
+    if settings.api_embedded_updater:
+        # 内置更新内核（编排器+调度链+自愈并入 uvicorn）。数据底座缺失时
+        # 降级纯只读 API（503 提示初始化），不拖死服务。
+        from .updater.embedded import start_core
+        try:
+            core = start_core(scheduler=True)
+            # 锚连接：并发每请求 connect 的 attach 竞态消除（见 db.hold_anchor）
+            from .foundation.db import hold_anchor
+            hold_anchor()
+        except FileNotFoundError as e:
+            logger.warning("内置更新内核未启动：%s", e)
     yield
+    if core:
+        core.shutdown()
 
 
 app = FastAPI(

@@ -320,20 +320,44 @@ def fetch_kline_em(code: str, count: int = 3000) -> List[Dict[str, Any]]:
 
 
 def fetch_kline_tx(code: str, count: int = 3200) -> List[Dict[str, Any]]:
-    """腾讯 fqkline 日线（不复权原始价）→ [{t,o,h,l,c,v,amount,...}]（备用车道）。
+    """腾讯 fqkline 日线（不复权原始价）→ [{t,o,h,l,c,v,amount,...}]（主车道）。
 
-    v 换算成股：科创板（688/689）腾讯原始即股，其余为手 ×100；amount 腾讯不
-    返回，写 None（涨跌幅由写库侧按前收盘补算）。"""
+    单车道内 4 个域名轮换（1.0 kline_lanes 教训：单端点被 WAF 拦会让全市场
+    增量「跑得飞快但一个都写不进去」）。v 换算成股：科创板（688/689）腾讯
+    原始即股，其余为手 ×100；amount 腾讯不返回，写 None（涨跌幅由写库侧按
+    前收盘补算）。"""
     from .http import pure_of          # 局部导入避免环（fetch_kline_em 同款）
     tx = tx_symbol(code)
     if not tx:
         return []
-    url = "https://web.ifzq.gtimg.cn/appstock/app/fqkline/get"
-    data = get_json(url, {"param": f"{tx},day,,,{count},"},
-                    "https://gu.qq.com/", timeout=10)
+    param = {"param": f"{tx},day,,,{count},"}
+    data = None
+    for url, ref in _TX_KLINE_ENDPOINTS:      # 端点轮换：全部失败才抛
+        try:
+            data = get_json(url, param, ref, timeout=10)
+            break
+        except Exception:
+            continue
+    if data is None:
+        raise RuntimeError("腾讯 K 线全部端点不可用")
     stock = (data.get("data") or {}).get(tx) or {}
     klines = stock.get("day") or stock.get("qfqday") or []
-    sci = pure_of(code).startswith(("688", "689"))
+    return _tx_rows(pure_of(code), klines)
+
+
+#: 腾讯 K 线端点池（1.0 kline_lanes 同款四个域名；第一个走代理域名优先试）
+_TX_KLINE_ENDPOINTS = (
+    ("https://proxy.finance.qq.com/ifzqgtimg/appstock/app/newfqkline/get",
+     "https://gu.qq.com/"),
+    ("https://web.ifzq.gtimg.cn/appstock/app/kline/kline", "https://gu.qq.com/"),
+    ("https://ifzq.gtimg.cn/appstock/app/kline/kline", "https://gu.qq.com/"),
+    ("https://web.ifzq.gtimg.cn/appstock/app/fqkline/get", "https://gu.qq.com/"),
+)
+
+
+def _tx_rows(pure: str, klines: list) -> List[Dict[str, Any]]:
+    """腾讯 klines 数组 → 统一行；科创板单位为股、其余手 ×100。"""
+    sci = pure.startswith(("688", "689"))
     rows: List[Dict[str, Any]] = []
     for k in klines:
         if len(k) >= 6:
@@ -348,6 +372,37 @@ def fetch_kline_tx(code: str, count: int = 3200) -> List[Dict[str, Any]]:
                 })
             except (TypeError, ValueError):
                 continue
+    return rows
+
+
+def fetch_kline_sina(symbol: str, count: int = 3000) -> List[Dict[str, Any]]:
+    """新浪日线（scale=240 即日线，不复权原始价）→ 统一行（第二车道）。
+
+    1.0 实测：与腾讯互为备份（腾讯被 WAF 拦时全靠它兜住）；datalen=6000
+    一次可回到 2001 年；volume 单位为股（与库内一致）；**不返回成交额**
+    （amount 置 None，与腾讯 6 字段端点行为一致）；仅支持 sh/sz（北交所
+    无数据，自然落到下一车道）。"""
+    from .http import sina_symbol
+    daima = sina_symbol(symbol)
+    if not daima:
+        return []
+    data = get_json("https://money.finance.sina.com.cn/quotes_service/api/"
+                    "json_v2.php/CN_MarketData.getKLineData",
+                    {"symbol": daima, "scale": "240", "ma": "no",
+                     "datalen": str(max(1, min(int(count), 6000)))},
+                    "https://finance.sina.com.cn/", timeout=12)
+    rows: List[Dict[str, Any]] = []
+    for k in data or []:
+        try:
+            rows.append({
+                "t": str(k["day"])[:10],
+                "o": float(k["open"]), "c": float(k["close"]),
+                "h": float(k["high"]), "l": float(k["low"]),
+                "v": int(float(k.get("volume") or 0)),
+                "amount": None, "pct_chg": None, "turnover_rate": None,
+            })
+        except (KeyError, TypeError, ValueError):
+            continue
     return rows
 
 

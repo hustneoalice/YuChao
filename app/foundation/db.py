@@ -1,9 +1,12 @@
-"""DuckDB 行情底座 · 只读访问层。
+"""DuckDB 行情底座 · 访问层。
 
-进程模型（设计文档 03/05 节）：
-  - API 进程对 DuckDB 一律 READ_ONLY 挂载（DuckDB 多进程只允许全 read_only），
-    写全部收敛进 updater 进程（M1 暂单进程只读跑通，updater 属 M2）。
-  - 连接生命周期：每请求新建、读完即关（get_conn 生成器依赖 + finally close）。
+进程模型（2.1 起默认内置更新内核，api_embedded_updater=true）：
+  - API 进程同时承担读与写（更新内核见 updater/embedded），连接全部以
+    读写模式打开——同进程同实例共享，读写并发由 DuckDB 内部管理；
+  - 回退模式（api_embedded_updater=false）：API 一律 READ_ONLY 挂载，
+    写收敛进独立 updater 进程（DuckDB 多进程只允许全 read_only）。
+  - 连接生命周期：每请求新建、读完即关（get_conn 生成器依赖 + finally close），
+    请求间隙天然存在无锁窗口（回退模式下 updater 写锁重试依赖它）。
 
 为什么是「每请求开关」而不是「线程缓存 + 空闲 reaper」（2026-10-30 实测教训）：
   看盘工具永远在被前端轮询（行情/状态每 3s 一次），线程缓存连接的
@@ -99,24 +102,43 @@ _READ_RETRY = (2.0, 12)  # 读连接被写锁挡住：间隔 2s × 至多 12 次
 
 
 class DataSourceMissing(RuntimeError):
-    """DuckDB 文件不存在 —— API 进程只读挂载无法自建，需先初始化/导入数据包。"""
+    """DuckDB 文件不存在 —— 连接无法建立，需先初始化/导入数据包。"""
+
+
+# -- 进程级锚连接 ------------------------------------------------------------
+# 内置内核模式专用：进程内常驻一条读写连接（不参与请求），让 DuckDB 的
+# instance cache 稳定命中——否则并发「每请求 connect+close」会撞 attach 竞态
+# （ResourceInUse: Unique file handle conflict，实测 6 线程×300 次失败 21 次，
+# 有锚 0 次）。回退模式绝不能持锚：常驻只读连接会钉死共享锁，updater 写锁
+# 永远拿不到（1.0 真实踩坑）。
+_anchor = None
+
+
+def hold_anchor() -> None:
+    """内置模式启动时调用一次；进程生命周期内持有，随进程退出释放。"""
+    global _anchor
+    if _anchor is None:
+        _anchor = duckdb.connect(str(Path(settings.duckdb_path)), read_only=False)
 
 
 def open_conn() -> duckdb.DuckDBPyConnection:
-    """新建只读连接（被写锁挡住时短重试）。调用方负责 close()。
+    """新建连接（被写锁挡住时短重试）。调用方负责 close()。
 
-    API 端点请用 get_conn（FastAPI 依赖，自动关闭）；
+    连接模式跟随运行形态：内置内核模式（api_embedded_updater=true）读写
+    打开（同实例共享，编排器写连接同配置可并存）；回退模式只读挂载，
+    跨进程写锁由重试协调。API 端点请用 get_conn（FastAPI 依赖，自动关闭）；
     open_conn 供非请求上下文（后台任务、测试）显式管理连接时使用。
     """
     path = Path(settings.duckdb_path)
     if not path.exists():
         raise DataSourceMissing(f"DuckDB 文件不存在：{path}")
     import time
+    read_only = not settings.api_embedded_updater
     gap, tries = _READ_RETRY
     for i in range(tries):
         try:
-            return duckdb.connect(str(path), read_only=True)
-        except duckdb.IOException as e:      # 写锁持有中（updater 任务执行窗口）
+            return duckdb.connect(str(path), read_only=read_only)
+        except duckdb.IOException as e:      # 回退模式：写锁持有中（updater 任务执行窗口）
             if "Could not set lock" not in str(e) or i == tries - 1:
                 raise
             time.sleep(gap)
@@ -124,7 +146,7 @@ def open_conn() -> duckdb.DuckDBPyConnection:
 
 
 def get_conn():
-    """FastAPI 依赖：每请求一条只读连接，请求结束即关（让锁给 updater）。"""
+    """FastAPI 依赖：每请求一条连接，请求结束即关。"""
     conn = open_conn()
     try:
         yield conn

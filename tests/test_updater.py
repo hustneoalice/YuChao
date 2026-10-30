@@ -4,6 +4,7 @@ import json
 import duckdb
 import pytest
 
+from app.config import settings
 from app.stream.bus import (ControlRequests, FileJournal, StreamBus,
                             channel_matches, make_sse_frame, tail_events)
 from app.updater.collectors.financials import _last_periods
@@ -32,6 +33,9 @@ def updater_env(duckdb_file, tmp_path, monkeypatch):
                         tmp_path / "control.jsonl")
     yield duckdb_file
     writer.reset()
+    # 恢复指向真实库：writer 是模块级单例，db_path 残留夹具路径会让后续
+    # 走真实 lifespan 的用例（内核启动/降级）摸错库
+    writer.db_path = settings.duckdb_path
 
 
 # ---------------------------------------------------------------------------
