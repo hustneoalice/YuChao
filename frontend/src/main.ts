@@ -91,10 +91,12 @@ function initRailResize(): void {
   });
 }
 
-/* ── 设备模式（桌面 / 手机）：顶栏 seg 切换，body.mobile 驱动移动布局 ── */
-type DeviceMode = "desktop" | "mobile";
+/* ── 设备模式（桌面 / 折叠屏 / 普通屏）：三款宽度，body.mobile+f/phone 驱动布局 ── */
+type DeviceMode = "desktop" | "fold" | "phone";
 function applyDevice(m: DeviceMode, persist = true): void {
-  document.body.classList.toggle("mobile", m === "mobile");
+  document.body.classList.toggle("mobile", m !== "desktop");
+  document.body.classList.toggle("fold", m === "fold");
+  document.body.classList.toggle("phone", m === "phone");
   document.querySelectorAll<HTMLElement>("#dev-toggle button").forEach((b) =>
     b.classList.toggle("on", b.dataset.dev === m));
   if (persist) localStorage.setItem("yc_device", m);
@@ -102,7 +104,10 @@ function applyDevice(m: DeviceMode, persist = true): void {
 }
 function initDevice(): void {
   const saved = localStorage.getItem("yc_device") as DeviceMode | null;
-  const mode: DeviceMode = saved ?? (window.matchMedia("(max-width: 760px)").matches ? "mobile" : "desktop");
+  const w = window.innerWidth;
+  const auto: DeviceMode = w <= 480 ? "phone" : w <= 820 ? "fold" : "desktop";
+  const mode: DeviceMode = saved === "desktop" || saved === "fold" || saved === "phone"
+    ? saved : auto;
   applyDevice(mode, saved != null); // 首次访问跟随视口且不落盘，手动切换后才记忆
   document.getElementById("dev-toggle")!.addEventListener("click", (e) => {
     const b = (e.target as HTMLElement).closest<HTMLElement>("button[data-dev]");

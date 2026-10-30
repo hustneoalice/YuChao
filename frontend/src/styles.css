@@ -796,3 +796,21 @@ body.mobile .setbody{overflow:visible;padding-right:0}
 body.mobile .dsgrid{grid-template-columns:repeat(2,1fr)}
 body.mobile .factorgrid{grid-template-columns:1fr}
 body.mobile .modal{padding:16px}
+/* ── 两款宽度（折叠屏 / 普通屏）：真机按视口自动分档，桌面预时限宽居中画框 ── */
+/* 折叠屏款：卡片双列、热力/卡池 4 列，图表更高 */
+body.mobile.fold .rightcol{display:grid;grid-template-columns:1fr 1fr;gap:8px;overflow-y:auto}
+body.mobile.fold .heat{grid-template-columns:repeat(4,1fr)}
+body.mobile.fold .cardgrid{grid-template-columns:repeat(4,1fr)}
+body.mobile.fold .dsgrid{grid-template-columns:repeat(4,1fr)}
+body.mobile.fold .chartbox{height:66vh}
+body.mobile.fold .factorgrid{grid-template-columns:1fr 1fr}
+@media (min-width: 900px){
+  /* 桌面全屏预览：给 shell 设备画框，宽度即真机视口宽度（fold 768 / phone 400） */
+  body.mobile.fold .shell{max-width:768px;margin:0 auto;width:100%;
+    border-left:1px solid var(--border);border-right:1px solid var(--border);box-shadow:var(--shadow)}
+  body.mobile.phone .shell{max-width:400px;margin:0 auto;width:100%;
+    border-left:1px solid var(--border);border-right:1px solid var(--border);box-shadow:var(--shadow)}
+  body.mobile.fold .mtabs,body.mobile.phone .mtabs{left:50%;right:auto;transform:translateX(-50%);width:100%}
+  body.mobile.phone .mtabs{max-width:400px}
+  body.mobile.fold .mtabs{max-width:768px}
+}
