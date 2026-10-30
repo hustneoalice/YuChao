@@ -553,6 +553,22 @@ body.mobile .rcard .cbar{opacity:1}
   backdrop-filter:blur(7px);-webkit-backdrop-filter:blur(7px);
   border:1px solid var(--border);border-radius:9px;
   box-shadow:var(--shadow);pointer-events:none;font-size:11px;color:var(--dim)}
+/* 框选区间统计（策影同款）：Shift+拖拽选区与统计浮窗 */
+.kl-selbox{position:absolute;z-index:12;top:0;display:none;pointer-events:none;
+  background:color-mix(in srgb,var(--accent) 12%,transparent);
+  border-left:1px solid color-mix(in srgb,var(--accent) 55%,transparent);
+  border-right:1px solid color-mix(in srgb,var(--accent) 55%,transparent)}
+.kl-seltip{position:absolute;z-index:21;display:none;width:196px;padding:8px 11px;border-radius:10px;
+  background:color-mix(in srgb,var(--panel) 92%,transparent);border:1px solid var(--border);
+  box-shadow:var(--shadow);pointer-events:none;font-size:11px}
+.kl-seltip .st-h{font-size:11px;font-weight:650;color:var(--text);margin-bottom:3px}
+.kl-seltip .st-r{display:flex;justify-content:space-between;gap:10px;line-height:1.75;color:var(--faint)}
+.kl-seltip .st-r.full{color:var(--dim);font-size:10.5px}
+.kl-seltip .st-r b{font-weight:550;color:var(--text)}
+.kl-seltip .st-r b.up{color:var(--up)}
+.kl-seltip .st-r b.down{color:var(--down)}
+.kl-seltip .st-f{margin-top:4px;padding-top:4px;border-top:1px solid var(--border-soft);
+  font-size:9.5px;color:var(--faint);text-align:center}
 .kl-tip .t{text-align:center;font-weight:600;font-size:11px;color:var(--text);
   padding-bottom:4px;margin-bottom:5px;border-bottom:1px solid var(--border-soft)}
 .kl-tip .grp{display:flex;align-items:baseline;gap:9px;line-height:1.7}

@@ -7,7 +7,7 @@
  */
 import { init, dispose, registerIndicator, registerYAxis, type Chart } from "klinecharts";
 import type { Bar } from "../api";
-import { cssv } from "../fmt";
+import { cssv, fmt, fmtYi, fmtVol } from "../fmt";
 import { sixSegmentSeries } from "../indicators";
 
 /* ── 策影配色（tradingColors） ── */
@@ -125,6 +125,56 @@ let registered = false;
 function ensureRegistered(): void {
   if (registered) return;
   registered = true;
+  // BOLL 自研（策影同款）：注册为 BOLLX 避开 v10 内置同名不可靠覆盖；显示名仍为 BOLL
+  registerIndicator({
+    name: "BOLLX",
+    shortName: "BOLL",
+    precision: 2,
+    calcParams: [
+      { key: "timePeriod", value: 20 },
+      { key: "stdDev", value: 2 },
+    ],
+    calc: (kLineDataList, indicator) => {
+      const params = { timePeriod: 20, stdDev: 2 };
+      indicator?.calcParams?.forEach((p: { key?: string; value?: number }) => {
+        if (p.key !== undefined) (params as Record<string, number>)[p.key] = p.value!;
+      });
+      const n = Math.max(2, Math.round(params.timePeriod)), k = params.stdDev;
+      let sum = 0, sq = 0;
+      return kLineDataList.map((bar, i) => {
+        sum += bar.close; sq += bar.close * bar.close;
+        if (i >= n) { sum -= kLineDataList[i - n].close; sq -= kLineDataList[i - n].close ** 2; }
+        if (i < n - 1) return { up: null, mid: null, dn: null };
+        const mean = sum / n;
+        const sd = Math.sqrt(Math.max(0, sq / n - mean * mean));
+        return { up: mean + k * sd, mid: mean, dn: mean - k * sd };
+      });
+    },
+    figures: [
+      { key: "up", title: "UP", type: "line", styles: () => ({ color: "#8E8E93", style: "dashed", lineWidth: 1 }) },
+      { key: "mid", title: "MID", type: "line", styles: () => ({ color: "#FF9F43", style: "dashed", lineWidth: 1 }) },
+      { key: "dn", title: "DN", type: "line", styles: () => ({ color: "#8E8E93", style: "dashed", lineWidth: 1 }) },
+    ],
+    draw: (params: { ctx?: CanvasRenderingContext2D; chart?: Chart; indicator?: { result?: unknown[] } }) => {
+      const { ctx, chart, indicator } = params;
+      const data = (indicator?.result || []) as ({ up: number | null; dn: number | null } | null)[];
+      if (!ctx || !chart || data.length === 0) return false;
+      const barSpace = chart.getBarSpace?.() || { bar: 8 };
+      const barWidth = Math.max(2, (barSpace.bar || 8) - 1);
+      ctx.fillStyle = "rgba(142,142,147,.07)";   // 上下轨间中性淡填充，不抢 K 线
+      data.forEach((item, i) => {
+        if (!item || item.up == null || item.dn == null) return;
+        const xPixel = chart.convertToPixel({ dataIndex: i, value: 0 }) as { x?: number };
+        const upPixel = chart.convertToPixel({ dataIndex: i, value: item.up }) as { y?: number };
+        const dnPixel = chart.convertToPixel({ dataIndex: i, value: item.dn }) as { y?: number };
+        if (xPixel.x == null || upPixel.y == null || dnPixel.y == null) return;
+        const h = Math.abs(upPixel.y - dnPixel.y);
+        if (h < 0.5) return;
+        ctx.fillRect(xPixel.x - barWidth / 2, Math.min(upPixel.y, dnPixel.y), barWidth, h);
+      });
+      return false;   // 继续默认绘制 figures（三条虚线轨道）
+    },
+  });
   registerTrendChannel("SHORT_TREND_CHANNEL", "短线趋势", 7, 10, 0.82);
   registerTrendChannel("MID_TREND_CHANNEL", "中线趋势", 35, 45, 0.86);
   // 分时均价线（VWAP）：后端 /market/minute 已算好，直接透传画线
@@ -202,7 +252,7 @@ export const IND_DEFS: IndDef[] = [
   // 主图叠加
   { key: "ma", kc: "MA", label: "MA", cat: "main", where: "main", desc: "移动平均线 5/10/20" },
   { key: "ema", kc: "EMA", label: "EMA", cat: "main", where: "main", desc: "指数移动平均线" },
-  { key: "boll", kc: "BOLL", label: "BOLL", cat: "main", where: "main", desc: "布林带通道" },
+  { key: "boll", kc: "BOLLX", label: "BOLL", cat: "main", where: "main", desc: "布林带（虚线三轨+淡填充）" },
   { key: "sar", kc: "SAR", label: "SAR", cat: "main", where: "main", desc: "抛物线转向（停损点）" },
   { key: "short", kc: "SHORT_TREND_CHANNEL", label: "短线趋势", cat: "main", where: "main", desc: "策影同款短线操盘趋势通道（收盘对 MA10）" },
   { key: "mid", kc: "MID_TREND_CHANNEL", label: "中线趋势", cat: "main", where: "main", desc: "策影同款中线操盘趋势通道（收盘对 MA45）" },
@@ -463,6 +513,82 @@ export function mountKline(el: HTMLElement): KlineChartHandle {
   };
   try { chart.subscribeAction("onCrosshairChange", onCross as never); } catch { /* 忽略 */ }
 
+  /* ── 框选区间统计（策影同款移植）：Shift+拖拽框选 → 区间涨跌幅/高低/成交额资金 ── */
+  const sel = document.createElement("div");
+  sel.className = "kl-selbox";
+  sel.style.display = "none";
+  el.appendChild(sel);
+  const selTip = document.createElement("div");
+  selTip.className = "kl-seltip";
+  selTip.style.display = "none";
+  el.appendChild(selTip);
+  let selX0: number | null = null;
+  const ymd = (t: number): string => {
+    const d = new Date(t);
+    return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-${String(d.getDate()).padStart(2, "0")}`;
+  };
+  const onSelDown = (e: MouseEvent) => {
+    if (!e.shiftKey) { selTip.style.display = "none"; return; }  // 无 Shift 点击 → 关闭统计浮窗
+    e.preventDefault(); e.stopPropagation();                     // 拦截 v10 平移，进入框选
+    selX0 = e.clientX;
+    const r = el.getBoundingClientRect();
+    sel.style.left = `${e.clientX - r.left}px`; sel.style.top = "0px";
+    sel.style.width = "0px"; sel.style.height = `${r.height}px`;
+    sel.style.display = "block";
+  };
+  const onSelMove = (e: MouseEvent) => {
+    if (selX0 == null) return;
+    e.preventDefault(); e.stopPropagation();
+    const r = el.getBoundingClientRect();
+    const a = Math.min(selX0, e.clientX) - r.left, b = Math.max(selX0, e.clientX) - r.left;
+    sel.style.left = `${a}px`; sel.style.width = `${b - a}px`;
+  };
+  const onSelUp = (e: MouseEvent) => {
+    if (selX0 == null) return;
+    e.preventDefault(); e.stopPropagation();
+    const r = el.getBoundingClientRect();
+    const x0 = Math.min(selX0, e.clientX) - r.left, x1 = Math.max(selX0, e.clientX) - r.left;
+    selX0 = null; sel.style.display = "none";
+    if (x1 - x0 < 6) return;                                     // 太窄视为误触
+    const diOf = (x: number): number | undefined => {
+      const hit = chart.convertFromPixel([{ x }]) as unknown;
+      return (Array.isArray(hit) ? hit[0] : hit)?.dataIndex as number | undefined;
+    };
+    const i0 = diOf(x0), i1 = diOf(x1);
+    const list = chart.getDataList() as { timestamp: number; open: number; high: number; low: number; close: number; volume?: number; amount?: number }[];
+    if (i0 == null || i1 == null || !list.length) return;
+    const a = Math.max(0, Math.min(i0, i1)), b = Math.min(list.length - 1, Math.max(i0, i1));
+    const seg = list.slice(a, b + 1);
+    if (seg.length < 2) return;
+    const s = seg[0], t = seg[seg.length - 1];
+    const hi = Math.max(...seg.map((x) => x.high)), lo = Math.min(...seg.map((x) => x.low));
+    const pct = (t.close - s.close) / s.close * 100;
+    const amp = (hi - lo) / s.close * 100;
+    const amt = seg.reduce((q, x) => q + (x.amount ?? 0), 0);
+    const vol = seg.reduce((q, x) => q + (x.volume ?? 0), 0);
+    const upN = seg.filter((x) => x.close >= x.open).length;
+    const cls = pct >= 0 ? "up" : "down";
+    selTip.innerHTML =
+      `<div class="st-h">区间统计 · ${seg.length} 根</div>` +
+      `<div class="st-r full">${ymd(s.timestamp)} → ${ymd(t.timestamp)}</div>` +
+      `<div class="st-r"><span>区间涨跌</span><b class="${cls}">${pct >= 0 ? "+" : ""}${pct.toFixed(2)}%</b></div>` +
+      `<div class="st-r"><span>最高 / 最低</span><b class="num">${fmt(hi)} / ${fmt(lo)}</b></div>` +
+      `<div class="st-r"><span>振幅</span><b class="num">${amp.toFixed(2)}%</b></div>` +
+      `<div class="st-r"><span>区间成交额</span><b class="num">${fmtYi(amt, 1)}</b></div>` +
+      `<div class="st-r"><span>日均成交额</span><b class="num">${fmtYi(amt / seg.length, 1)}</b></div>` +
+      `<div class="st-r"><span>区间成交量</span><b class="num">${fmtVol(vol)}</b></div>` +
+      `<div class="st-r"><span>阳 / 阴</span><b>${upN} / ${seg.length - upN}</b></div>` +
+      `<div class="st-f">Shift + 拖拽框选 · 点击空白关闭</div>`;
+    selTip.style.display = "block";
+    const tw = selTip.offsetWidth, th = selTip.offsetHeight;
+    const flip = x1 + tw + 12 > r.width;
+    selTip.style.left = `${flip ? x0 - tw - 12 : x1 + 12}px`;
+    selTip.style.top = `${Math.max(8, Math.min(r.height - th - 8, 52))}px`;
+  };
+  el.addEventListener("mousedown", onSelDown, true);
+  el.addEventListener("mousemove", onSelMove, true);
+  el.addEventListener("mouseup", onSelUp, true);
+
   /* ── 底部导航条（策影同款：缩略图 + 拖拽窗口平移 + 回到最新） ── */
   const nav = document.createElement("div");
   nav.className = "kl-nav";
@@ -678,6 +804,11 @@ export function mountKline(el: HTMLElement): KlineChartHandle {
     },
     destroy() {
       try { chart.unsubscribeAction("onCrosshairChange", onCross as never); } catch { /* 忽略 */ }
+      el.removeEventListener("mousedown", onSelDown, true);
+      el.removeEventListener("mousemove", onSelMove, true);
+      el.removeEventListener("mouseup", onSelUp, true);
+      sel.remove();
+      selTip.remove();
       tip.remove();
       legend.remove();
       nav.remove();
