@@ -461,16 +461,14 @@ export function mountKline(el: HTMLElement): KlineChartHandle {
     const amp = base ? ((bar.high - bar.low) / base) * 100 : 0;
     const pos = rangePosition(list, di!);
     const posTxt = pos == null ? "—" : pos.toFixed(1) + "%";
-    const row = (k: string, v: string, cls = "") =>
-      `<div class="r"><span>${k}</span><b class="num ${cls}">${v}</b></div>`;
     const cls = chg > 0 ? "up" : chg < 0 ? "down" : "";
+    // 紧凑分组：OHLC 一行 · 涨跌/振幅/位置 一行 · 量/额 一行（减少遮挡）
+    const kv = (k: string, v: string, c = "") => `<span>${k}<b class="num ${c}">${v}</b></span>`;
     tip.innerHTML =
       `<div class="t num">${tipTitle(bar.date ?? "", period)}</div>` +
-      row("开", bar.open.toFixed(2)) + row("高", bar.high.toFixed(2)) +
-      row("低", bar.low.toFixed(2)) + row("收", bar.close.toFixed(2)) +
-      row("涨跌", `${sgn(chg)} (${sgn(pct)}%)`, cls) +
-      row("振幅", amp.toFixed(2) + "%") + row("位置", posTxt) +
-      row("量", fmtWanYi(bar.volume ?? 0, "手")) + row("额", fmtWanYi(bar.amount ?? 0));
+      `<div class="grp">${kv("开", bar.open.toFixed(2))}${kv("高", bar.high.toFixed(2))}${kv("低", bar.low.toFixed(2))}${kv("收", bar.close.toFixed(2), cls)}</div>` +
+      `<div class="grp">${kv("涨跌", `${sgn(chg)} (${sgn(pct)}%)`, cls)}${kv("振幅", amp.toFixed(2) + "%")}${kv("位置", posTxt)}</div>` +
+      `<div class="grp">${kv("量", fmtWanYi(bar.volume ?? 0, "手"))}${kv("额", fmtWanYi(bar.amount ?? 0))}</div>`;
     tip.style.display = "block";
     // 定位 + 翻转（卡片实际尺寸就绪后再算，避免首帧抖动）
     const w = tip.offsetWidth, h = tip.offsetHeight;
