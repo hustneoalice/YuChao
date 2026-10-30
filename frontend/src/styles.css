@@ -489,6 +489,19 @@ body.mobile .rcard .cbar{opacity:1}
 .kl-ipanel .ipk{flex:none;width:56px;line-height:26px;font-size:10.5px;color:var(--faint);
   white-space:nowrap;overflow:hidden}
 .kl-ipanel .ip-hint{font-size:10px;color:var(--faint);text-align:right}
+/* 指标 chip 右上角 ★ 常显标：hover 浮现，点亮常驻金色 */
+.kl-ipanel .iprow button{position:relative}
+.kl-ipanel .iprow .star{position:absolute;top:-5px;right:-4px;font-size:9px;line-height:1;
+  color:var(--faint);opacity:0;cursor:pointer;font-style:normal;transition:opacity .12s}
+.kl-ipanel .iprow button:hover .star{opacity:.75}
+.kl-ipanel .iprow .star:hover{opacity:1;color:var(--faint)}
+.kl-ipanel .iprow .star.on{opacity:1;color:#FFD60A}
+/* 工具栏常显指标按钮组（策影同款）：直接可点，on=开启；样式复用 .seg */
+.favseg{display:inline-flex;align-items:center;gap:2px}
+.favseg button{padding:2px 7px;border-radius:6px;border:0;background:none;font-size:10.5px;
+  font-weight:600;color:var(--faint);cursor:pointer;line-height:1.3}
+.favseg button:hover{color:var(--text);background:var(--panel-3)}
+.favseg button.on{color:var(--accent);background:var(--accent-soft)}
 /* 自定义方案 chip：按钮 + 行内 × 删除 */
 .kl-ipanel .chipx{display:inline-flex;align-items:stretch}
 .kl-ipanel .chipx button{border-radius:8px 0 0 8px;border-right:none}

@@ -208,6 +208,7 @@ export const IND_DEFS: IndDef[] = [
   { key: "mid", kc: "MID_TREND_CHANNEL", label: "中线趋势", cat: "main", where: "main", desc: "策影同款中线操盘趋势通道（收盘对 MA45）" },
   { key: "avg", kc: "TIME_AVG", label: "均价线", cat: "main", where: "main", desc: "分时均价线（日内）" },
   { key: "bbi", kc: "BBI", label: "BBI", cat: "main", where: "main", desc: "多空指数（四均线加权）" },
+  { key: "bbiboll", kc: "BBIBOLL", label: "BBIBOLL", cat: "main", where: "main", desc: "BBI 布林变异带（多均线布林）" },
   // 趋势类
   { key: "macd", kc: "MACD", label: "MACD", cat: "trend", where: "sub", desc: "指数平滑异同移动平均" },
   { key: "dmi", kc: "DMI", label: "DMI", cat: "trend", where: "sub", desc: "趋向指标（ADX 强弱方向）" },
@@ -222,10 +223,14 @@ export const IND_DEFS: IndDef[] = [
   { key: "mtm", kc: "MTM", label: "MTM", cat: "mom", where: "sub", desc: "动量指标" },
   { key: "wr", kc: "WR", label: "WR", cat: "mom", where: "sub", desc: "威廉指标（超买超卖）" },
   { key: "psy", kc: "PSY", label: "PSY", cat: "mom", where: "sub", desc: "心理线（上涨天数占比）" },
+  { key: "lwr", kc: "LWR", label: "LWR", cat: "mom", where: "sub", desc: "威廉随机指标（快慢随机线）" },
+  { key: "osc", kc: "OSC", label: "OSC", cat: "mom", where: "sub", desc: "变动率柱（震荡量指标）" },
+  { key: "udl", kc: "UDL", label: "UDL", cat: "mom", where: "sub", desc: "引力线（多周期动量合成）" },
   // 量能类
   { key: "vol", kc: "VOL", label: "VOL", cat: "vol", where: "sub", desc: "成交量（5/10/40 日均量线）" },
   { key: "obv", kc: "OBV", label: "OBV", cat: "vol", where: "sub", desc: "能量潮（量能累积方向）" },
   { key: "vr", kc: "VR", label: "VR", cat: "vol", where: "sub", desc: "成交量比率" },
+  { key: "wvad", kc: "WVAD", label: "WVAD", cat: "vol", where: "sub", desc: "威廉变异离散量（量价加权）" },
   // 摆动人气类
   { key: "brar", kc: "BRAR", label: "BRAR", cat: "swing", where: "sub", desc: "情绪指标（人气/意愿）" },
   { key: "cr", kc: "CR", label: "CR", cat: "swing", where: "sub", desc: "能量指标（中间意愿）" },
