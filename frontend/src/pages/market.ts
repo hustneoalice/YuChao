@@ -581,12 +581,19 @@ function renderIpanel(): void {
   pres.innerHTML = `<span class="ipk">方案</span>${chips.join("")}`;
   const mset = new Set(mk.mainInds), sset = new Set(mk.subInds);
   const CAT_IC: Record<string, string> = { main: "#FF9F43", trend: "#F2C94C", mom: "#4DD0E1", vol: "#EF5350", swing: "#7E57C2", volat: "#26C6DA" };
-  inds.innerHTML = IND_CATS.map(({ cat, label }) => {
-    const defs = IND_DEFS.filter((d) => d.cat === cat);
-    if (!defs.length) return "";
-    return `<div class="iprow"><span class="ipk">${label}</span>${defs.map((d) =>
-      `<button style="--ic:${CAT_IC[cat] || "transparent"}" data-${d.where === "main" ? "mi" : "si"}="${d.key}" title="${esc(d.desc)}"${(d.where === "main" ? mset : sset).has(d.key) ? ' class="on"' : ""}>${d.label}</button>`).join("")}</div>`;
-  }).join("");
+  const chipOf = (d: (typeof IND_DEFS)[number]) =>
+    `<button style="--ic:${CAT_IC[d.cat] || "transparent"}" data-${d.where === "main" ? "mi" : "si"}="${d.key}" title="${esc(d.desc)}"${(d.where === "main" ? mset : sset).has(d.key) ? ' class="on"' : ""}>${d.label}</button>`;
+  // 主/副图两大分组：主图叠加在 K 线上，副图每个指标独立窗格
+  const mainDefs = IND_DEFS.filter((d) => d.where === "main");
+  const subCats = IND_CATS.filter(({ cat }) => cat !== "main" && IND_DEFS.some((d) => d.cat === cat && d.where === "sub"));
+  inds.innerHTML =
+    `<div class="iphead">主图<span class="ipbadge">叠加在 K 线上</span></div>` +
+    `<div class="iprow"><span class="ipk">${IND_CATS.find((c) => c.cat === "main")?.label || "主图叠加"}</span>${mainDefs.map(chipOf).join("")}</div>` +
+    `<div class="iphead">副图<span class="ipbadge">每个指标独立窗格</span></div>` +
+    subCats.map(({ cat, label }) => {
+      const defs = IND_DEFS.filter((d) => d.cat === cat && d.where === "sub");
+      return `<div class="iprow"><span class="ipk">${label}</span>${defs.map(chipOf).join("")}</div>`;
+    }).join("");
 }
 
 /** 日线聚合为周/月 */
