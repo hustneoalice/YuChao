@@ -204,8 +204,8 @@ export const IND_DEFS: IndDef[] = [
   { key: "ema", kc: "EMA", label: "EMA", cat: "main", where: "main", desc: "指数移动平均线" },
   { key: "boll", kc: "BOLL", label: "BOLL", cat: "main", where: "main", desc: "布林带通道" },
   { key: "sar", kc: "SAR", label: "SAR", cat: "main", where: "main", desc: "抛物线转向（停损点）" },
-  { key: "short", kc: "SHORT", label: "短线趋势", cat: "main", where: "main", desc: "自研快慢线趋势通道" },
-  { key: "mid", kc: "MID", label: "中线趋势", cat: "main", where: "main", desc: "自研快慢线趋势通道" },
+  { key: "short", kc: "SHORT_TREND_CHANNEL", label: "短线趋势", cat: "main", where: "main", desc: "策影同款短线操盘趋势通道（收盘对 MA10）" },
+  { key: "mid", kc: "MID_TREND_CHANNEL", label: "中线趋势", cat: "main", where: "main", desc: "策影同款中线操盘趋势通道（收盘对 MA45）" },
   { key: "avg", kc: "TIME_AVG", label: "均价线", cat: "main", where: "main", desc: "分时均价线（日内）" },
   { key: "bbi", kc: "BBI", label: "BBI", cat: "main", where: "main", desc: "多空指数（四均线加权）" },
   // 趋势类
