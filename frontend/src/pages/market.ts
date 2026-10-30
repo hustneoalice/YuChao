@@ -298,6 +298,7 @@ export function initMarket(): void {
       if (mk.cur?.symbol !== q.symbol) return;
       mk.quote = q;
       renderRight();
+      document.querySelectorAll<HTMLElement>(".klp").forEach(renderKlpBar); // 顶栏信息条同步实时价
     } catch { /* 静默，下轮再试 */ }
   }, 20000);
   // 资讯/研报 tab 切换（点击已选 tab 不重复请求，走缓存）
@@ -677,6 +678,8 @@ function ensurePanelDom(): void {
   box.innerHTML = slots.map((p, i) =>
     `<div class="klp${i === mk.active ? " active" : ""}" data-pi="${i}">` +
     `<div class="klp-bar"><b class="klp-name"></b>` +
+    `<span class="klp-code num"></span><span class="klp-ind"></span>` +
+    `<span class="klp-q"></span>` +
     `<span class="klp-p" title="切换周期">${P_LABEL[p]}</span>` +
     `<span class="klp-menu">` +
     (["t", "60", "d", "w", "m", "q"] as PKey[]).map((k) => `<button data-pp="${k}">${P_LABEL[k]}</button>`).join("") +
@@ -696,7 +699,35 @@ function applyPanel(i: number): void {
   kl.setData(barsFor(p));
   kl.drawLegend(p === "t" ? ["avg"] : (SUB_OK[currentLayout()]?.[i] ? [...mk.mainInds] : mk.mainInds));
   const box = document.querySelector<HTMLElement>(`.klp[data-pi="${i}"]`);
-  if (box) box.querySelector(".klp-name")!.textContent = mk.cur.name || mk.cur.symbol;
+  if (box) renderKlpBar(box);
+}
+
+/** K 线顶栏信息条（东财网页头部同款）：名称+代码+行业 | 现价 涨跌幅 | 开 高 低 昨收 */
+function renderKlpBar(box: HTMLElement): void {
+  const s = mk.cur, q = mk.quote;
+  if (!s) return;
+  const nb = box.querySelector(".klp-name"), cb = box.querySelector(".klp-code"),
+    ib = box.querySelector(".klp-ind"), qb = box.querySelector(".klp-q");
+  if (!nb || !cb || !qb) return;
+  nb.textContent = s.name || s.symbol;
+  cb.textContent = s.symbol.replace(/\./g, "·");
+  if (ib) ib.textContent = q?.industry || "";
+  // 现价/涨跌幅：实时快照优先，缺省用最后根 K 线
+  const bars = barsFor(box.querySelector(".klp-main") ? mk.panels[Number(box.dataset.pi)] : "d");
+  const last = bars[bars.length - 1];
+  const prevBar = bars.length > 1 ? bars[bars.length - 2].close : null;
+  const price = q?.rt_price ?? last?.close;
+  const pct = q?.pct_chg ?? (prevBar ? (last.close - prevBar) / prevBar * 100 : null);
+  const pc = q?.rt_prev_close ?? prevBar;
+  const cls = (pct ?? 0) >= 0 ? "up" : "down";
+  const f = (v?: number | null) => v == null || !isFinite(v) ? "—" : fmt(v);
+  qb.innerHTML = price == null ? "" :
+    `<b class="${cls}">${f(price)}</b>` +
+    (pct == null ? "" : `<span class="${cls}">${pct >= 0 ? "+" : ""}${pct.toFixed(2)}%</span>`) +
+    `<span class="dim">开 <b class="${(q?.open ?? 0) >= pc! ? "up" : "down"}">${f(q?.open ?? last?.open)}</b></span>` +
+    `<span class="dim">高 <b class="up">${f(q?.high ?? last?.high)}</b></span>` +
+    `<span class="dim">低 <b class="down">${f(q?.low ?? last?.low)}</b></span>` +
+    (pc == null ? "" : `<span class="dim">昨收 <b class="num">${f(pc)}</b></span>`);
 }
 
 export function renderKline(): void {

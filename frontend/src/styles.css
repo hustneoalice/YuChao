@@ -397,7 +397,15 @@ body.mobile .rcard .cbar{opacity:1}
   font-size:11px;color:var(--faint);border-bottom:1px solid var(--border-soft);
   background:var(--panel-2);user-select:none}
 .klp-name{font-size:12px;color:var(--text);font-weight:600;overflow:hidden;
-  text-overflow:ellipsis;white-space:nowrap}
+  text-overflow:ellipsis;white-space:nowrap;flex:none}
+/* 顶栏信息条（东财头部同款）：代码·市场 / 行业 chip / 现价·涨跌幅·开高低昨收 */
+.klp-code{flex:none;color:var(--faint);font-size:11px;letter-spacing:.3px}
+.klp-ind{flex:none;max-width:88px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;
+  padding:0 6px;border-radius:5px;background:var(--panel-3);color:var(--dim);line-height:16px}
+.klp-q{display:flex;align-items:center;gap:9px;flex:1;min-width:0;overflow:hidden;white-space:nowrap}
+.klp-q b{font-weight:600;font-size:11.5px}
+.klp-q .dim{color:var(--faint)}
+.klp-q .dim b{font-size:11px;font-weight:500}
 .klp-p{cursor:pointer;padding:1px 8px;border-radius:6px;background:var(--panel-3);
   color:var(--accent);font-weight:700;flex:none}
 .klp-menu{display:none;position:absolute;top:29px;left:52px;z-index:30;flex-direction:column;
