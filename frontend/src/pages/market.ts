@@ -681,6 +681,45 @@ function mbar(items: [string, number, string][]): string {
     `<div class="mbl"><span>${i[0]}</span><div class="mbt"><i style="width:${Math.max(4, Math.abs(i[1]) / mx * 100).toFixed(0)}%;background:${i[2]}"></i></div><b class="num ${i[1] >= 0 ? "up" : "down"}">${i[1] > 0 ? "+" : ""}${fmt(i[1])}</b></div>`).join("") + `</div>`;
 }
 
+/* ── 自选股卡片（首个多标的卡）：与左侧自选页同源 store.watchlist，
+   增删/云同步 emit → renderRight 自动重渲；行情走 /market/quotes 批量快照 ── */
+const wlQ = new Map<string, Quote>(); // symbol → 批量快照（盘中由 12s 轮询带动刷新）
+let wlQAt = 0;                        // 上次拉取时刻（节流 ≈ 后端 10s 快照缓存）
+let wlQSig = "";                      // 上次拉取代码集签名（自选变更 → 绕过节流立即刷）
+let wlQBusy = false;
+
+function redrawWatchBody(): void {
+  const el = document.querySelector<HTMLElement>('#rightcol .rcard[data-cid="watch"] .fbody');
+  if (!el) return;
+  const list = el.querySelector<HTMLElement>(".wl-list");
+  const top = list?.scrollTop ?? 0;          // 原地刷新保留滚动位置
+  el.innerHTML = cardBody("watch", getState().cards.watch?.mode ?? "simple");
+  const nl = el.querySelector<HTMLElement>(".wl-list");
+  if (nl) nl.scrollTop = top;
+}
+
+async function refreshWlQuotes(): Promise<void> {
+  const symbols = getState().watchlist.map((w) => w.symbol);
+  const sig = symbols.join(",");
+  if (!symbols.length) { wlQ.clear(); wlQSig = sig; return; }
+  if (wlQBusy || (sig === wlQSig && Date.now() - wlQAt < 9000)) return;
+  wlQBusy = true;
+  try {
+    const keep = new Set(symbols);
+    for (const k of [...wlQ.keys()]) if (!keep.has(k)) wlQ.delete(k);
+    // 后端单次 ≤50 只：超出分批串行拉
+    for (let i = 0; i < symbols.length; i += 50) {
+      const r = await marketApi.quotes(symbols.slice(i, i + 50));
+      for (const q of r.items) wlQ.set(q.symbol, q);
+    }
+    wlQAt = Date.now();
+    wlQSig = sig;
+    redrawWatchBody();
+  } catch { /* 静默：保留旧快照 */ } finally {
+    wlQBusy = false;
+  }
+}
+
 function cardBody(cid: string, mode: string): string {
   const s = mk.cur;
   if (!s) return "";
@@ -720,6 +759,28 @@ function cardBody(cid: string, mode: string): string {
       `<div class="bi-rows">${rows}</div>` +
       (cons.length ? `<div class="bi-cons">${cons.slice(0, 6).map((c) => `<span class="sh-con">${esc(c)}</span>`).join("")}` +
         (cons.length > 6 ? `<span class="sh-con more" title="${esc(cons.slice(6).join("、"))}">+${cons.length - 6}</span>` : "") + `</div>` : "");
+  }
+  if (cid === "watch") {
+    const wl = getState().watchlist;
+    if (!wl.length)
+      return `<div class="bempty">暂无自选股<br><span style="color:var(--faint)">从左侧「自选」页或顶栏搜索添加</span><br>` +
+        `<button class="hbtn primary" data-wl-add style="margin-top:10px;height:28px;padding:0 14px;font-size:11.5px">${ic("plus", 12)}添加自选</button></div>`;
+    const det = mode === "detailed";
+    const rows = wl.map((w, i) => {
+      const wq = wlQ.get(w.symbol);
+      const ch = wq?.pct_chg ?? 0;
+      const up = ch >= 0;
+      const price = wq ? (wq.rt_price ?? wq.close ?? null) : null;
+      return `<div class="wl-r${det ? " det" : ""}" data-go-stock="${w.symbol}" data-go-name="${esc(w.name)}" title="打开 ${esc(w.name)}">` +
+        `<span class="wl-i num">${i + 1}</span>` +
+        `<div class="wl-nm"><b>${esc(w.name)}</b><span class="num">${w.symbol}</span></div>` +
+        (det ? `<span class="num wl-d">${fmtYi(wq?.amount ?? null, 1)}</span>` +
+          `<span class="num wl-d">${wq?.turnover_rate != null ? fmt(wq.turnover_rate) + "%" : "—"}</span>` : "") +
+        `<b class="num wl-p">${price != null ? fmt(price) : "—"}</b>` +
+        (wq ? `<b class="num ${up ? "up" : "down"}">${fmtChg(ch)}%</b>` : `<b class="num" style="color:var(--faint)">—</b>`) +
+        `</div>`;
+    }).join("");
+    return `<div class="wl-list">${rows}</div>`;
   }
   if (cid === "signals") {
     const segI = sixSegment(mk.bars, mk.bars.length - 1);
@@ -790,7 +851,7 @@ function cardBody(cid: string, mode: string): string {
 
 function cardHead(def: { id: string; name: string; icon: string }): string {
   const p = getState().cards[def.id];
-  const mono = def.id === "moneyflow" ? (mk.cur?.symbol || "") : def.id === "corepick" ? "池档案" : "OPEN";
+  const mono = def.id === "moneyflow" ? (mk.cur?.symbol || "") : def.id === "corepick" ? "池档案" : def.id === "watch" ? `${getState().watchlist.length}只` : "OPEN";
   return `<div class="rh">${ic(def.icon, 14)}<h4>${def.name}</h4><span class="mono" style="margin-left:auto">${mono}</span>` +
     `<span class="cbar"><span class="cseg"><button class="cbtn${p.mode === "simple" ? " on" : ""}" data-mode="simple" title="简单模式">${ic("list", 12)}</button><button class="cbtn${p.mode === "detailed" ? " on" : ""}" data-mode="detailed" title="详细模式">${ic("faders-horizontal", 12)}</button></span>` +
     `<button class="cbtn" data-fold title="折叠 / 展开">${ic("caret-up", 12)}</button>` +
@@ -852,6 +913,11 @@ export function renderRight(): void {
     b.addEventListener("click", () => openModal("modal-vip")));
   el.querySelectorAll<HTMLElement>("[data-ic-go-core]").forEach((b) =>
     b.addEventListener("click", () => document.dispatchEvent(new CustomEvent("yc:goto-page", { detail: "corepicks" }))));
+  el.querySelectorAll<HTMLElement>("[data-wl-add]").forEach((b) =>
+    b.addEventListener("click", () => {
+      document.dispatchEvent(new CustomEvent("yc:goto-page", { detail: "watchlist" }));
+      window.setTimeout(() => document.getElementById("wl-add")?.click(), 60);
+    }));
   el.querySelectorAll<HTMLElement>("[data-mode]").forEach((b) =>
     b.addEventListener("click", () => {
       setCardPref(b.closest(".rcard")!.getAttribute("data-cid")!, { mode: b.dataset.mode as "simple" | "detailed" });
@@ -905,4 +971,6 @@ export function renderRight(): void {
       const sym = r.dataset.goStock!;
       void openStock({ symbol: sym, name: r.dataset.goName || sym });
     }));
+  // 自选股卡片：行情快照按需拉取（节流 + 自选变更即刷）
+  void refreshWlQuotes();
 }

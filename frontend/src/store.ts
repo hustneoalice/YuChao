@@ -7,6 +7,7 @@ export type CardPrefs = Record<string, CardPref>;
 
 export const CARD_DEFS = [
   { id: "info", name: "基本信息", icon: "info", desc: "名称代码 / 最新价 / 行业概念 / 换手 / 市值 / PE / PB / 总股本（策影同款卡；daily_valuation 缺失时实时源兜底）。" },
+  { id: "watch", name: "自选股", icon: "star", desc: "与左侧自选列表同源实时同步：现价 / 涨跌幅 / 换手 / 成交额一屏速览，点击行直达个股；首个多标的卡（批量快照接口）。" },
   { id: "signals", name: "信号面板", icon: "lightning", desc: "六分段位置判定与操作提示，VIP 因子明细（趋势/位置）由服务端计算。" },
   { id: "moneyflow", name: "资金流", icon: "trend-up", desc: "超大 / 大 / 中 / 小单当日净流入结构与主力净额五日迷你走势。" },
   { id: "indicators", name: "技术指标", icon: "chart-line-up", desc: "MA / BOLL / RSI / KDJ 关键读数与 MA20 背离状态（开源口径）。" },

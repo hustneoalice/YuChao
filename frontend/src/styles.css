@@ -295,6 +295,19 @@ td .lnk:hover{text-decoration:underline}
 .bi-cons{display:flex;gap:4px;flex-wrap:wrap;margin-top:8px}
 .sh-con{font-size:11px;padding:2.5px 8px;border-radius:6px;background:var(--panel-3);color:var(--dim)}
 .sh-con.more{color:var(--faint)}
+/* 自选股卡片（首个多标的卡）：行式列表，名称+代码 | (成交额 换手) | 现价 | 涨跌幅 */
+.wl-list{display:flex;flex-direction:column;max-height:320px;overflow-y:auto;margin:0 -4px;padding:0 4px}
+.wl-r{display:grid;grid-template-columns:16px minmax(0,1fr) auto auto;align-items:center;gap:8px;
+  padding:5px 6px;border-radius:8px;cursor:pointer;font-size:11.5px}
+.wl-r:hover{background:var(--panel-2)}
+.wl-r.det{grid-template-columns:16px minmax(0,1fr) auto auto auto auto}
+.wl-i{color:var(--faint);font-size:10px;text-align:right}
+.wl-nm{min-width:0;line-height:1.25}
+.wl-nm b{display:block;font-size:11.5px;font-weight:600;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.wl-nm .num{font-size:10px;color:var(--faint)}
+.wl-d{font-size:10.5px;color:var(--dim);text-align:right}
+.wl-p{text-align:right;font-weight:650}
+.wl-r>b:last-child{text-align:right;min-width:46px}
 
 /* 指数 ticker 滚动条 */
 .tickerbar{height:34px;flex:none;overflow:hidden;border:1px solid var(--border);border-radius:10px;
