@@ -693,10 +693,12 @@ function renderIndBar(): void {
   const main = favs.map((k) => IND_BY_KEY[k]).filter((d) => d?.where === "main");
   const sub = favs.map((k) => IND_BY_KEY[k]).filter((d) => d?.where === "sub");
   const hint = `<span class="ipempty">在「＋更多」里勾选 ★ 常显</span>`;
+  // 单行布局：主图组 + 分割线 + 副图组 + 「＋更多」，放不下自动换行（#ip-inds flex-wrap）
   inds.innerHTML =
     `<div class="iprow"><span class="ipk">主图</span>${main.map(chipOf).join("") || hint}</div>` +
-    `<div class="iprow"><span class="ipk">副图</span>${sub.map(chipOf).join("") || hint}` +
-    `<button class="imore-open" data-more="1" title="全部指标：搜索 / 配置常显 / 临时叠加">＋更多</button></div>`;
+    `<i class="barsep"></i>` +
+    `<div class="iprow"><span class="ipk">副图</span>${sub.map(chipOf).join("") || hint}</div>` +
+    `<button class="imore-open" data-more="1" title="全部指标：搜索 / 配置常显 / 临时叠加">＋更多</button>`;
 }
 
 /** 更多面板列表（#kl-more-list）：搜索过滤 + 分类分组；点行=显影切换，★=常显切换。

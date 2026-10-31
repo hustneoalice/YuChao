@@ -478,11 +478,13 @@ body.mobile .rcard .cbar{opacity:1}
 .kl-ipanel{position:fixed;z-index:60;background:var(--panel);
   border:1px solid var(--border);border-radius:11px;box-shadow:var(--shadow);padding:9px 11px;
   display:flex;flex-direction:column;gap:6px;max-width:min(620px,calc(100vw - 24px))}
-/* 常显态（#kl-indbar）：chartbox 内流式区块，主/副图各一行，随 chartbar 之下直显 */
+/* 常显态（#kl-indbar）：主图组｜分割线｜副图组 单行 flex，放不下自动换行 */
 .kl-ipanel.ip-inline{position:static;z-index:auto;background:none;border:0;border-radius:0;
   box-shadow:none;padding:4px 8px;max-width:none;gap:3px;flex:none;
-  border-bottom:1px solid var(--border-soft);overflow-x:auto;scrollbar-width:thin}
-/* 常显两行：chip 悬停 ×（移出常显）与空提示 */
+  border-bottom:1px solid var(--border-soft)}
+.kl-ipanel.ip-inline #ip-inds{display:flex;align-items:center;flex-wrap:wrap;gap:3px 6px}
+.kl-ipanel.ip-inline #ip-inds > .barsep{height:12px}
+/* chip 悬停 ×（移出常显）与空提示 */
 .kl-ipanel.ip-inline .iprow button .x{display:none;margin-left:3px;color:var(--faint);font-style:normal;font-size:11px}
 .kl-ipanel.ip-inline .iprow button:hover .x{display:inline}
 .kl-ipanel.ip-inline .iprow button .x:hover{color:var(--down)}
