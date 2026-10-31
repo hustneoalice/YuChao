@@ -745,7 +745,7 @@ export function mountKline(el: HTMLElement): KlineChartHandle {
   el.addEventListener("mousemove", onSelMove, true);
   el.addEventListener("mouseup", onSelUp, true);
 
-  /* ── 底部导航条（策影同款：缩略图 + 拖拽窗口平移 + 回到最新） ── */
+  /* ── 底部导航条（策影同款：缩略图 + 可见窗口日期范围文字 + 拖拽窗口平移 + 回到最新） ── */
   const nav = document.createElement("div");
   nav.className = "kl-nav";
   nav.innerHTML =
@@ -753,12 +753,14 @@ export function mountKline(el: HTMLElement): KlineChartHandle {
     `<button data-j="prev" title="向前一页">‹</button></div>` +
     `<canvas class="kl-nav-cv"></canvas>` +
     `<div class="kl-nav-win" title="拖动调整可见范围"><i></i><b></b></div>` +
+    `<span class="kl-nav-time"></span>` +
     `<div class="kl-nav-btns r"><button data-j="next" title="向后一页">›</button>` +
     `<button data-j="last" title="回到最新">⇥</button></div>` +
     `<button class="kl-nav-latest" title="回到最新">最新 ›</button>`;
   el.appendChild(nav);
   const navCv = nav.querySelector("canvas")!;
   const navWin = nav.querySelector(".kl-nav-win") as HTMLElement;
+  const navTime = nav.querySelector(".kl-nav-time") as HTMLElement;
   // 快速跳转（策影 navJump 同款：first / ±0.8 页 / last）
   nav.addEventListener("click", (e) => {
     const b = (e.target as HTMLElement).closest<HTMLButtonElement>("button[data-j]");
@@ -800,7 +802,7 @@ export function mountKline(el: HTMLElement): KlineChartHandle {
     navUpdateWin();
   };
   const navUpdateWin = () => {
-    const list = chart.getDataList();
+    const list = chart.getDataList() as { close: number; date?: string }[];
     const r = chart.getVisibleRange?.() as { from: number; to: number } | undefined;
     if (!list.length || !r) return;
     const L = list.length;
@@ -809,6 +811,18 @@ export function mountKline(el: HTMLElement): KlineChartHandle {
     const cvL = navCv.offsetLeft, cvW = navCv.clientWidth;
     navWin.style.left = cvL + (from / L) * cvW + "px";
     navWin.style.width = Math.max(2, ((to - from) / L) * cvW) + "px";
+    // 中心日期范围文字（策影同款）：跨度 ≥3 年用 YY/MM 紧凑格式，否则 YYYY-MM-DD；
+    // 全量数据范围挂 nav 条 title（悬停可见「2022-03-01 ~ 2026-10-30 · 共 4 年 8 月」）
+    const d = (i: number) => list[Math.max(0, Math.min(L - 1, i))]?.date || "";
+    const s0 = d(from), s1 = d(to - 1);
+    if (s0 && s1) {
+      const spanYears = (new Date(s1).getTime() - new Date(s0).getTime()) / 31536e6;
+      navTime.textContent = spanYears >= 3 ? `${s0.slice(2, 7)} ~ ${s1.slice(2, 7)}`
+        : s0.includes(" ") ? `${s0.slice(11, 16)} ~ ${s1.slice(11, 16)}` : `${s0} ~ ${s1}`;
+      const years = Math.floor(spanYears), months = Math.round((spanYears - years) * 12);
+      nav.title = `全量 ${list[0]?.date ?? s0} ~ ${list[L - 1]?.date ?? s1}` +
+        (years > 0 ? ` · 共 ${years} 年 ${months} 月` : "");
+    } else navTime.textContent = "";
   };
   const onVisChange = () => { requestAnimationFrame(navUpdateWin); };
   try { chart.subscribeAction("onVisibleRangeChange", onVisChange as never); } catch { /* 忽略 */ }
