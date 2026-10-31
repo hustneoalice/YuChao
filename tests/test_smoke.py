@@ -153,16 +153,20 @@ def test_sectors_list(client: TestClient):
     assert r.status_code == 200
     items = r.json()
     assert len(items) == 2
-    assert items[0]["id"] == "白酒"  # 按涨跌降序
+    assert items[0]["id"] == "白酒"  # 行业按涨跌降序
     assert items[0]["leader"] == "贵州茅台"
-    # 2.1 板块级聚合：主力净流入（capital_flow 按 industry rollup）+ 成分数
+    # 2.1 板块级聚合：主力净流入（capital_flow 按成分归属 rollup）+ 成分数
     assert items[0]["member_count"] == 2
     assert items[0]["main_net_today"] == pytest.approx(1.2e8 - 0.5e8)
     assert items[0]["main_net_5d"] == pytest.approx(1.2e8 - 0.5e8)
     assert items[1]["main_net_today"] is None  # 电池无资金流数据 → NULL
-    # 概念板块 M1 空集
-    r2 = client.get("/api/v1/sectors", params={"type": "concept"})
-    assert r2.status_code == 200 and r2.json() == []
+    # 概念板块（2.1 sector_member 口径）
+    rc = client.get("/api/v1/sectors", params={"type": "concept"})
+    assert rc.status_code == 200
+    ci = rc.json()
+    assert len(ci) == 1 and ci[0]["id"] == "免税概念" and ci[0]["type"] == "concept"
+    assert ci[0]["member_count"] == 2       # sector_member 映射口径
+    assert ci[0]["main_net_today"] == pytest.approx(1.2e8)
 
 
 def test_sector_members_weighted(client: TestClient):
@@ -176,6 +180,15 @@ def test_sector_members_weighted(client: TestClient):
     pcts = [1.0 + i * 0.01 for i in range(55, 60)]
     expected = sum(a * p for a, p in zip(amounts, pcts)) / sum(amounts)
     assert members[0]["lookback_pct"] == pytest.approx(expected)
+
+
+def test_sector_members_concept(client: TestClient):
+    """概念成分走 sector_member 映射口径（与行业 f100 分流）。"""
+    r = client.get("/api/v1/sectors/免税概念/members", params={"lookback": 5})
+    assert r.status_code == 200
+    members = r.json()
+    assert {m["symbol"] for m in members} == {"600519", "300750"}
+    assert members[0]["symbol"] == "300750"     # 加权涨幅更高者居首（pct_base 2.0 > 1.0）
 
 
 def test_sector_unknown_404(client: TestClient):

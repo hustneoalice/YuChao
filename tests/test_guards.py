@@ -197,6 +197,10 @@ def test_failed_cron_retries_with_backoff(orch):
     orch.submit("kline_update", trigger="cron")
     _drain(orch)
     assert _last(orch, "kline_update").status == "failed"
+    # Timer 在落账之后才创建，_drain 可能先观察到排空——短暂轮询等调度落定
+    deadline = time.time() + 2
+    while not FakeTimer.instances and time.time() < deadline:
+        time.sleep(0.05)
     assert FakeTimer.instances, "cron 失败应调度自动重试"
     assert FakeTimer.instances[0].delay == 300      # 第一次退避 5 分钟
     assert FakeTimer.instances[0].args == ("kline_update", 1)

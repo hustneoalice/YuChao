@@ -102,17 +102,19 @@ def fetch_valuation_snapshot(progress=None, cancel=None) -> Tuple[
 
 
 # ---------------------------------------------------------------------------
-# 东财：行业板块快照（15:35）
+# 东财：板块快照（15:35，行业 t:2 / 概念 t:3）+ 概念成分映射
 # ---------------------------------------------------------------------------
 
-def fetch_sector_snapshot(progress=None, cancel=None) -> List[Dict[str, Any]]:
-    """东财行业板块清单（fs=m:90+t:2）→ [{industry, code, close, pct_change,
-    up_count, down_count, leader, leader_change}]。"""
+def fetch_sector_snapshot(board_type: str = "industry",
+                          progress=None, cancel=None) -> List[Dict[str, Any]]:
+    """东财板块清单（fs=m:90+t:2 行业 / t:3 概念）→ [{industry, code, close,
+    pct_change, up_count, down_count, leader, leader_change}]。"""
     out: List[Dict[str, Any]] = []
+    fs = f"m:90+t:{'2' if board_type == 'industry' else '3'}"
     page, total = 1, None
     while page <= 10 and (total is None or len(out) < total):
         params = {"pn": page, "pz": 100, "po": 0, "np": 1, "fltt": 2, "invt": 2,
-                  "fid": "f3", "fs": "m:90+t:2",
+                  "fid": "f3", "fs": fs,
                   "fields": "f12,f14,f2,f3,f104,f105,f128,f136"}
         data = get_json_hosts("/api/qt/clist/get", params, _CLIST_HOSTS,
                               "https://quote.eastmoney.com/")
@@ -137,6 +139,38 @@ def fetch_sector_snapshot(progress=None, cancel=None) -> List[Dict[str, Any]]:
                 "leader_change": _num(r.get("f136")),
             })
         _emit(progress, done=len(out), total=total, log=f"板块快照 [{len(out)}/{total}]")
+        if cancel and cancel():
+            break
+        page += 1
+        time.sleep(0.12)
+    return out
+
+
+def fetch_board_members(bk_code: str, progress=None, cancel=None) -> List[Dict[str, Any]]:
+    """东财板块成分股清单（fs=b:BKxxxx 翻页）→ [{symbol, stock_name}]。
+
+    概念板块成分的唯一来源——f100 只给行业标签，概念归属必须逐板块拉。
+    """
+    out: List[Dict[str, Any]] = []
+    page, total = 1, None
+    while page <= 40 and (total is None or len(out) < total):
+        params = {"pn": page, "pz": 100, "po": 0, "np": 1, "fltt": 2, "invt": 2,
+                  "fid": "f12", "fs": f"b:{bk_code}", "fields": "f12,f14"}
+        data = get_json_hosts("/api/qt/clist/get", params, _CLIST_HOSTS,
+                              "https://quote.eastmoney.com/")
+        d = data.get("data") or {}
+        if total is None:
+            total = int(d.get("total") or 0)
+        diff = d.get("diff") or []
+        if not diff:
+            break
+        for r in diff:
+            sym = str(r.get("f12") or "").strip()
+            if sym:
+                out.append({"symbol": sym,
+                            "stock_name": str(r.get("f14") or "").strip()})
+        _emit(progress, done=len(out), total=total,
+              log=f"成分映射 {bk_code} [{len(out)}/{total}]")
         if cancel and cancel():
             break
         page += 1

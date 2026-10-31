@@ -3,7 +3,7 @@ import duckdb
 import pytest
 
 from app.config import settings
-from app.foundation.db import NEW_TABLES_DDL, PRICE_VIEW_DDL
+from app.foundation.db import MIGRATIONS, NEW_TABLES_DDL, PRICE_VIEW_DDL
 
 DDL = """
 CREATE TABLE IF NOT EXISTS stock_universe (
@@ -69,6 +69,8 @@ def duckdb_file(tmp_path):
     for stmt in PRICE_VIEW_DDL.split(";"):
         if stmt.strip():
             conn.execute(stmt)
+    for stmt in MIGRATIONS:                 # 存量表迁移（sector_index 补 kind 列）
+        conn.execute(stmt)
 
     conn.executemany(
         "INSERT OR REPLACE INTO stock_universe VALUES (?,?,?,?,?,?,CURRENT_TIMESTAMP)",
@@ -103,10 +105,21 @@ def duckdb_file(tmp_path):
         ],
     )
     conn.executemany(
-        "INSERT OR REPLACE INTO sector_index VALUES (?,?,?,?,?,?,?,?,?)",
+        "INSERT OR REPLACE INTO sector_index "
+        "(industry, trade_date, close, pct_change, code, up_count, down_count, "
+        " leader, leader_change, kind) VALUES (?,?,?,?,?,?,?,?,?,?)",
         [
-            ("白酒", "2026-10-30", 3150.5, 1.85, "BK0477", 18, 2, "贵州茅台", 2.1),
-            ("电池", "2026-10-30", 1980.2, -0.62, "BK0428", 8, 12, "宁德时代", -0.9),
+            ("白酒", "2026-10-30", 3150.5, 1.85, "BK0477", 18, 2, "贵州茅台", 2.1, "industry"),
+            ("电池", "2026-10-30", 1980.2, -0.62, "BK0428", 8, 12, "宁德时代", -0.9, "industry"),
+            ("免税概念", "2026-10-30", 2850.0, 3.42, "BK0580", 30, 2, "中国中免", 5.2, "concept"),
+        ],
+    )
+    conn.executemany(
+        "INSERT OR REPLACE INTO sector_member "
+        "(bk_code, bk_name, symbol, stock_name) VALUES (?,?,?,?)",
+        [
+            ("BK0580", "免税概念", "600519", "贵州茅台"),
+            ("BK0580", "免税概念", "300750", "宁德时代"),
         ],
     )
     conn.execute(

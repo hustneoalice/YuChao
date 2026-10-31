@@ -16,7 +16,7 @@ from pathlib import Path
 import duckdb
 
 from ..config import settings
-from ..foundation.db import NEW_TABLES_DDL, PRICE_VIEW_DDL
+from ..foundation.db import MIGRATIONS, NEW_TABLES_DDL, PRICE_VIEW_DDL
 
 logger = logging.getLogger("yuchao.updater")
 
@@ -90,6 +90,8 @@ class Writer:
             stmt = stmt.strip()
             if stmt:
                 c.execute(stmt)
+        for stmt in MIGRATIONS:        # 存量表迁移（幂等）
+            c.execute(stmt)
         for stmt in PRICE_VIEW_DDL.split(";"):
             stmt = stmt.strip()
             if stmt:

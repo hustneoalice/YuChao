@@ -325,21 +325,33 @@ def test_pe_percentile_rebuild(updater_env):
 def test_sector_index_task(updater_env, tmp_path, monkeypatch):
     from app.updater.collectors import sector_index as smod
 
+    lists = {
+        "industry": [{"industry": "白酒", "code": "BK0477", "close": 3200.0,
+                      "pct_change": 2.0, "up_count": 20, "down_count": 1,
+                      "leader": "贵州茅台", "leader_change": 3.1}],
+        "concept": [{"industry": "免税概念", "code": "BK0580", "close": 2850.0,
+                     "pct_change": 3.4, "up_count": 30, "down_count": 2,
+                     "leader": "中国中免", "leader_change": 5.2}],
+    }
     monkeypatch.setattr(smod, "expected_asof", lambda: "2026-11-02")
     monkeypatch.setattr(
         smod.sources, "fetch_sector_snapshot",
-        lambda progress=None, cancel=None: [
-            {"industry": "白酒", "code": "BK0477", "close": 3200.0,
-             "pct_change": 2.0, "up_count": 20, "down_count": 1,
-             "leader": "贵州茅台", "leader_change": 3.1}])
+        lambda board_type="industry", progress=None, cancel=None: lists[board_type])
+    monkeypatch.setattr(
+        smod.sources, "fetch_board_members",
+        lambda bk_code, progress=None, cancel=None:
+            [{"symbol": "600519", "stock_name": "贵州茅台"}])
 
     res = smod.update_sector_index(progress=None, ctx={"cancel_check": lambda: False})
-    assert res["status"] == "success" and res["rows"] == 1
+    assert res["status"] == "success" and res["rows"] == 2
     conn = duckdb.connect(str(updater_env))
-    n = conn.execute(
-        "SELECT COUNT(*) FROM sector_index WHERE trade_date='2026-11-02'").fetchone()[0]
+    kinds = dict(conn.execute(
+        "SELECT kind, COUNT(*) FROM sector_index WHERE trade_date='2026-11-02' "
+        "GROUP BY kind").fetchall())
+    m = conn.execute(
+        "SELECT COUNT(*) FROM sector_member WHERE bk_code='BK0580'").fetchone()[0]
     conn.close()
-    assert n == 1
+    assert kinds == {"industry": 1, "concept": 1} and m == 1
 
 
 # ---------------------------------------------------------------------------

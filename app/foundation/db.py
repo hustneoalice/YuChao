@@ -82,7 +82,24 @@ NEW_TABLES_DDL = """
         industry VARCHAR,
         updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
     );
+
+    -- 板块成分映射（2.1 概念板块成分快照，每日全量重建；行业成分沿用
+    -- stock_universe.industry 口径不进此表——东财 f100 标签已是现成归属）
+    CREATE TABLE IF NOT EXISTS sector_member (
+        bk_code VARCHAR,
+        bk_name VARCHAR,
+        symbol VARCHAR,
+        stock_name VARCHAR,
+        updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+        PRIMARY KEY (bk_code, symbol)
+    );
 """
+
+# 存量表迁移（幂等；writer.ensure_schema / scripts/ensure_schema.py 共用执行）。
+# 1.0 继承库没有 kind 列——概念板块接入（2.1）统一在此补齐，老库/导入包全兼容。
+MIGRATIONS = (
+    "ALTER TABLE sector_index ADD COLUMN IF NOT EXISTS kind VARCHAR DEFAULT 'industry'",
+)
 
 _ADJUST_VIEW = {"qfq": "v_daily_ohlcv_qfq", "hfq": "v_daily_ohlcv_hfq", "raw": "daily_ohlcv"}
 

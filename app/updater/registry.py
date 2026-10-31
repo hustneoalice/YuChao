@@ -15,11 +15,12 @@ fn 用「模块:函数」字符串延迟解析——API 进程只读这份元数
 """
 
 TASKS: tuple[dict, ...] = (
-    {"kind": "sector_index", "label": "行业板块快照",
+    {"kind": "sector_index", "label": "板块快照",
      "fn": "app.updater.collectors.sector_index:update_sector_index",
      "freshness": {"table": "sector_index", "col": "trade_date"},
-     "min_rows": 50,
-     "description": "15:35 东财行业板块清单 → sector_index（含涨跌家数/领涨股）"},
+     "min_rows": 300,
+     "description": "15:35 东财板块清单（行业 t:2 + 概念 t:3）→ sector_index；"
+                    "概念成分逐板块 → sector_member"},
     {"kind": "quotes", "label": "行情快照",
      "fn": "app.updater.collectors.quotes:update_quotes",
      "freshness": {"log": True},

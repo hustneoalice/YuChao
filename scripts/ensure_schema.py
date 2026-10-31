@@ -12,7 +12,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 import duckdb  # noqa: E402
 
 from app.config import settings  # noqa: E402
-from app.foundation.db import PRICE_VIEW_DDL, NEW_TABLES_DDL  # noqa: E402
+from app.foundation.db import PRICE_VIEW_DDL, NEW_TABLES_DDL, MIGRATIONS  # noqa: E402
 
 
 def main() -> None:
@@ -25,12 +25,15 @@ def main() -> None:
         for stmt in NEW_TABLES_DDL.split(";"):
             if stmt.strip():
                 conn.execute(stmt)
+        for stmt in MIGRATIONS:        # 存量表迁移（幂等：老库补 kind 列等）
+            conn.execute(stmt)
         for stmt in PRICE_VIEW_DDL.split(";"):
             if stmt.strip():
                 conn.execute(stmt)
         conn.execute("CHECKPOINT")
         print(f"[ensure_schema] 完成：{path}")
-        for table in ("corepicks_result", "stock_profile", "v_daily_ohlcv_qfq", "v_daily_ohlcv_hfq"):
+        for table in ("corepicks_result", "stock_profile", "sector_member",
+                      "v_daily_ohlcv_qfq", "v_daily_ohlcv_hfq"):
             print("  -", table)
     finally:
         conn.close()
