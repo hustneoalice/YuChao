@@ -170,6 +170,10 @@
       <div class="phead">
         <span class="crumb">板块 /</span><h1>板块热力</h1>
         <span class="sp"></span>
+        <input id="sec-q" type="search" placeholder="搜板块…" style="width:130px">
+        <span class="seg" id="sec-view">
+          <button class="on" data-v="heat">热力</button><button data-v="rank">排行</button>
+        </span>
         <span class="seg" id="sec-type">
           <button class="on" data-t="industry">行业</button><button data-t="concept">概念</button>
         </span>
@@ -179,8 +183,14 @@
       </div>
       <div style="display:flex;gap:12px;flex:1;min-height:0">
         <div class="panel" style="flex:1.4;min-height:0;display:flex;flex-direction:column">
-          <div class="phead2"><h3 id="sec-title">行业热力</h3><span class="sub">色深 = 涨跌幅强度 · 点击查看成分股</span></div>
-          <div class="tblwrap" style="flex:1;padding:14px"><div class="heat" id="heat"></div></div>
+          <div class="phead2"><h3 id="sec-title">行业热力</h3><span class="sub" id="sec-sub">色深 = 涨跌幅强度 · 点击查看成分股</span></div>
+          <div class="tblwrap" style="flex:1;padding:14px" id="sec-heatwrap"><div class="heat" id="heat"></div></div>
+          <div class="tblwrap" style="flex:1;display:none" id="sec-rankwrap">
+            <table>
+              <thead><tr id="sec-rank-head"></tr></thead>
+              <tbody id="sec-rank"></tbody>
+            </table>
+          </div>
         </div>
         <div class="panel" style="flex:1;min-width:0;display:flex;flex-direction:column" id="sec-members">
           <div class="phead2">

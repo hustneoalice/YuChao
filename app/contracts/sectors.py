@@ -5,7 +5,11 @@ from pydantic import BaseModel
 
 
 class SectorSummary(BaseModel):
-    """sector_index 最新交易日一行（1.0 字段原样；id 即板块名）。"""
+    """sector_index 最新交易日一行（id 即板块名）。
+
+    2.1 追加板块级聚合（策影板块强度表核心列）：主力净流入按
+    stock_universe.industry rollup capital_flow，成分数同源。
+    """
 
     id: str
     name: str
@@ -17,6 +21,9 @@ class SectorSummary(BaseModel):
     down_count: Optional[int] = None
     leader: Optional[str] = None
     leader_change: Optional[float] = None
+    member_count: Optional[int] = None
+    main_net_today: Optional[float] = None
+    main_net_5d: Optional[float] = None
 
 
 class SectorMember(BaseModel):

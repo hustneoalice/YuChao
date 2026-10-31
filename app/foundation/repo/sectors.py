@@ -5,20 +5,45 @@ _WINDOW_COLS = ("symbol", "name", "last_date", "last_close", "lookback_pct", "ma
 
 
 def list_sectors(conn, sector_type: str = "industry", limit: int = 100) -> dict:
-    """行业板块按当日涨跌排序（1.0 sector_index 字段原样）。
+    """行业板块按当日涨跌排序。
 
-    概念板块（type=concept）为 2.0 增补口径，M1 数据未采集，返回空集。
+    2.1 对齐策影「板块强度表」核心列：每板块附当日/5日主力净流入
+    （capital_flow 按 stock_universe.industry 聚合）与成分数——全部用自有表
+    rollup，不引申万依赖。概念板块（type=concept）数据未采集，返回空集。
     """
     if sector_type != "industry":
         return {"items": [], "total": 0}
 
     rows = conn.execute(
         """
-        SELECT industry, trade_date, close, pct_change, up_count, down_count, leader, leader_change
-        FROM sector_index
-        WHERE trade_date = (SELECT MAX(trade_date) FROM sector_index)
-        ORDER BY pct_change DESC NULLS LAST
-        LIMIT ?
+        WITH secs AS (
+            SELECT industry, trade_date, close, pct_change, up_count, down_count,
+                   leader, leader_change
+            FROM sector_index
+            WHERE trade_date = (SELECT MAX(trade_date) FROM sector_index)
+            LIMIT ?
+        ),
+        flow1 AS (
+            SELECT u.industry AS ind, SUM(c.net_main) AS net
+            FROM capital_flow c JOIN stock_universe u ON u.symbol = c.symbol
+            WHERE c.date = (SELECT MAX(date) FROM capital_flow)
+            GROUP BY 1
+        ),
+        win AS (SELECT DISTINCT date FROM capital_flow ORDER BY date DESC LIMIT 5),
+        flow5 AS (
+            SELECT u.industry AS ind, SUM(c.net_main) AS net
+            FROM capital_flow c JOIN stock_universe u ON u.symbol = c.symbol
+            WHERE c.date IN (SELECT date FROM win)
+            GROUP BY 1
+        ),
+        cnt AS (SELECT industry AS ind, COUNT(*) AS n FROM stock_universe GROUP BY 1)
+        SELECT s.industry, s.trade_date, s.close, s.pct_change, s.up_count,
+               s.down_count, s.leader, s.leader_change, f1.net, f5.net, c.n
+        FROM secs s
+        LEFT JOIN flow1 f1 ON f1.ind = s.industry
+        LEFT JOIN flow5 f5 ON f5.ind = s.industry
+        LEFT JOIN cnt c ON c.ind = s.industry
+        ORDER BY s.pct_change DESC NULLS LAST
         """,
         [limit],
     ).fetchall()
@@ -27,6 +52,7 @@ def list_sectors(conn, sector_type: str = "industry", limit: int = 100) -> dict:
             "id": r[0], "name": r[0], "type": "industry", "trade_date": str(r[1]),
             "close": r[2], "pct_change": r[3], "up_count": r[4], "down_count": r[5],
             "leader": r[6], "leader_change": r[7],
+            "main_net_today": r[8], "main_net_5d": r[9], "member_count": r[10],
         }
         for r in rows
     ]

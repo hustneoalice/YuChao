@@ -156,6 +156,7 @@ export interface SectorSummary {
   id: string; name: string; type: string; trade_date: string;
   close?: number; pct_change?: number; up_count?: number; down_count?: number;
   leader?: string; leader_change?: number;
+  member_count?: number; main_net_today?: number | null; main_net_5d?: number | null;
 }
 export interface SectorMember {
   symbol: string; name?: string; last_date?: string; last_close?: number;

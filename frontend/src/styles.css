@@ -666,6 +666,14 @@ body.mobile .rcard .cbar{opacity:1}
 .heat .tile.r{background:linear-gradient(150deg,var(--up-soft),transparent 55%)}
 .heat .tile.g{background:linear-gradient(150deg,var(--down-soft),transparent 55%)}
 .heat .tile.r .tv{color:var(--up)} .heat .tile.g .tv{color:var(--down)}
+/* 板块排行视图（策影板块强度表移植）：可排序表头 + 行悬停 + 板块搜索框 */
+#sec-rank th[data-k]{cursor:pointer;user-select:none}
+#sec-rank tr[data-sec]{cursor:pointer}
+#sec-rank tr[data-sec]:hover{background:color-mix(in srgb,var(--accent) 7%,transparent)}
+#sec-q{height:28px;padding:0 10px;border:1px solid var(--border);border-radius:8px;
+  background:var(--panel);font-size:11.5px;color:var(--text);outline:none}
+#sec-q:focus{border-color:color-mix(in srgb,var(--accent) 45%,transparent)}
+#sec-q::placeholder{color:var(--faint)}
 
 /* 核心标 */
 .scorebar{display:flex;align-items:center;gap:8px}
