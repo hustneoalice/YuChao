@@ -471,6 +471,15 @@ export function initMarket(): void {
       }
       return;
     }
+    // ★ 常显标：切换常显集合（不在 button 里，必须放在下方 button 短路检查之前）
+    if (t.closest("i[data-fav]")) {
+      const k = t.closest("i")!.dataset.fav!;
+      const favs = new Set(readIndFavs());
+      if (favs.has(k)) favs.delete(k); else favs.add(k);
+      writeIndFavs([...favs]);
+      renderIpanel();
+      return;
+    }
     const b = t.closest("button") as HTMLElement | null;
     if (!b) return;
     if (b.dataset.psave) {                                 // 当前组合存为自定义方案
@@ -503,14 +512,6 @@ export function initMarket(): void {
         renderIndMore();
         more.querySelector<HTMLInputElement>("input")?.focus();
       }
-      return;
-    }
-    if (t.closest("i[data-fav]")) {                        // ★ 常显标：切换常显集合，不影响当前显影
-      const k = t.closest("i")!.dataset.fav!;
-      const favs = new Set(readIndFavs());
-      if (favs.has(k)) favs.delete(k); else favs.add(k);
-      writeIndFavs([...favs]);
-      renderIpanel();
       return;
     }
     if (t.dataset.xshow || t.closest("i[data-xshow]")) {   // chip 悬停 ×：移出常显（显影不变）

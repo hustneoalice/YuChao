@@ -322,6 +322,33 @@ function ensureRegistered(): void {
         dash("ob", "超买80"), dash("os", "超卖20"),
       ],
     });
+    // OBOS 超买超卖（策影 CAOPAN 同款）：操盘值 = 加权价(2C+H+L+O)/5 在 14 周期
+    // LLV~HHV 区间的位置百分位；超买 95 橙 / 中轴 50 灰 / 超卖 5 青参考线
+    registerIndicator({
+      name: "OBOSX",
+      shortName: "操盘",
+      precision: 0,
+      calcParams: [{ key: "n", value: 14 }],
+      calc: (kLineDataList, indicator) => {
+        const p: Record<string, number> = { n: 14 };
+        indicator?.calcParams?.forEach((x: { key?: string; value?: number }) => {
+          if (x.key !== undefined) p[x.key] = x.value!;
+        });
+        const list = kLineDataList as unknown as { open: number; high: number; low: number; close: number }[];
+        const n = Math.max(1, Math.round(p.n));
+        const base = list.map((k) => (2 * k.close + k.high + k.low + k.open) / 5);
+        return list.map((_, i) => {
+          if (i < n - 1) return { cp: null, ob: 95, mid: 50, os: 5 };
+          let h = -Infinity, l = Infinity;
+          for (let j = i - n + 1; j <= i; j++) { h = Math.max(h, base[j]); l = Math.min(l, base[j]); }
+          return { cp: h === l ? 50 : ((base[i] - l) / (h - l)) * 100, ob: 95, mid: 50, os: 5 };
+        });
+      },
+      figures: [
+        { key: "cp", title: "操盘", type: "line", styles: () => ({ color: "#4FC3F7", lineWidth: 1.4 }) },
+        dash("ob", "超买95"), dash("mid", "中轴50"), dash("os", "超卖5"),
+      ],
+    });
     registerIndicator({
       name: "RSIX",
       shortName: "RSI",
@@ -428,6 +455,7 @@ export const IND_DEFS: IndDef[] = [
   { key: "roc", kc: "ROC", label: "ROC", cat: "mom", where: "sub", desc: "变动率指标" },
   { key: "mtm", kc: "MTM", label: "MTM", cat: "mom", where: "sub", desc: "动量指标" },
   { key: "wr", kc: "WRX", label: "WR", cat: "mom", where: "sub", desc: "威廉指标（超买80/超卖20参考线）" },
+  { key: "obos", kc: "OBOSX", label: "超买超卖", cat: "mom", where: "sub", desc: "操盘线：加权价 14 周期位置百分位（超买95/中轴50/超卖5）" },
   { key: "psy", kc: "PSY", label: "PSY", cat: "mom", where: "sub", desc: "心理线（上涨天数占比）" },
   { key: "lwr", kc: "LWR", label: "LWR", cat: "mom", where: "sub", desc: "威廉随机指标（快慢随机线）" },
   { key: "osc", kc: "OSC", label: "OSC", cat: "mom", where: "sub", desc: "变动率柱（震荡量指标）" },
