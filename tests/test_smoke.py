@@ -1,5 +1,6 @@
 """M1 冒烟：仅凭契约即可对接 K线/板块/核心标 三页端点。"""
 import json
+from datetime import date
 
 import pytest
 from fastapi.testclient import TestClient
@@ -79,16 +80,20 @@ def test_quotes_batch(client: TestClient):
 
 def test_quotes_batch_rt_overlay(client: TestClient, monkeypatch):
     """盘中批量实时覆盖：一次腾讯 HTTP 后价格字段改用实时值（与单只同规约）。"""
+    import app.foundation.live as _live
+    _live._RTS_CACHE.clear()        # 隔离其他用例/真实网络留下的实时缓存（flaky 源）
+    # ts 必须是动态「今天」：_apply_rt 以快照日==今天判定盘中覆盖（写死日期跨天即挂）
+    today = date.today().isoformat() + " 10:30"
     monkeypatch.setattr("app.foundation.live.realtime_quotes", lambda syms: {
         s: {"price": 888.0, "open": 880.0, "high": 890.0, "low": 875.0,
             "prev_close": 870.0, "pct": 2.07, "volume": 12300.0, "amount": 1.1e9,
             "turnover": 3.3, "pe_ttm": 30.0, "pb": 8.0,
-            "total_mv_yi": 9000.0, "circ_mv_yi": 9000.0, "ts": "2026-10-30 10:30"}
+            "total_mv_yi": 9000.0, "circ_mv_yi": 9000.0, "ts": today}
         for s in syms})
     r = client.get("/api/v1/market/quotes", params={"symbols": "600519,000858"})
     assert r.status_code == 200
     for q in r.json()["items"]:
-        assert q["rt_price"] == 888.0 and q["rt_time"] == "2026-10-30 10:30"
+        assert q["rt_price"] == 888.0 and q["rt_time"] == today
         assert q["close"] == 888.0 and q["pct_chg"] == 2.07   # 盘中覆盖
         assert q["rt_prev_close"] == 870.0
 
@@ -196,7 +201,8 @@ def test_data_status(client: TestClient):
     assert tables["daily_ohlcv"]["rows"] == 180
     assert tables["daily_ohlcv"]["latest_date"] == "2026-10-30"
     assert tables["corepicks_result"]["rows"] == 1
-    assert tables["stock_profile"]["rows"] == 0
+    # stock_profile（主营/行业资料，AI 解读上下文表）0 行空表不出现在看板清单
+    assert "stock_profile" not in tables
 
 
 def test_index_kline_and_quote(client: TestClient, duckdb_file):

@@ -4,14 +4,14 @@ from datetime import datetime
 _INVENTORY = (
     "daily_ohlcv", "adjust_factor", "capital_flow", "financials",
     "stock_universe", "sector_index", "daily_valuation",
-    "corepicks_result", "stock_profile",
+    "corepicks_result",
 )
 
 # 个股维度表 → 完整度按「最新截面覆盖标的数 / 全市场证券数」计算；
 # 其余（板块快照/证券清单/核心标名单）不适用 → None
 _COVERAGE_TABLES = {
     "daily_ohlcv": "date", "adjust_factor": "ex_date", "capital_flow": "date",
-    "financials": "report_date", "daily_valuation": "date", "stock_profile": None,
+    "financials": "report_date", "daily_valuation": "date",
 }
 
 
@@ -57,7 +57,7 @@ def table_status(conn, table: str) -> dict:
 _DATE_COL = {
     "daily_ohlcv": "date", "adjust_factor": "ex_date", "capital_flow": "date",
     "financials": "report_date", "stock_universe": None, "sector_index": "trade_date",
-    "daily_valuation": "date", "corepicks_result": "date", "stock_profile": None,
+    "daily_valuation": "date", "corepicks_result": "date",
 }
 
 
