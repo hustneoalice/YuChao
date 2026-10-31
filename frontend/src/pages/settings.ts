@@ -84,6 +84,7 @@ const fmtW = (n: number): string => (n >= 10000 ? `${(n / 10000).toFixed(1)} 万
 
 let upTimer: ReturnType<typeof setInterval> | null = null;
 const stopUpState = (): void => { if (upTimer) { clearInterval(upTimer); upTimer = null; } };
+/* 顶栏徽章的轮询句柄（update 态自适应 3s）另用 upChipTimer，避免与设置页页内轮询冲突 */
 
 /** 秒 → 人话时长（策影 fmtDur） */
 const fmtDur = (s?: number | null): string => {
@@ -594,10 +595,45 @@ export async function refreshDatachip(): Promise<void> {
   }
 }
 
+/* ── 顶栏全局进度徽章（策影同款）：更新任务运行/排队时 datachip 变进度胶囊 ──
+ * 自适应轮询：活动态 3s 跟进度，空闲即停（恢复常规 status 显示）；
+ * 唤醒源 = SSE data:update（任务开始/进度/结束都推）+ 启动与 60s status 兜底。 */
+let upActive = false;
+let upChipTimer: ReturnType<typeof setTimeout> | null = null;
+
+export async function refreshUpChip(): Promise<void> {
+  if (upChipTimer) { clearTimeout(upChipTimer); upChipTimer = null; }
+  const el = document.getElementById("datachip");
+  const t = document.getElementById("datachip-t");
+  if (!el || !t) return;
+  let snap: UpdateSnapshot | null = null;
+  try { snap = await dataApi.state(); } catch { /* 快照不可达保持原样 */ }
+  const r = snap?.running;
+  const q = snap?.queued?.length ?? 0;
+  const active = !!(r || q);
+  if (r) {
+    t.textContent = `更新中 · ${r.label} ${(r.percent ?? 0).toFixed(0)}%`;
+    el.className = "datachip i-run";
+    el.title = `${r.stage || r.label}${r.total ? ` · ${r.done}/${r.total}` : ""} · 点击查看详情`;
+  } else if (q) {
+    t.textContent = `更新排队 · ${q} 项`;
+    el.className = "datachip i-mid";
+    el.title = "任务排队中 · 点击查看详情";
+  }
+  if (active !== upActive) {
+    upActive = active;
+    if (!active) void refreshDatachip();   // 刚结束：恢复「行情底座 · 健康 · 日期」
+  }
+  if (active) upChipTimer = setTimeout(() => void refreshUpChip(), 3000);
+}
+
 export function initSettings(): void {
   void render();
   void refreshDatachip();
-  setInterval(() => void refreshDatachip(), 60_000);
+  void refreshUpChip();          // 启动即查一次更新活动（首屏就有徽章态）
+  setInterval(() => {
+    if (!upActive) void refreshDatachip();
+  }, 60_000);
   // 登录后 tier 实时刷新
   void authApi.me().then((u) => setUser(u)).catch(() => { /* 未登录静默 */ });
 }

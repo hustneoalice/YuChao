@@ -118,6 +118,8 @@ svg{display:block}
   background:var(--panel)}
 .datachip i{width:7px;height:7px;border-radius:50%;background:var(--down);flex:none}
 .datachip.i-up i{background:var(--up)} .datachip.i-mid i{background:var(--warn);animation:pulse 1.2s infinite}
+.datachip.i-run i{background:var(--accent);animation:pulse 1.2s infinite}
+.datachip.i-run{border-color:var(--accent);color:var(--text)}
 @keyframes pulse{50%{opacity:.35}}
 .topbar .sp{flex:1}
 .icbtn{width:32px;height:32px;border-radius:9px;display:grid;place-items:center;color:var(--dim);position:relative}
@@ -566,6 +568,11 @@ body.mobile .rcard .cbar{opacity:1}
 /* ── 底部导航条（缩略图 + 可拖拽窗口 + 回到最新） ── */
 .kl-nav{position:relative;flex:none;height:44px;margin-top:5px;
   border-top:1px solid var(--border-soft);overflow:hidden}
+/* 中心日期范围文字（策影同款）：悬浮于缩略图上方居中，不挡拖拽 */
+.kl-nav-time{position:absolute;left:50%;top:50%;transform:translate(-50%,-50%);z-index:5;
+  pointer-events:none;font-family:var(--mono),ui-monospace,monospace;font-size:10.5px;
+  color:var(--dim);background:color-mix(in srgb,var(--panel) 85%,transparent);
+  padding:1px 7px;border-radius:6px;white-space:nowrap}
 .kl-nav-cv{position:absolute;left:52px;right:52px;top:0;bottom:0;width:auto;height:100%;display:block}
 .kl-nav-win{position:absolute;top:0;bottom:0;cursor:grab;
   background:color-mix(in srgb,var(--accent) 10%,transparent);
@@ -792,7 +799,10 @@ body.mobile .shell{grid-template-columns:1fr;
 body.mobile .topbar{gap:8px;padding:0 10px}
 body.mobile .gsearch{flex:1;width:auto;min-width:0}
 body.mobile .gsearch .gbox .mono{display:none}
-body.mobile .datachip,body.mobile .vipbadge{display:none}
+/* 手机版：空闲态藏 datachip（省空间），更新活动时强制显示紧凑徽章（顶栏唯一全局进度入口） */
+body.mobile .datachip{display:none}
+body.mobile .datachip.i-run,body.mobile .datachip.i-mid{display:flex;height:26px;padding:0 9px;font-size:10.5px;gap:5px}
+body.mobile .vipbadge{display:none}
 body.mobile .userchip #user-name{display:none}
 body.mobile .brand span{display:none}
 /* 六页通用：页面纵向滚动 */

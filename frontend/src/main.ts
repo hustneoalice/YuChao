@@ -11,7 +11,7 @@ import { initWatchlist, renderWatchlist } from "./pages/watchlist";
 import { initSectors, loadSectors } from "./pages/sectors";
 import { initCorepicks, renderCorepicks } from "./pages/corepicks";
 import { initCards, renderCards } from "./pages/cards";
-import { initSettings, refreshDatachip, openSettingsTab } from "./pages/settings";
+import { initSettings, refreshDatachip, refreshUpChip, openSettingsTab } from "./pages/settings";
 import { initSync, pullOnLogin } from "./sync";
 import { SseClient } from "./sse";
 import { initWatchPanel } from "./watch";
@@ -184,7 +184,10 @@ function boot(): void {
     if (ch === "data:update") void refreshDatachip();
   });
   sse.on((ev) => {
-    if (ev.channel === "data:update") void refreshDatachip();
+    if (ev.channel === "data:update") {
+      void refreshDatachip();
+      void refreshUpChip();      // 任务开始/进度/结束 → 顶栏进度徽章（活动态 3s 自跟）
+    }
     if (ev.channel === "corepicks:daily") {
       loaded.corepicks = false;
       if (document.getElementById("page-corepicks")!.classList.contains("on")) {
