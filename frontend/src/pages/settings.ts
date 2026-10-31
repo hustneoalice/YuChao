@@ -588,7 +588,8 @@ export async function refreshDatachip(): Promise<void> {
     const latest = st.tables.map((x) => x.latest_date).filter(Boolean).sort().pop();
     const [label, cls] = STAGE_TEXT[st.stage] ?? ["未知", "bad"];
     t.textContent = `行情底座 · ${label}${latest ? " · " + latest : ""}`;
-    el.className = "datachip" + (cls === "ok" ? " i-up" : cls === "warn" ? " i-mid" : "");
+    // i-ok：健康用绿点（--up 是 A 股涨的红，语义是行情不是状态，勿用于健康态）
+    el.className = "datachip" + (cls === "ok" ? " i-ok" : cls === "warn" ? " i-mid" : "");
   } catch {
     t.textContent = "行情底座 · 不可达";
     el.className = "datachip";

@@ -117,7 +117,7 @@ svg{display:block}
   border:1px solid var(--border);border-radius:999px;font-size:11.5px;color:var(--dim);
   background:var(--panel)}
 .datachip i{width:7px;height:7px;border-radius:50%;background:var(--down);flex:none}
-.datachip.i-up i{background:var(--up)} .datachip.i-mid i{background:var(--warn);animation:pulse 1.2s infinite}
+.datachip.i-ok i{background:#30D158} .datachip.i-mid i{background:var(--warn);animation:pulse 1.2s infinite}
 .datachip.i-run i{background:var(--accent);animation:pulse 1.2s infinite}
 .datachip.i-run{border-color:var(--accent);color:var(--text)}
 @keyframes pulse{50%{opacity:.35}}
