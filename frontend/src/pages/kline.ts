@@ -239,8 +239,8 @@ function ensureRegistered(): void {
       precision: 0,
       shouldFormatBigNumber: true,
       calc: (kLineDataList) => {
-        const list = kLineDataList as unknown as { volume?: number }[];
-        const out: { volume: number | null; ma5: number | null; ma10: number | null; ma40: number | null }[] = [];
+        const list = kLineDataList as unknown as { volume?: number; open?: number; close?: number }[];
+        const out: { volume: number | null; ma5: number | null; ma10: number | null; ma40: number | null; open?: number; close?: number }[] = [];
         let s5 = 0, s10 = 0, s40 = 0;
         for (let i = 0; i < list.length; i++) {
           const v = list[i].volume ?? 0;
@@ -253,6 +253,8 @@ function ensureRegistered(): void {
             ma5: i >= 4 ? s5 / 5 : null,
             ma10: i >= 9 ? s10 / 10 : null,
             ma40: i >= 39 ? s40 / 40 : null,
+            // 复制 open/close 到结果项供柱色回调判断涨跌（策影内置 VOL 同款）
+            open: list[i].open, close: list[i].close,
           });
         }
         return out as never;
@@ -260,14 +262,19 @@ function ensureRegistered(): void {
       figures: [
         {
           key: "volume", title: "VOL", type: "bar",
+          // v10 回调第一参即 {data:{prev,current,next}}，current 为 calc 结果项
           styles: (raw: unknown) => {
             const c = (raw as { data?: { current?: { close?: number; open?: number } } })?.data?.current;
-            return { color: c && c.close != null && c.close < (c.open ?? c.close) ? chartDown() : chartUp() };
+            const up = cssv("--up") || "#E64545", dn = cssv("--down") || "#2FBF71";
+            if (c?.close == null || c.open == null) return { color: NEUTRAL };
+            if (c.close > c.open) return { color: up };
+            if (c.close < c.open) return { color: dn };
+            return { color: NEUTRAL };
           },
         },
         { key: "ma5", title: "MA5", type: "line", styles: () => ({ color: "#FF9F43", lineWidth: 1 }) },
         { key: "ma10", title: "MA10", type: "line", styles: () => ({ color: "#4DD0E1", lineWidth: 1 }) },
-        { key: "ma40", title: "MA40", type: "line", styles: () => ({ color: "#AB47BC", lineWidth: 1 }) },
+        { key: "ma40", title: "MA40", type: "line", styles: () => ({ color: "#AB47BC", lineWidth: 1.5 }) },
       ],
     });
   } catch { /* 重复注册忽略 */ }
