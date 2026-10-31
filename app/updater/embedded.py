@@ -93,7 +93,10 @@ def start_core(*, scheduler: bool) -> EmbeddedCore:
     orchestrator.bus = make_publisher()
     for spec in TASKS:
         orchestrator.register(spec["kind"], spec["label"], resolve_fn(spec),
-                              description=spec["description"])
+                              description=spec["description"],
+                              meta={k: spec[k] for k in
+                                    ("freshness", "needs", "min_rows")
+                                    if k in spec})
     orchestrator.start()
     from .selfheal import Selfheal
     core.selfheal = Selfheal()

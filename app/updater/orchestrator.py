@@ -31,11 +31,18 @@ from typing import Any, Callable, Dict, List, Optional
 
 from ..config import settings
 from ..stream.bus import StreamBus
+from .util import expected_asof
 from .writer import writer
 
 logger = logging.getLogger("yuchao.updater")
 
 _TERMINAL = {"completed", "failed", "skipped", "cancelled", "interrupted"}
+
+# 失败自动重试（2.x 超越策影：策影 job 异常仅日志，漏一天要等次日 selfheal
+# 才发现）。当日退避重试两次（5/15 分钟）；计时器不落盘，进程重启丢失的
+# 补跑由 selfheal 次日兜底。manual 触发不自动重试——用户在场，自己决定。
+_RETRY_DELAYS = (300, 900)
+_RETRY_TRIGGERS = {"cron", "selfheal", "startup", "retry"}
 
 _RECENT_KEEP = 30       # 内存保留的终态任务条数
 _LOG_KEEP = 200         # 单任务日志行数上限
@@ -56,6 +63,7 @@ KIND_DATASETS: Dict[str, List[str]] = {
                        "stock_universe", "sector_index", "daily_valuation",
                        "corepicks_result", "stock_profile"],
     "package_export": [],                    # 只读导出，底座数据未变
+    "backup": [],                            # 快照写库外文件，不触发前端失效
     "backfill": ["daily_ohlcv", "daily_valuation", "capital_flow"],
 }
 
@@ -162,11 +170,17 @@ class UpdateOrchestrator:
     # -- 注册 -------------------------------------------------------------
 
     def register(self, kind: str, label: str, fn: Callable, *,
-                 description: str = "", cooldown_s: Optional[int] = None):
-        """注册一种更新任务。fn(progress, ctx) -> dict"""
+                 description: str = "", cooldown_s: Optional[int] = None,
+                 meta: Optional[Dict[str, Any]] = None):
+        """注册一种更新任务。fn(progress, ctx) -> dict。
+
+        meta：registry 声明的守卫元数据（freshness / needs / min_rows），
+        _precheck 与写后行数下限防线从这里读——注册时丢字段守卫就形同虚设。
+        """
         self._registry[kind] = {
             "kind": kind, "label": label, "fn": fn, "description": description,
             "cooldown_s": cooldown_s if cooldown_s is not None else self.cooldown_s,
+            **(meta or {}),
         }
 
     def kinds(self) -> List[Dict[str, Any]]:
@@ -204,6 +218,8 @@ class UpdateOrchestrator:
                     return {"ok": False, "cooldown": True, "remaining_s": remain,
                             "message": f"{spec['label']} 冷却中，{remain}s 后可再触发"}
 
+            if force:                       # force 同时越过冷却与新鲜度预检
+                params = {**(params or {}), "force": True}
             task = UpdateTask(kind, spec["label"], trigger, params)
             self._tasks[task.id] = task
             self._queue.append(task.id)
@@ -214,6 +230,13 @@ class UpdateOrchestrator:
         self._ensure_worker()
         self._wake.set()
         return {"ok": True, "task": task.to_dict()}
+
+    def _retry_submit(self, kind: str, attempt: int):
+        """失败自动重试的入队（force 绕过冷却；去重防与手动触发叠加）。"""
+        r = self.submit(kind, trigger="retry", params={"attempt": attempt},
+                        force=True)
+        if r.get("ok") and not r.get("deduped"):
+            logger.info("[Orchestrator] %s 已入队第 %d 次自动重试", kind, attempt)
 
     def cancel(self, task_id: Optional[str] = None) -> Dict[str, Any]:
         """请求取消：排队中的直接移除，运行中的置标记由执行函数自行退出。"""
@@ -327,32 +350,49 @@ class UpdateOrchestrator:
                 self._publish_state(t, "running")
             self._persist()
 
-        status, error, detail = "completed", "", ""
+        # 2.x 执行前置守卫：新鲜度秒跳 / 上游失败传播。均以 skipped 正常落账
+        # ——「跳过」是信息不是错误（策影到点全量跑，这两项能力都缺失）。
+        guard = self._precheck(task, spec, bool((task.params or {}).get("force")))
+        status, error, detail = ("skipped", "", guard) if guard \
+            else ("completed", "", "")
         t = task
-        try:
-            if not spec:
-                raise RuntimeError(f"任务类型未注册: {task.kind}")
-            ctx = dict(task.params)
-            ctx["task_id"] = task_id
-            ctx["cancel_check"] = lambda: self.is_cancelled(task_id)
-            ctx["bus"] = self.bus          # 任务层用它发频道事件（kline.update 等）
-            res = spec["fn"](progress, ctx) or {}
-            status = res.get("status") or "completed"
-            if res.get("error"):
-                # 主流程成功但子项失败时也要把原因带出来，
-                # 否则「任务成功、数据没动」会再次被静默吞掉
-                error = str(res["error"])[:2000]
-            detail = str(res.get("detail") or "")[:500]
-            with self._lock:
-                if t:
-                    t.rows = int(res.get("rows", t.rows) or 0)
-                    if res.get("total"):
-                        t.total = int(res["total"])
-                    if res.get("success") is not None:
-                        t.succeeded = int(res.get("success") or 0)
-        except Exception as e:
-            status, error = "failed", f"{type(e).__name__}: {e}"
-            logger.exception("[Orchestrator] 任务异常 %s", task.label)
+        if not guard:
+            try:
+                if not spec:
+                    raise RuntimeError(f"任务类型未注册: {task.kind}")
+                ctx = dict(task.params)
+                ctx["task_id"] = task_id
+                ctx["cancel_check"] = lambda: self.is_cancelled(task_id)
+                ctx["bus"] = self.bus          # 任务层用它发频道事件（kline.update 等）
+                res = spec["fn"](progress, ctx) or {}
+                status = res.get("status") or "completed"
+                if res.get("error"):
+                    # 主流程成功但子项失败时也要把原因带出来，
+                    # 否则「任务成功、数据没动」会再次被静默吞掉
+                    error = str(res["error"])[:2000]
+                detail = str(res.get("detail") or "")[:500]
+                with self._lock:
+                    if t:
+                        t.rows = int(res.get("rows", t.rows) or 0)
+                        if res.get("total"):
+                            t.total = int(res["total"])
+                        if res.get("success") is not None:
+                            t.succeeded = int(res.get("success") or 0)
+            except Exception as e:
+                status, error = "failed", f"{type(e).__name__}: {e}"
+                logger.exception("[Orchestrator] 任务异常 %s", task.label)
+
+        # 2.x 写后防线：整包行数下限（registry 声明 min_rows 的快照/重建型任务；
+        # 增量型任务不设——资金流/K线/因子 0 行增量是合法的）。
+        # 「成功但只写回 37 行」= WAF 假成功一类的整包垃圾，按失败处理进重试。
+        floor = (spec or {}).get("min_rows")
+        if floor and status in ("success", "completed") \
+                and (t.rows or 0) < int(floor):
+            status = "failed"
+            error = (f"仅写入 {t.rows} 行，低于下限 {floor}"
+                     "（疑似数据源整包异常），拒绝按成功落账")
+            logger.warning("[Orchestrator] %s 行数下限防线触发: %s",
+                           task.label, error)
 
         with self._lock:
             t = self._tasks.get(task_id)
@@ -416,9 +456,72 @@ class UpdateOrchestrator:
                     self.on_record(t.kind, t.status, t.error)
                 except Exception:
                     logger.debug("[Orchestrator] on_record 回调失败", exc_info=True)
+            # 2.x 失败自动重试：当日退避（5/15 分钟），不再等次日 selfheal。
+            # manual 触发不重试（用户在场自己决定）；用户取消过的失败也不重试。
+            attempt = int((task.params or {}).get("attempt") or 0)
+            if (status == "failed" and not cancelled
+                    and task.trigger in _RETRY_TRIGGERS
+                    and attempt < len(_RETRY_DELAYS)):
+                delay = _RETRY_DELAYS[attempt]
+                nxt = attempt + 1
+                self._event(f"{task.label} 失败，{delay // 60} 分钟后自动重试"
+                            f"（第 {nxt}/{len(_RETRY_DELAYS)} 次）",
+                            "warning", kind=task.kind)
+                timer = threading.Timer(delay, self._retry_submit,
+                                        args=(task.kind, nxt))
+                timer.daemon = True
+                timer.start()
         # 释放写锁：DuckDB 写连接是排他的——持有期间连 read_only 连接都会被拒，
         # API 进程将完全不可用。锁只在任务执行窗口持有，空闲期让位给 API。
         writer.reset()
+
+    def _precheck(self, task, spec: Optional[Dict[str, Any]], force: bool) -> str:
+        """执行前置守卫（2.x）：新鲜度秒跳 + 上游失败传播。
+
+        交易日守卫在调度层（scheduler._cron_submit），这里管「该不该再跑一次」：
+        数据已最新 → skipped（省源压力，手动触发也安全）；上游今日失败 →
+        skipped（拒绝拿旧截面/旧因子硬算——策影靠 cron 时间错开，上游失败
+        下游照样跑旧数据）。预检自身失败一律放行：守卫是优化，不能因为
+        账本读不到就把任务卡死。返回 skipped 理由，空串 = 放行。
+        """
+        if not spec or force:
+            return ""
+        fr = spec.get("freshness")
+        if fr:
+            try:
+                if fr.get("log"):
+                    row = writer.conn().execute(
+                        "SELECT status FROM update_log WHERE data_type = ? "
+                        "AND CAST(created_at AS DATE) = CURRENT_DATE "
+                        "ORDER BY created_at DESC LIMIT 1",
+                        [task.kind]).fetchone()
+                    if row and row[0] in ("completed", "skipped"):
+                        return "今日已更新过（update_log 有账），秒跳"
+                else:
+                    tbl, col = fr["table"], fr["col"]
+                    row = writer.conn().execute(
+                        f"SELECT MAX(TRY_CAST(TRY_CAST({col} AS TIMESTAMP) "
+                        f"AS DATE)) FROM {tbl}").fetchone()
+                    if row and row[0] and str(row[0]) >= expected_asof():
+                        return f"数据已最新（{tbl}.{col} = {row[0]}），秒跳"
+            except Exception as e:
+                logger.debug("[Orchestrator] 新鲜度预检失败（放行）: %s", e)
+            finally:
+                writer.reset()
+        for up in spec.get("needs") or ():
+            try:
+                row = writer.conn().execute(
+                    "SELECT status FROM update_log WHERE data_type = ? "
+                    "AND CAST(created_at AS DATE) = CURRENT_DATE "
+                    "ORDER BY created_at DESC LIMIT 1", [up]).fetchone()
+            except Exception as e:
+                logger.debug("[Orchestrator] 依赖预检失败（放行）: %s", e)
+                row = None
+            finally:
+                writer.reset()
+            if row and row[0] == "failed":
+                return f"上游 {up} 今日失败，跳过（拒绝拿旧数据硬算）"
+        return ""
 
     def _trim_recent(self):
         while len(self._recent) > _RECENT_KEEP:

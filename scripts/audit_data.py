@@ -27,6 +27,9 @@ from pathlib import Path
 
 import duckdb
 
+# 独立脚本场景可从任意 cwd 运行：把仓库根加进 import 路径
+sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
+
 #: 隐含均价正常区间（amount/volume/close ≈1，放宽到 [0.2,5] 减少边缘误报）
 RATIO_OK = (0.2, 5.0)
 #: 自证审计范围：个股（裸码）与 ETF（带后缀的 51/15/56/58 段）；指数段
@@ -167,6 +170,18 @@ def audit(db: Path) -> int:
             print(f"[5] update_log 最近失败：{len(fails)} 条（最多展示 10）")
             for r in fails:
                 print(f"      {r[0]}  {r[1]}  {r[2]}  {str(r[3])[:80]}")
+
+        # 6. 交易日历自检 -----------------------------------------------------
+        # is_trading_day 对未知年份 fail-open，holidays 包过期 = 明年节假日全被
+        # 当成交易日（中秋幽灵日期教训的根源）——把「日历本身不新鲜」变成显式报警
+        try:
+            from app.updater.trading_calendar import calendar_health
+            cal = calendar_health()
+        except Exception as e:
+            cal = {"status": "unknown", "detail": f"日历模块不可用: {e}"}
+        print(f"[6] 交易日历自检：{cal['status']}——{cal['detail']}")
+        if cal["status"] in ("stale", "degraded"):
+            problems += 1
 
         verdict = "体检通过，未见异常" if problems == 0 else f"发现 {problems} 行异常，请处理"
         print(f"\n== 结论：{verdict} ==")

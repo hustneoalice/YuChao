@@ -2,32 +2,56 @@
 
 fn 用「模块:函数」字符串延迟解析——API 进程只读这份元数据，
 不 import 任何 DuckDB/采集器代码，读写分进程约束不被破坏。
+
+守卫元数据（2.x，orchestrator._precheck / 写后防线消费）：
+  freshness  新鲜度前置：{"table","col"} 目标表当日已落 → 秒跳；
+             {"log": True} update_log 有当日成功账 → 秒跳。
+             增量型任务（capital_flow/kline_update）不声明——它们靠 cutoff
+             增量语义天然幂等，重跑是补缺口，不能拦。
+  needs      上游依赖：上游今日 update_log 有 failed 账 → 下游 skip
+             （拒绝拿旧截面硬算；策影只靠 cron 时间错开，上游失败下游照跑）。
+  min_rows   写后行数下限（快照/重建型任务专属）：成功但行数低于下限 = 疑似
+             数据源整包异常（WAF 假成功类），按失败处理进自动重试。
 """
 
 TASKS: tuple[dict, ...] = (
     {"kind": "sector_index", "label": "行业板块快照",
      "fn": "app.updater.collectors.sector_index:update_sector_index",
+     "freshness": {"table": "sector_index", "col": "trade_date"},
+     "min_rows": 50,
      "description": "15:35 东财行业板块清单 → sector_index（含涨跌家数/领涨股）"},
     {"kind": "quotes", "label": "行情快照",
      "fn": "app.updater.collectors.quotes:update_quotes",
+     "freshness": {"log": True},
      "description": "16:00 腾讯 qt 批量报价：换手率补写 + 证券简称刷新"},
     {"kind": "valuation", "label": "全市场估值",
      "fn": "app.updater.collectors.valuation:update_valuation",
+     "freshness": {"table": "daily_valuation", "col": "date"},
+     "min_rows": 3000,
      "description": "16:20 东财 clist 全市场估值 → daily_valuation（腾讯备用车道）"},
     {"kind": "capital_flow", "label": "个股资金流",
      "fn": "app.updater.collectors.capital_flow:update_capital_flow",
      "description": "16:30 新浪逐只资金流 → capital_flow（唯一源）"},
     {"kind": "pe_percentile", "label": "PE 分位重建",
      "fn": "app.updater.collectors.pe_percentile:rebuild_pe_percentile",
+     "needs": ["valuation"],
+     "freshness": {"table": "pe_percentile", "col": "updated_at"},
+     "min_rows": 2000,
      "description": "16:50 基于最新估值截面重建全市场 PE 分位与行业中位"},
     {"kind": "kline_update", "label": "K 线增量",
      "fn": "app.updater.collectors.kline:update_kline",
      "description": "17:00 腾讯 fqkline 日线增量 → daily_ohlcv（东财备用）"},
     {"kind": "financials", "label": "财务数据",
      "fn": "app.updater.collectors.financials:update_financials",
+     "freshness": {"log": True},
+     "min_rows": 500,
      "description": "17:30 东财财务三表按报告期 → financials（覆盖近两期）"},
+    {"kind": "backup", "label": "库快照备份",
+     "fn": "app.updater.collectors.backup:run_backup",
+     "description": "18:10 CHECKPOINT → 整库快照（滚动 7 份，副本可读校验）"},
     {"kind": "adjust_factor", "label": "复权因子",
      "fn": "app.updater.collectors.adjust_factor:update_adjust_factor",
+     "freshness": {"log": True},
      "description": "周六 09:00 baostock 复权因子（可选依赖，缺失则 skipped）"},
     {"kind": "corepicks", "label": "核心标推送",
      "fn": "app.updater.collectors.corepicks:update_corepicks",
@@ -60,6 +84,7 @@ CRON_CHAIN: tuple[tuple[str, int, int], ...] = (
     ("pe_percentile", 16, 50),
     ("kline_update", 17, 0),
     ("financials", 17, 30),
+    ("backup", 18, 10),           # 更新链收尾后快照；策影零备份，这是超越点
     ("corepicks", 21, 0),
 )
 WEEKLY: tuple[tuple[str, int, int], ...] = (
