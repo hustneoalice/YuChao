@@ -29,6 +29,6 @@ stop_one() { # name port
   rm -f "$pid_file"
 }
 
-stop_one frontend 5173
+stop_one frontend 5178
 stop_one backend 8031
 echo "完成"

@@ -8,8 +8,8 @@ mkdir -p "$LOG_DIR"
 
 port_pid() { lsof -nP -tiTCP:"$1" -sTCP:LISTEN 2>/dev/null || true; }
 
-start_one() { # name port start_cmd
-  local name="$1" port="$2"; shift 2
+start_one() { # name port wait_secs start_cmd
+  local name="$1" port="$2" wait="$3"; shift 3
   if [ -n "$(port_pid "$port")" ]; then
     echo "[$name] 已在运行 (port $port)，跳过"
     return 0
@@ -19,8 +19,8 @@ start_one() { # name port start_cmd
   nohup bash -c "$@" >"$LOG_DIR/$name.log" 2>&1 &
   echo $! > "$PID_DIR/$name.pid"
   disown 2>/dev/null || true
-  # 等端口就绪（最多 30s）
-  for _ in $(seq 1 60); do
+  # 等端口就绪（backend 90s：写锁被旧进程只读连接占用时，reaper 最长 90s 才让锁）
+  for _ in $(seq 1 $((wait * 2))); do
     [ -n "$(port_pid "$port")" ] && break
     sleep 0.5
   done
@@ -33,8 +33,15 @@ start_one() { # name port start_cmd
   fi
 }
 
-start_one backend 8031 "cd '$ROOT' && PYTHONUNBUFFERED=1 .venv/bin/python -m uvicorn app.main:app --host 127.0.0.1 --port 8031 --log-level info"
-start_one frontend 5178 "cd '$ROOT/frontend' && npm run dev"
+# 清理残留的 yuchao 后端进程（可能已不在 8031 监听但持有 duckdb 写锁）
+if pids=$(pgrep -f "uvicorn app.main:app" 2>/dev/null); then
+  echo "[backend] 清理残留进程：$pids"
+  kill -TERM $pids 2>/dev/null || true
+  sleep 1
+fi
+
+start_one backend 8031 90 "cd '$ROOT' && PYTHONUNBUFFERED=1 .venv/bin/python -m uvicorn app.main:app --host 127.0.0.1 --port 8031 --log-level info"
+start_one frontend 5178 30 "cd '$ROOT/frontend' && npm run dev"
 
 echo
 echo "驭潮已就绪：前端 http://localhost:5178 · 后端 http://127.0.0.1:8031"
