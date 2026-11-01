@@ -2,7 +2,7 @@
  * 指标层（均线/量比/六分段/涨停次数）服务端一次算好按数据日缓存；
  * 条件层前端勾选 → 传参即时重筛；数据更新后缓存键变化自动重算。
  * 页面打开时加载，驻留期间 60s 轮询（数据更新即新结果）。 */
-import { marketApi, type TargetItem, type TargetScanOut } from "../api";
+import { marketApi, type TargetItem } from "../api";
 import { esc, fmt, fmtChg } from "../fmt";
 import { trendPalette } from "./kline";
 
@@ -21,18 +21,27 @@ try {
 let timer: ReturnType<typeof setInterval> | null = null;
 let busy = false;
 
+/* 分页：指标层一次算完返回全量，前端每页 50 条本地翻页 */
+const PAGE_SIZE = 50;
+let items: TargetItem[] = [];
+let page = 1;
+let scanned = 0;
+
 function condsParam(): string {
   return CONDS.filter((d) => conds[d.k]).map((d) => d.k).join(",");
 }
 
-async function load(): Promise<void> {
+async function load(resetPage = false): Promise<void> {
   if (busy) return;
   busy = true;
   const st = document.getElementById("tgt-status")!;
   st.textContent = "计算中…";
   try {
-    const r = await marketApi.targets(condsParam(), 300);
-    render(r);
+    const r = await marketApi.targets(condsParam(), 500);
+    items = r.items;
+    scanned = r.scanned;
+    if (resetPage) page = 1;
+    drawPage();
     st.textContent = r.as_of ? `数据截至 ${r.as_of}` : "";
   } catch {
     st.textContent = "计算失败，稍后自动重试";
@@ -41,20 +50,26 @@ async function load(): Promise<void> {
   }
 }
 
-function render(r: TargetScanOut): void {
+function drawPage(): void {
   const body = document.getElementById("tgt-body")!;
   const empty = document.getElementById("tgt-empty")!;
+  const pager = document.getElementById("tgt-pager")!;
   document.getElementById("tgt-hits")!.textContent =
-    `命中 ${r.total_hits} / 扫描 ${r.scanned} 只`;
-  empty.style.display = r.items.length ? "none" : "grid";
+    `命中 ${items.length} / 扫描 ${scanned} 只`;
+  empty.style.display = items.length ? "none" : "grid";
+  const pages = Math.max(1, Math.ceil(items.length / PAGE_SIZE));
+  page = Math.min(Math.max(1, page), pages);
+  const start = (page - 1) * PAGE_SIZE;
+  const slice = items.slice(start, start + PAGE_SIZE);
+
   const pal = trendPalette();
   const ORANGE = `rgb(${pal.fr.join(",")})`, BLUE = `rgb(${pal.sr.join(",")})`;
-  body.innerHTML = r.items.map((t, i) => {
+  body.innerHTML = slice.map((t, i) => {
     const ch = t.pct_chg ?? 0;
     const dot = (on: boolean) => `<span style="color:${on ? ORANGE : BLUE}">●</span> ${on ? "橙" : "蓝"}`;
     const state = `${t.pullback ? "回调中" : "上行"} · ${t.short_orange ? "橙" : "蓝"}`;
     return `<tr data-stock="${t.symbol}" data-name="${esc(t.name || t.symbol)}">` +
-      `<td class="num" style="color:var(--faint)">${i + 1}</td>` +
+      `<td class="num" style="color:var(--faint)">${start + i + 1}</td>` +
       `<td class="num">${t.symbol}</td>` +
       `<td><span style="font-weight:600">${esc(t.name || t.symbol)}</span></td>` +
       `<td class="n num">${fmt(t.close ?? 0)}</td>` +
@@ -70,6 +85,14 @@ function render(r: TargetScanOut): void {
       document.dispatchEvent(new CustomEvent("yc:open-stock", {
         detail: { symbol: tr.dataset.stock, name: tr.dataset.name,
           from: { page: "targets", label: "目标监控" } } }))));
+
+  pager.innerHTML = items.length === 0 ? "" :
+    pages === 1 ? `<span style="font-size:11.5px;color:var(--faint)">共 ${items.length} 条</span>` :
+      `<button class="hbtn" id="pg-prev" ${page <= 1 ? "disabled" : ""}>上一页</button>` +
+      `<span style="font-size:11.5px;color:var(--dim)">第 ${page} / ${pages} 页 · 共 ${items.length} 条</span>` +
+      `<button class="hbtn" id="pg-next" ${page >= pages ? "disabled" : ""}>下一页</button>`;
+  pager.querySelector("#pg-prev")?.addEventListener("click", () => { page -= 1; drawPage(); });
+  pager.querySelector("#pg-next")?.addEventListener("click", () => { page += 1; drawPage(); });
 }
 
 function renderConds(): void {
@@ -83,7 +106,7 @@ function renderConds(): void {
       conds[k] = !conds[k];
       localStorage.setItem("yc_tgt_conds", JSON.stringify(conds));
       renderConds();
-      void load();                       // 改条件 → 即时重筛（指标层缓存，毫秒级）
+      void load(true);                   // 改条件 → 即时重筛（指标层缓存，毫秒级）
     }));
 }
 
