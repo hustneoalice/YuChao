@@ -665,8 +665,9 @@ export function mountKline(el: HTMLElement): KlineChartHandle {
       },
     },
   }) as Chart;
-  // 最新K线贴右：默认 50px 右偏移清零，首根（最新）紧挨 Y 刻度
-  try { chart.setOffsetRightDistance(0); } catch { /* 忽略 */ }
+  // 最后一根 K 线右侧留 80px 空白：offsetRightDistance=0 时最新 K 线紧贴 Y 轴
+  // 边界，轴线/刻度会盖住最后几根（策影/同花顺同款右留白）
+  try { chart.setOffsetRightDistance(80); } catch { /* 忽略 */ }
   // v10 门控：symbol/period 无效时 getBars 永远不触发（canvas 空白无报错），
   // 数据虽由外部回填，仍需设置合法 symbol/period 才能打开加载开关
   chart.setSymbol({ ticker: "YUCHAO", pricePrecision: 2, volumePrecision: 0 });
