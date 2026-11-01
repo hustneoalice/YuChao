@@ -1,5 +1,6 @@
 /* ═══ YuChao · 设计系统令牌（暗色看盘默认 / 亮色文档模式） ═══ */
 :root,[data-theme="dark"]{
+  color-scheme:dark;
   --page:#0A0A0B; --panel:#161618; --panel-2:#232326; --panel-3:#2D2D31;
   --border:#2B2B2F; --border-soft:rgba(255,255,255,.06);
   --text:#F5F5F7; --dim:#A1A1A6; --faint:#717176;
@@ -19,6 +20,7 @@
   --mono:ui-monospace,SFMono-Regular,Menlo,Consolas,monospace;
 }
 [data-theme="light"]{
+  color-scheme:light;
   --page:#F5F5F7; --panel:#FFFFFF; --panel-2:#F2F2F7; --panel-3:#E9E9EE;
   --border:#E6E6EB; --border-soft:rgba(0,0,0,.05);
   --text:#1D1D1F; --dim:#6E6E73; --faint:#9A9AA0;
@@ -285,6 +287,8 @@ tbody tr:hover td{background:var(--panel-2)}
 th.n,td.n{text-align:right;font-variant-numeric:tabular-nums}
 th.n{color:var(--dim)}
 .hbtn:disabled{opacity:.35;cursor:default}
+/* 目标页条件区：.panel 本身无内边距，左右必须与 .phead2 对齐留 14px，否则 chips/设置控件贴边框 */
+#tgt-conds{display:flex;gap:8px;align-items:center;flex-wrap:wrap;padding:10px 14px 12px}
 /* 目标表：满宽铺开 + 各列最小宽，间距均匀不留大片空白 */
 #page-targets table{width:100%}
 #page-targets td:nth-child(2){min-width:78px}
@@ -294,6 +298,19 @@ th.n{color:var(--dim)}
 #page-targets td:nth-child(9){min-width:66px}
 #page-targets td:nth-child(10){min-width:112px}
 #page-targets td:nth-child(11){min-width:96px}
+/* 趋势柱线条件设置行：原生 select / number / checkbox 统一走主题色底，暗色下不再白底浅字看不清 */
+.tgt-trend-set{display:flex;align-items:center;gap:10px;flex-wrap:wrap;padding:10px 0;width:100%}
+.tgt-trend-set label{display:inline-flex;align-items:center;gap:6px;font-size:12px;color:var(--text)}
+.tgt-trend-set select,.tgt-trend-set input[type="number"]{height:26px;padding:0 7px;
+  background:var(--panel-2);color:var(--text);border:1px solid var(--border);border-radius:6px;font-size:12px;outline:none}
+.tgt-trend-set input[type="number"]{width:65px}
+.tgt-trend-set select{cursor:pointer;padding-right:4px}
+.tgt-trend-set select:hover,.tgt-trend-set input[type="number"]:hover{border-color:var(--axis)}
+.tgt-trend-set select:focus,.tgt-trend-set input[type="number"]:focus{
+  border-color:color-mix(in srgb,var(--accent) 55%,transparent)}
+.tgt-trend-set select option{background:var(--panel-2);color:var(--text)}
+.tgt-trend-set input[type="checkbox"]{width:13px;height:13px;margin:0;accent-color:var(--accent);cursor:pointer}
+.tgt-trend-hint{font-size:12px;color:var(--faint)}
 /* 通用分页条（全列表一套设计） */
 .pager{display:flex;gap:8px;align-items:center;justify-content:flex-end;padding:10px 2px 0;flex-wrap:wrap}
 .pager:empty{display:none}
