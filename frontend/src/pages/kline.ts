@@ -10,6 +10,7 @@ import type { Bar } from "../api";
 import { cssv, fmt, fmtYi, fmtVol } from "../fmt";
 import { sixSegmentSeries } from "../indicators";
 import { accumulationSeries } from "../accumulation";
+import { volumeActivitySeries } from "../volume-activity";
 
 /* ── 策影配色（tradingColors） ── */
 const UP = "#EF5350";
@@ -220,6 +221,23 @@ function ensureRegistered(): void {
       key: "accumulation", title: "吸筹", type: "bar", baseValue: 0,
       styles: () => ({ color: "#F000FF", borderColor: "#F000FF", borderSize: 1, style: "stroke" }),
     }],
+  });
+  registerIndicator({
+    name: "ZY_VOLUME_ACTIVITY", shortName: "量能活跃·估算股本", precision: 2,
+    calc: (list) => {
+      const capital = (list[0] as { floatShares?: number } | undefined)?.floatShares ?? null;
+      return volumeActivitySeries(list, capital).map(v => ({
+        ...v, marker: v.signal ? 0 : null,
+      }));
+    },
+    figures: [
+      { key: "short", title: "短线量能", type: "bar", baseValue: 0,
+        styles: (raw: unknown) => ({ color: ((raw as {data?: {current?: {short?: number}}}).data?.current?.short ?? 0) >= 0 ? "#FF5356" : "#2D9E00" }) },
+      { key: "trend", title: "趋势量能", type: "line", styles: () => ({ color: "#25ACFA", size: 1.5 }) },
+      { key: "marker", title: "", type: "text",
+        attrs: (raw: unknown) => ({ text: (raw as {data?: {current?: {signal?: string}}}).data?.current?.signal ?? "" }),
+        styles: () => ({ color: "#FFD54F", size: 10, textBaseline: "bottom" }) },
+    ],
   });
   // ATR 自研（klinecharts v10 未内置）：14 日真实波幅均值
   try {
@@ -480,6 +498,7 @@ export const IND_DEFS: IndDef[] = [
   { key: "osc", kc: "OSC", label: "OSC", cat: "mom", where: "sub", desc: "变动率柱（震荡量指标）" },
   { key: "udl", kc: "UDL", label: "UDL", cat: "mom", where: "sub", desc: "引力线（多周期动量合成）" },
   // 量能类
+  { key: "volumeactivity", kc: "ZY_VOLUME_ACTIVITY", label: "量能活跃", cat: "vol", where: "sub", desc: "短线量能红绿柱、趋势量能蓝线及TL/PP/DL标记；以最近有效日量/换手率估算固定股本，尚未与原软件核对；指数或缺少数据不计算" },
   { key: "accumulation", kc: "ZY_ACCUMULATION", label: "主力吸筹", cat: "vol", where: "sub", desc: "众赢安装包公式移植，尚未与原软件逐点核对；紫色柱为价格推导指标，非实际主力资金" },
   { key: "vol", kc: "VOLX", label: "VOL", cat: "vol", where: "sub", desc: "成交量（5/10/40 日均量线）" },
   { key: "obv", kc: "OBV", label: "OBV", cat: "vol", where: "sub", desc: "能量潮（量能累积方向）" },
@@ -535,7 +554,7 @@ export interface RangeFund {
 
 export interface KlineChartHandle {
   chart: Chart;
-  setData: (bars: Bar[], keepView?: boolean) => void;
+  setData: (bars: Bar[], keepView?: boolean, floatShares?: number | null) => void;
   /** 主图多选叠加：增量增删，不动已叠加的同名指标 */
   setMain: (inds: MainKey[]) => void;
   /** 图内右上角指标图例（MA/BOLL/操盘趋势，色块+名称；多面板时每实例一份） */
@@ -1118,11 +1137,11 @@ export function mountKline(el: HTMLElement): KlineChartHandle {
 
   const handle: KlineChartHandle = {
     chart,
-    setData: (bars: Bar[], keepView = false) => {
+    setData: (bars: Bar[], keepView = false, floatShares: number | null = null) => {
       const list = bars.map((b) => ({
         timestamp: toTs(b.date), open: b.open, high: b.high, low: b.low,
         close: b.close, volume: b.volume ?? 0, amount: b.amount ?? 0,
-        date: b.date,
+        date: b.date, floatShares,
       }));
       // 盘中的增量重灌（同标的同周期）不该把视图弹回最右：用户在翻历史时
       // 每 12s 被拽回最新，选中的那根也就跑出屏幕了 —— 记下窗口，重灌后原样恢复

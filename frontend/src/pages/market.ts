@@ -1,3 +1,4 @@
+import { estimateFloatShares } from "../volume-activity";
 /* 行情页：个股头 + klinecharts K线 + 右列功能卡 */
 import { marketApi, type Bar, type FundFlowRange, type IndexQuote, type Quote } from "../api";
 import { cssv, esc, fmt, fmtChg, fmtVol, fmtYi, fmtYiS } from "../fmt";
@@ -372,7 +373,7 @@ export function initMarket(): void {
   let hoverT: ReturnType<typeof setTimeout> | null = null;
   document.addEventListener("mouseover", (ev) => {
     if (document.hidden) return;
-    const tr = (ev.target as HTMLElement | null)?.closest?.("tr[data-key]");
+    const tr = (ev.target as HTMLElement | null)?.closest?.("tr[data-key]") as HTMLElement | null;
     if (!tr) return;
     const sym = tr.dataset.key || "";
     if (!/^\d{6}(\.[A-Z]{2})?$/.test(sym)) return;             // 只预热股票键；板块等其它键跳过
@@ -1044,7 +1045,13 @@ function applyPanel(i: number): void {
   const key = `${mk.cur.symbol}|${p}`;
   const keep = panelKey[i] === key;
   panelKey[i] = key;
-  kl.setData(barsFor(p), keep);
+  // 仅个股使用换手率反推股本，指数换手率不代表股票流通股本。
+  const code = mk.cur.symbol.split(".")[0];
+  const market = (mk.cur.market ?? "").toLowerCase();
+  const stock = market === "sh" ? /^(600|601|603|605|688|689)/.test(code)
+    : market === "sz" ? /^(000|001|002|003|300|301)/.test(code)
+    : market === "bj" && /^(4|8|92)/.test(code);
+  kl.setData(barsFor(p), keep, stock ? estimateFloatShares(mk.bars) : null);
   kl.drawLegend(p === "t" ? ["avg"] : (SUB_OK[currentLayout()]?.[i] ? [...mk.mainInds] : mk.mainInds));
 }
 
