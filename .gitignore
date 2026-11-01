@@ -29,3 +29,7 @@ data/scratch_*/
 
 # 启停脚本运行时产物（日志 / PID 文件）
 .logs/
+
+# 本地工作记忆（AI 助手产物，不入开源仓库）
+.workbuddy/
+.trae/
