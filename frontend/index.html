@@ -5,6 +5,24 @@
 <meta name="viewport" content="width=device-width,initial-scale=1">
 <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns=%27http://www.w3.org/2000/svg%27 viewBox=%270 0 16 16%27%3E%3Crect width=%2716%27 height=%2716%27 rx=%274%27 fill=%27%230a0a0b%27/%3E%3Cpath d=%27M3 10 L6 7 L8 9 L13 4%27 stroke=%27%23ff9f43%27 stroke-width=%271.6%27 fill=%27none%27 stroke-linecap=%27round%27/%3E%3C/svg%3E">
 <title>驭潮 YuChao · 看盘分析工作台</title>
+<script>
+/* 看门狗：模块脚本 6s 内没把菜单图标注入出来（服务重启/脚本崩溃/连接断）
+ * → 底部弹重载条，不再无解释白屏。JS 正常时永远不触发。 */
+(function () {
+  setTimeout(function () {
+    if (document.querySelector('#rail svg')) return;
+    var b = document.createElement('div');
+    b.style.cssText = 'position:fixed;left:50%;bottom:18px;transform:translateX(-50%);z-index:9999;'
+      + 'background:#b45309;color:#fff;padding:10px 16px;border-radius:10px;font:13px/1 -apple-system,sans-serif;'
+      + 'box-shadow:0 8px 24px rgba(0,0,0,.35);display:flex;gap:10px;align-items:center';
+    var t = document.createElement('span'); t.textContent = '页面加载失败（服务可能已重启）';
+    var x = document.createElement('button'); x.textContent = '重载';
+    x.style.cssText = 'border:0;background:rgba(255,255,255,.18);color:#fff;padding:5px 14px;border-radius:6px;cursor:pointer;font:inherit';
+    x.onclick = function () { location.reload(); };
+    b.appendChild(t); b.appendChild(x); document.body.appendChild(b);
+  }, 6000);
+})();
+</script>
 <script type="module" src="/src/main.ts"></script>
 </head>
 

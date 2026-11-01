@@ -8,10 +8,12 @@
 """
 import logging
 from contextlib import asynccontextmanager
+from pathlib import Path
 
 from fastapi import FastAPI, Request
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
+from fastapi.staticfiles import StaticFiles
 from prometheus_client import make_asgi_app
 
 from . import __version__
@@ -107,3 +109,19 @@ app.include_router(stream_router, prefix=v1)
 
 # Prometheus 可观测性（1.0 资产原样保留）
 app.mount("/metrics", make_asgi_app())
+
+# 前端静态托管：dist 存在即挂到根路径（API 路由已先注册，优先命中）。
+# 生产形态只开 8031 一个口——vite(5178) 仅开发热更用，避免「旧标签页连不上
+# dev server → 菜单空白」这类双端口环境问题。
+_DIST = Path(__file__).resolve().parent.parent / "frontend" / "dist"
+if (_DIST / "index.html").exists():
+    # index.html 永不缓存：后端更新后普通刷新即可拿到新 hash 资源引用；
+    # /assets/* 带 hash 文件名，长缓存安全。
+    @app.middleware("http")
+    async def _no_cache_html(request: Request, call_next):
+        resp = await call_next(request)
+        if request.url.path == "/" or request.url.path.endswith(".html"):
+            resp.headers["Cache-Control"] = "no-cache"
+        return resp
+
+    app.mount("/", StaticFiles(directory=_DIST, html=True), name="frontend")
