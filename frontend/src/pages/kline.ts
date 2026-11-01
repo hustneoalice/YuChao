@@ -5,7 +5,7 @@
  *  · 滚轮缩放 / 拖拽平移为 klinecharts 原生能力
  *  · 十字光标浮动信息卡：OHLC/涨跌/振幅/区间位置/量额，周期（日/周/月）区分标题
  */
-import { init, dispose, registerIndicator, registerYAxis, type Chart } from "klinecharts";
+import { init, dispose, registerIndicator, registerYAxis, type Chart, type CandleType } from "klinecharts";
 import type { Bar } from "../api";
 import { cssv, fmt, fmtYi, fmtVol } from "../fmt";
 import { sixSegmentSeries } from "../indicators";
@@ -737,12 +737,21 @@ function styles() {
     grid: { show: false },
     separator: { size: 1, color: border, fill: false, activeBackgroundColor: border },
     candle: {
-      type: "candle_up_stroke" as const,
+      type: "candle_up_stroke" as CandleType,
       tooltip: { showRule: "none" as const },
       bar: {
         upColor: "rgba(0,0,0,0)", downColor: dn, noChangeColor: NEUTRAL,
         upBorderColor: up, downBorderColor: dn, noChangeBorderColor: NEUTRAL,
         upWickColor: up, downWickColor: dn, noChangeWickColor: NEUTRAL,
+      },
+      // area 形态默认（分时主图用，periodStyles 覆盖线色/填充）
+      area: {
+        lineSize: 1.2, lineColor: up, value: "close", smooth: false,
+        backgroundColor: [
+          { offset: 0, color: "rgba(64,110,161,0.30)" },
+          { offset: 1, color: "rgba(64,110,161,0.02)" },
+        ],
+        point: { show: false, color: up, radius: 0, rippleColor: up, rippleRadius: 0, animation: false },
       },
       priceMark: { show: true, last: { show: false }, high: { show: true }, low: { show: true } },
     },
@@ -770,6 +779,27 @@ function styles() {
       show: true, size: "auto" as const,
       axisLine: { color: axis, size: 1 }, tickLine: { color: axis, size: 1, length: 3 },
       tickText: { show: true, color: text, size: 11 },
+    },
+  };
+}
+
+/* 分时主图形态（众赢/策影同款）：价格曲线（area）+ 均价线，非蜡烛。
+ * 其余周期走基础样式；retheme/切周期统一经此，避免 setStyles 把 area 冲回蜡烛。 */
+function periodStyles(p: TipPeriod): ReturnType<typeof styles> {
+  const s = styles();
+  if (p !== "t") return s;
+  const line = cssv("--text") || "#F5F5F7";
+  return {
+    ...s,
+    candle: {
+      ...s.candle,
+      type: "area",
+      priceMark: {
+        ...s.candle.priceMark,
+        high: { ...s.candle.priceMark.high, show: false },
+        low: { ...s.candle.priceMark.low, show: false },
+      },
+      area: { ...s.candle.area, lineColor: line, point: { ...s.candle.area.point, color: line, rippleColor: line } },
     },
   };
 }
@@ -1375,6 +1405,8 @@ export function mountKline(el: HTMLElement): KlineChartHandle {
     },
     setPeriod(p: TipPeriod) {
       period = p;
+      // 分时主图换形态：价格曲线（area）替代蜡烛（蜡烛对每分钟假 K 无意义）
+      chart.setStyles(periodStyles(p));
     },
     applyHeights,
     zoom(factor: number) {
@@ -1412,7 +1444,7 @@ export function mountKline(el: HTMLElement): KlineChartHandle {
     clearRange(notify = true) { clearSel(notify); },
     clearPick(notify = true) { clearPickFn(notify); },
     drawLegend,
-    retheme() { chart.setStyles(styles()); requestAnimationFrame(navDraw); },
+    retheme() { chart.setStyles(periodStyles(period)); requestAnimationFrame(navDraw); },
     resize() {
       chart.resize();
       requestAnimationFrame(() => { applyHeights(); navDraw(); drawPick(); });
