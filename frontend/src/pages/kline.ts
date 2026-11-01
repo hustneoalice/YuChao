@@ -11,6 +11,7 @@ import { cssv, fmt, fmtYi, fmtVol } from "../fmt";
 import { sixSegmentSeries } from "../indicators";
 import { accumulationSeries } from "../accumulation";
 import { volumeActivitySeries } from "../volume-activity";
+import { trendHistogramSeries } from "../trend-histogram";
 
 /* ── 策影配色（tradingColors） ── */
 const UP = "#EF5350";
@@ -93,7 +94,7 @@ function registerTrendChannel(
           fast, slow,
           upper: Math.max(fast, slow),
           lower: Math.min(fast, slow),
-          strong: k.close > slow,
+          strong: k.close >= slow,
         };
       });
     },
@@ -227,17 +228,85 @@ function ensureRegistered(): void {
     calc: (list) => {
       const capital = (list[0] as { floatShares?: number } | undefined)?.floatShares ?? null;
       return volumeActivitySeries(list, capital).map(v => ({
-        ...v, marker: v.signal ? 0 : null,
+        ...v, marker: v.signal ? 0 : null, zero: 0,
       }));
     },
     figures: [
-      { key: "short", title: "短线量能", type: "bar", baseValue: 0,
+      { key: "zero", title: "", type: "line", styles: () => ({ color: "transparent" }) },
+      { key: "short", title: "短线量能", type: "line",
         styles: (raw: unknown) => ({ color: ((raw as {data?: {current?: {short?: number}}}).data?.current?.short ?? 0) >= 0 ? "#FF5356" : "#2D9E00" }) },
       { key: "trend", title: "趋势量能", type: "line", styles: () => ({ color: "#25ACFA", size: 1.5 }) },
       { key: "marker", title: "", type: "text",
         attrs: (raw: unknown) => ({ text: (raw as {data?: {current?: {signal?: string}}}).data?.current?.signal ?? "" }),
         styles: () => ({ color: "#FFD54F", size: 10, textBaseline: "bottom" }) },
     ],
+    draw: ({ ctx, chart, indicator, xAxis, yAxis, bounding }) => {
+      const data = indicator.result as { short: number | null }[];
+      const range = chart.getVisibleRange();
+      const zeroY = yAxis.convertToPixel(0);
+      ctx.save();
+      ctx.beginPath();
+      ctx.rect(0, 0, bounding.width, bounding.height);
+      ctx.clip();
+      const fill = (x1: number, y1: number, x2: number, y2: number, positive: boolean) => {
+        ctx.fillStyle = positive ? "#FF5356" : "#2D9E00";
+        ctx.beginPath();
+        ctx.moveTo(x1, zeroY);
+        ctx.lineTo(x1, y1);
+        ctx.lineTo(x2, y2);
+        ctx.lineTo(x2, zeroY);
+        ctx.closePath();
+        ctx.fill();
+      };
+      for (let i = Math.max(1, Math.floor(range.from)); i < Math.min(data.length, Math.ceil(range.to) + 1); i++) {
+        const a = data[i - 1]?.short, b = data[i]?.short;
+        if (a == null || b == null) continue;
+        const x1 = xAxis.convertToPixel(i - 1), x2 = xAxis.convertToPixel(i);
+        const y1 = yAxis.convertToPixel(a), y2 = yAxis.convertToPixel(b);
+        if (a * b < 0) {
+          const cross = x1 + (x2 - x1) * a / (a - b);
+          fill(x1, y1, cross, zeroY, a > 0);
+          fill(cross, zeroY, x2, y2, b > 0);
+        } else fill(x1, y1, x2, y2, (a || b) >= 0);
+      }
+      ctx.restore();
+      return false; // 继续由图表绘制轮廓、蓝线和信号文字。
+    },
+  });
+  registerIndicator({
+    name: "ZY_TREND_HISTOGRAM", shortName: "趋势柱线·公式版", precision: 2,
+    calc: list => trendHistogramSeries(list).map(v => ({...v, zero: 0})),
+    figures: [
+      { key: "short", title: "STICKV", type: "line", styles: (raw: unknown) => {
+        const v = (raw as {data?: {current?: {short?: number; base?: number}}}).data?.current;
+        return { color: (v?.short ?? 0) >= (v?.base ?? 0) ? "#FF5356" : "#2D9E00", size: 1 };
+      } },
+      { key: "base", title: "中期", type: "line", styles: () => ({ color: "transparent" }) },
+      { key: "zero", title: "", type: "line", styles: () => ({ color: "transparent" }) },
+    ],
+    draw: ({ ctx, chart, indicator, xAxis, yAxis, bounding }) => {
+      const data = indicator.result as {short: number | null; base: number | null}[];
+      const range = chart.getVisibleRange();
+      const width = Math.max(1, chart.getBarSpace().bar * 0.6);
+      ctx.save();
+      ctx.beginPath();
+      ctx.rect(0, 0, bounding.width, bounding.height);
+      ctx.clip();
+      const column = (x: number, from: number, to: number, red: boolean) => {
+        const y1 = yAxis.convertToPixel(from), y2 = yAxis.convertToPixel(to);
+        ctx.fillStyle = red ? "#FF5356" : "#2D9E00";
+        ctx.fillRect(x - width / 2, Math.min(y1, y2), width, Math.abs(y1 - y2));
+      };
+      for (let i = Math.max(0, Math.floor(range.from)); i < Math.min(data.length, Math.ceil(range.to) + 1); i++) {
+        const v = data[i];
+        if (v?.short == null || v.base == null) continue;
+        const x = xAxis.convertToPixel(i);
+        column(x, 0, v.base, v.base >= 0);
+        column(x, v.base, v.short, v.short > v.base);
+      }
+      ctx.restore();
+      return false;
+    },
   });
   // ATR 自研（klinecharts v10 未内置）：14 日真实波幅均值
   try {
@@ -480,6 +549,7 @@ export const IND_DEFS: IndDef[] = [
   { key: "bbi", kc: "BBI", label: "BBI", cat: "main", where: "main", desc: "多空指数（四均线加权）" },
   { key: "bbiboll", kc: "BBIBOLL", label: "BBIBOLL", cat: "main", where: "main", desc: "BBI 布林变异带（多均线布林）" },
   // 趋势类
+  { key: "trendhistogram", kc: "ZY_TREND_HISTOGRAM", label: "趋势柱线", cat: "trend", where: "sub", desc: "众赢安装包公式移植：零轴至中期值、短期至中期值的红绿实心柱；个股与指数可用，尚未与原软件逐点核对" },
   { key: "macd", kc: "MACD", label: "MACD", cat: "trend", where: "sub", desc: "指数平滑异同移动平均" },
   { key: "dmi", kc: "DMI", label: "DMI", cat: "trend", where: "sub", desc: "趋向指标（ADX 强弱方向）" },
   { key: "trix", kc: "TRIX", label: "TRIX", cat: "trend", where: "sub", desc: "三重指数平滑平均线" },
@@ -498,7 +568,7 @@ export const IND_DEFS: IndDef[] = [
   { key: "osc", kc: "OSC", label: "OSC", cat: "mom", where: "sub", desc: "变动率柱（震荡量指标）" },
   { key: "udl", kc: "UDL", label: "UDL", cat: "mom", where: "sub", desc: "引力线（多周期动量合成）" },
   // 量能类
-  { key: "volumeactivity", kc: "ZY_VOLUME_ACTIVITY", label: "量能活跃", cat: "vol", where: "sub", desc: "短线量能红绿柱、趋势量能蓝线及TL/PP/DL标记；以最近有效日量/换手率估算固定股本，尚未与原软件核对；指数或缺少数据不计算" },
+  { key: "volumeactivity", kc: "ZY_VOLUME_ACTIVITY", label: "量能活跃", cat: "vol", where: "sub", desc: "短线量能红绿填充区域、趋势量能蓝线及TL/PP/DL标记；以最近有效日量/换手率估算固定股本，尚未与原软件核对；指数或缺少数据不计算" },
   { key: "accumulation", kc: "ZY_ACCUMULATION", label: "主力吸筹", cat: "vol", where: "sub", desc: "众赢安装包公式移植，尚未与原软件逐点核对；紫色柱为价格推导指标，非实际主力资金" },
   { key: "vol", kc: "VOLX", label: "VOL", cat: "vol", where: "sub", desc: "成交量（5/10/40 日均量线）" },
   { key: "obv", kc: "OBV", label: "OBV", cat: "vol", where: "sub", desc: "能量潮（量能累积方向）" },
@@ -871,7 +941,12 @@ export function mountKline(el: HTMLElement): KlineChartHandle {
     // 只认左键；框选模式或 Shift 手势才进入拖拽，否则视为"点空白关卡片"
     if (e.button !== 0) return;
     downX = e.clientX;
-    if (!rangeMode && !e.shiftKey) { if (lastSel) clearSel(true); return; }
+    if (!rangeMode && !e.shiftKey) {
+      // 非框选模式：只在这里关区间卡；单根选中交给 mouseup 的 pickAtIndex 统一裁决
+      // （在这里先清会把「再点同一根取消」变成先清空再重选，toggle 永远失效）
+      if (lastSel) clearSel(true);
+      return;
+    }
     e.preventDefault(); e.stopPropagation();                     // 拦截 v10 平移，进入框选
     const r = el.getBoundingClientRect();
     selX0 = e.clientX;
@@ -1054,6 +1129,8 @@ export function mountKline(el: HTMLElement): KlineChartHandle {
   pick.style.display = "none";
   pick.innerHTML = "<b></b>";
   el.appendChild(pick);
+  // 操作提示（悬停可见）：激活/取消路径都说清楚
+  el.title = "点击K线选中单根（再点取消 · ESC关闭）· Shift拖拽或框选模式统计区间";
   let pickDate: string | null = null;
 
   const drawPick = (): void => {
@@ -1092,7 +1169,7 @@ export function mountKline(el: HTMLElement): KlineChartHandle {
     if (di == null || di < 0 || di >= list.length) { clearPickFn(true); return; }
     const bar = list[di];
     const date = bar.date ?? ymd(bar.timestamp);
-    if (date === pickDate) return;
+    if (date === pickDate) { clearPickFn(true); return; }      // 再点同一根 = 取消选中（toggle）
     const prev = di > 0 ? list[di - 1] : null;
     const base = prev?.close ?? bar.open;
     pickDate = date;
@@ -1109,6 +1186,14 @@ export function mountKline(el: HTMLElement): KlineChartHandle {
       } as PickBar,
     }));
   };
+
+  /* ESC 分层取消：单根选中 → 进行中的框选拖拽 → 已成立的区间统计（策影同款手感） */
+  document.addEventListener("keydown", (e) => {
+    if (e.key !== "Escape") return;
+    if (pickDate) { clearPickFn(true); return; }
+    if (selX0 != null) { selX0 = null; sel.style.display = "none"; return; }
+    if (lastSel) clearSel(true);
+  });
 
   const onBarClick = (...args: unknown[]) => {
     pickAtIndex((args[0] as { dataIndex?: number } | null | undefined)?.dataIndex);

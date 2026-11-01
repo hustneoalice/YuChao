@@ -206,6 +206,7 @@ export async function openStock(s: CurStock, from?: { page: string; label: strin
     if (mk.cur?.symbol !== s.symbol || !q) return;
     qcache.set(s.symbol, { q, at: Date.now() });
     mk.quote = q;
+    if (mk.subInds.includes("volumeactivity")) renderKline();
     renderRight();
   } catch (e) {
     if ((e as Error).name !== "AbortError") { /* 实时兜底失败：保持日线数据展示 */ }
@@ -1048,11 +1049,11 @@ function applyPanel(i: number): void {
   // 仅个股使用换手率反推股本，指数换手率不代表股票流通股本。
   const symParts = mk.cur.symbol.split(".");
   const code = symParts[0];
-  const market = (symParts[1] ?? "").toLowerCase();
+  const market = (symParts[1] ?? mk.quote?.market ?? (code.startsWith("6") ? "sh" : /^(0|3)/.test(code) ? "sz" : "bj")).toLowerCase();
   const stock = market === "sh" ? /^(600|601|603|605|688|689)/.test(code)
     : market === "sz" ? /^(000|001|002|003|300|301)/.test(code)
     : market === "bj" && /^(4|8|92)/.test(code);
-  kl.setData(barsFor(p), keep, stock ? estimateFloatShares(mk.bars) : null);
+  kl.setData(barsFor(p), keep, stock ? (estimateFloatShares(mk.bars) ?? estimateFloatShares(mk.quote ? [mk.quote] : [])) : null);
   kl.drawLegend(p === "t" ? ["avg"] : (SUB_OK[currentLayout()]?.[i] ? [...mk.mainInds] : mk.mainInds));
 }
 
