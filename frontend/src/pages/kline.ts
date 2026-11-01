@@ -9,6 +9,7 @@ import { init, dispose, registerIndicator, registerYAxis, type Chart } from "kli
 import type { Bar } from "../api";
 import { cssv, fmt, fmtYi, fmtVol } from "../fmt";
 import { sixSegmentSeries } from "../indicators";
+import { accumulationSeries } from "../accumulation";
 
 /* ── 策影配色（tradingColors） ── */
 const UP = "#EF5350";
@@ -209,6 +210,17 @@ function ensureRegistered(): void {
       figures: [{ key: "seg", title: "段位", type: "line", styles: () => ({ color: "#26C6DA" }) }],
     });
   } catch { /* 重复注册忽略 */ }
+  registerIndicator({
+    name: "ZY_ACCUMULATION",
+    shortName: "主力吸筹·公式版",
+    precision: 2,
+    minValue: 0,
+    calc: (list) => accumulationSeries(list).map(value => ({ accumulation: value })),
+    figures: [{
+      key: "accumulation", title: "吸筹", type: "bar",
+      styles: () => ({ color: "#F000FF", style: "stroke" }),
+    }],
+  });
   // ATR 自研（klinecharts v10 未内置）：14 日真实波幅均值
   try {
     registerIndicator({
@@ -468,6 +480,7 @@ export const IND_DEFS: IndDef[] = [
   { key: "osc", kc: "OSC", label: "OSC", cat: "mom", where: "sub", desc: "变动率柱（震荡量指标）" },
   { key: "udl", kc: "UDL", label: "UDL", cat: "mom", where: "sub", desc: "引力线（多周期动量合成）" },
   // 量能类
+  { key: "accumulation", kc: "ZY_ACCUMULATION", label: "主力吸筹", cat: "vol", where: "sub", desc: "众赢安装包公式移植，尚未与原软件逐点核对；紫色柱为价格推导指标，非实际主力资金" },
   { key: "vol", kc: "VOLX", label: "VOL", cat: "vol", where: "sub", desc: "成交量（5/10/40 日均量线）" },
   { key: "obv", kc: "OBV", label: "OBV", cat: "vol", where: "sub", desc: "能量潮（量能累积方向）" },
   { key: "vr", kc: "VR", label: "VR", cat: "vol", where: "sub", desc: "成交量比率" },
@@ -665,9 +678,9 @@ export function mountKline(el: HTMLElement): KlineChartHandle {
       },
     },
   }) as Chart;
-  // 最后一根 K 线右侧留 80px 空白：offsetRightDistance=0 时最新 K 线紧贴 Y 轴
-  // 边界，轴线/刻度会盖住最后几根（策影/同花顺同款右留白）
-  try { chart.setOffsetRightDistance(80); } catch { /* 忽略 */ }
+  // 最新 K 线右侧留 12px 小空隙：0 时紧贴 Y 轴边界被轴线/刻度盖住，
+  // 太大则最新一根离轴太远（12px ≈ 一根半柱宽，贴轴但完整可见）
+  try { chart.setOffsetRightDistance(12); } catch { /* 忽略 */ }
   // v10 门控：symbol/period 无效时 getBars 永远不触发（canvas 空白无报错），
   // 数据虽由外部回填，仍需设置合法 symbol/period 才能打开加载开关
   chart.setSymbol({ ticker: "YUCHAO", pricePrecision: 2, volumePrecision: 0 });
