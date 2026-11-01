@@ -43,6 +43,21 @@ def _tx_fetch(url: str, params: Optional[dict] = None):
     return r.json()
 
 
+# 分时源域名（2026-11-01 实测 web.ifzq 整体 501，同路径在 ifzq.gtimg.cn /
+# proxy.finance.qq.com/ifzqgtimg 均可用；依次降级，全挂才抛）
+_TX_MINUTE_HOSTS = ("https://ifzq.gtimg.cn", "https://proxy.finance.qq.com/ifzqgtimg")
+
+
+def _tx_minute_fetch(path: str, params: Optional[dict] = None):
+    last: Optional[Exception] = None
+    for host in _TX_MINUTE_HOSTS:
+        try:
+            return _tx_fetch(f"{host}{path}", params=params)
+        except Exception as e:                       # noqa: BLE001 域名级降级
+            last = e
+    raise last  # type: ignore[misc]
+
+
 @router.get("/market/fundflow", response_model=FundFlowRange,
             summary="区间资金流明细 + 合计（K 线框选统计同步右列资金卡）")
 def fundflow(
@@ -71,14 +86,15 @@ def minute(symbol: str = Query(description="6 位代码，兼容 sh.600519 形�
         txc = tx_symbol(symbol)
         if not txc:
             raise ValueError(f"非法代码: {symbol}")
-        j = _tx_fetch("https://web.ifzq.gtimg.cn/appstock/app/minute/query",
-                      params={"code": txc})
+        j = _tx_minute_fetch("/appstock/app/minute/query",
+                             params={"code": txc})
         d = (j.get("data") or {}).get(txc) or {}
         body = d.get("data") or {}
-        qt = list((d.get("qt") or {}).values())
+        # 昨收按 txc 键精确取（qt dict 混有空的 v_ff_* 键，values()[0] 会拿到空数组）
+        qt = (d.get("qt") or {}).get(txc) or []
         prev_close = None
-        if qt and len(qt[0]) > 4 and qt[0][4]:
-            prev_close = float(qt[0][4])
+        if len(qt) > 4 and qt[4]:
+            prev_close = float(qt[4])
         raw_day = body.get("date") or date.today().strftime("%Y%m%d")
         day = f"{raw_day[:4]}-{raw_day[4:6]}-{raw_day[6:]}"
         bars, pv, pa = [], 0, 0.0
@@ -120,12 +136,12 @@ def sparks(symbols: str = Query(description="逗号分隔代码，≤50 只")):
             txc = tx_symbol(sym)
             if not txc:
                 return None
-            j = _tx_fetch("https://web.ifzq.gtimg.cn/appstock/app/minute/query",
-                          params={"code": txc})
+            j = _tx_minute_fetch("/appstock/app/minute/query",
+                                 params={"code": txc})
             d = (j.get("data") or {}).get(txc) or {}
             body = d.get("data") or {}
-            qt = list((d.get("qt") or {}).values())
-            prev = float(qt[0][4]) if qt and len(qt[0]) > 4 and qt[0][4] else None
+            qt = (d.get("qt") or {}).get(txc) or []
+            prev = float(qt[4]) if len(qt) > 4 and qt[4] else None
             pts = [float(str(it).split(" ")[1])
                    for it in body.get("data") or [] if len(str(it).split(" ")) >= 2]
             if len(pts) < 2:

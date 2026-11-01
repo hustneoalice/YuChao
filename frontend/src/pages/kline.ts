@@ -18,6 +18,8 @@ import { strongPullbackSeries } from "../strong-pullback";
 const UP = "#EF5350";
 const DOWN = "#519C2C";
 const NEUTRAL = "#757575";
+/* 分时主图蓝系（通达信分时同款）：均价线/昨收虚线基准 */
+const MIN_AVG_COLOR = "#2E6BD6";
 /* 趋势通道配色 · 四方案用户可选（本地 yc_trendpal，云同步键 trend_palette）：
    与 K 线红绿、MA 琥珀/蓝、BOLL 灰区隔，避免与主流机构撞色 */
 export const TRENDS: Record<string, { label: string; fast: string; slow: string; fr: number[]; sr: number[] }> = {
@@ -181,14 +183,43 @@ function ensureRegistered(): void {
   });
   registerTrendChannel("SHORT_TREND_CHANNEL", "短线趋势", 7, 10, 0.82);
   registerTrendChannel("MID_TREND_CHANNEL", "中线趋势", 35, 45, 0.86);
-  // 分时均价线（VWAP）：后端 /market/minute 已算好，直接透传画线
+  // 分时均价线（VWAP）+ 昨收虚线基准（通达信分时同款）：后端 /market/minute 已算好，
+  // baseline 由 setData 挂在每根分钟 bar 上（日线无此字段 → base 全 null 不画）
   try {
     registerIndicator({
       name: "TIME_AVG",
       shortName: "均价",
       calc: (kLineDataList) =>
-        (kLineDataList as unknown as { avg?: number }[]).map((b) => ({ avg: b.avg ?? null })),
-      figures: [{ key: "avg", title: "均价", type: "line", styles: () => ({ color: "#26C6DA" }) }],
+        (kLineDataList as unknown as { avg?: number; baseline?: number }[]).map((b) => ({
+          avg: b.avg ?? null, base: b.baseline ?? null,
+        })),
+      figures: [
+        { key: "avg", title: "均价", type: "line", styles: () => ({ color: MIN_AVG_COLOR }) },
+        { key: "base", title: "昨收", type: "line", styles: () => ({ color: MIN_AVG_COLOR, style: "dashed", lineWidth: 1 }) },
+      ],
+    });
+  } catch { /* 重复注册忽略 */ }
+  // 分时逐分钟量柱（通达信 VOLFS 同款）：红=分钟价较前分钟涨，绿=跌，灰=平
+  try {
+    registerIndicator<{ vol: number; rise: number }>({
+      name: "VOLFS",
+      shortName: "VOLFS",
+      precision: 0,
+      calc: (kLineDataList) => {
+        const list = kLineDataList as unknown as { close: number; volume?: number; baseline?: number }[];
+        return list.map((b, i) => {
+          const prev = i > 0 ? list[i - 1].close : (b.baseline ?? b.close);
+          return { vol: b.volume ?? 0, rise: b.close > prev ? 1 : b.close < prev ? -1 : 0 };
+        });
+      },
+      figures: [{
+        key: "vol", title: "VOLFS", type: "bar", baseValue: 0,
+        styles: (params) => {
+          const cur = (params.data as { current?: { rise?: number } | null }).current;
+          const c = cur?.rise === 1 ? chartUp() : cur?.rise === -1 ? chartDown() : NEUTRAL;
+          return { color: c, borderColor: c, borderSize: 1 };
+        },
+      }],
     });
   } catch { /* 重复注册忽略 */ }
   // 全局 Y 轴模板：覆盖内置 'normal'，成交量轴自动万/亿（策影 config.ts 同款）
@@ -620,6 +651,7 @@ export const IND_DEFS: IndDef[] = [
   { key: "volumeactivity", kc: "ZY_VOLUME_ACTIVITY", label: "量能活跃", cat: "vol", where: "sub", desc: "短线量能红绿填充区域、趋势量能蓝线及TL/PP/DL标记；以最近有效日量/换手率估算固定股本，尚未与原软件核对；指数或缺少数据不计算" },
   { key: "accumulation", kc: "ZY_ACCUMULATION", label: "主力吸筹", cat: "vol", where: "sub", desc: "众赢安装包公式移植，尚未与原软件逐点核对；紫色柱为价格推导指标，非实际主力资金" },
   { key: "vol", kc: "VOLX", label: "VOL", cat: "vol", where: "sub", desc: "成交量（5/10/40 日均量线）" },
+  { key: "volfs", kc: "VOLFS", label: "VOLFS", cat: "vol", where: "sub", desc: "分时逐分钟量柱（分钟价涨红/跌绿，通达信分时同款）" },
   { key: "obv", kc: "OBV", label: "OBV", cat: "vol", where: "sub", desc: "能量潮（量能累积方向）" },
   { key: "vr", kc: "VR", label: "VR", cat: "vol", where: "sub", desc: "成交量比率" },
   { key: "wvad", kc: "WVAD", label: "WVAD", cat: "vol", where: "sub", desc: "威廉变异离散量（量价加权）" },
@@ -1306,6 +1338,8 @@ export function mountKline(el: HTMLElement): KlineChartHandle {
         timestamp: toTs(b.date), open: b.open, high: b.high, low: b.low,
         close: b.close, volume: b.volume ?? 0, amount: b.amount ?? 0,
         date: b.date, floatShares,
+        // 分时 bar 挂昨收（TIME_AVG 的昨收虚线基准用；日线无此字段 → null）
+        baseline: (b as Bar & { baseline?: number | null }).baseline ?? null,
       }));
       // 盘中的增量重灌（同标的同周期）不该把视图弹回最右：用户在翻历史时
       // 每 12s 被拽回最新，选中的那根也就跑出屏幕了 —— 记下窗口，重灌后原样恢复
@@ -1393,6 +1427,9 @@ export function mountKline(el: HTMLElement): KlineChartHandle {
             name: "MACD",
             styles: { bars: [{ upColor: up, downColor: dn, noChangeColor: NEUTRAL }] },
           } as never, false);
+        } else if (d.key === "volfs") {
+          // 通达信 VOLFS：逐分钟量柱红绿按分钟涨跌（figure styles 内着色），轴文本万/亿
+          chart.createIndicator({ name: "VOLFS", shouldFormatBigNumber: false } as never, false);
         } else if (d.key === "sixseg") {
           // 六分段趋势（K线下方叠加）：60 窗口分位 1..6 段台阶线
           chart.createIndicator({ name: "SIXSEG", precision: 0 } as never, false);

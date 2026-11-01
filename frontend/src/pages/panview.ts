@@ -121,24 +121,30 @@ async function setLink(symbol: string, name: string, row?: BoardRow): Promise<vo
   if (linkSymbol === symbol) return;      // 同标的重复点击：不重拉（30s 轮询在管左表）
   linkSymbol = symbol;
   const token = ++linkToken;
-  try {
-    const [mi, kl] = await Promise.all([
-      marketApi.minute(symbol),
-      marketApi.kline({ symbol, adjust: "qfq", limit: 250 }),
-    ]);
-    if (token !== linkToken) return;      // 已切别的标的：丢弃过期响应
-    // 分时：均价线主图 + 量副图（行情页同款口径）
-    klT!.setPeriod("t");
-    klT!.setMain(["avg"]);
-    klT!.setSub(["vol"]);
-    klT!.setData((mi.bars ?? []) as Bar[]);
+  // 分时/日K 各自降级：腾讯分钟源抖动（偶发 5xx）时日K 照常出图，分时空白待重试
+  const [miRes, klRes] = await Promise.allSettled([
+    marketApi.minute(symbol),
+    marketApi.kline({ symbol, adjust: "qfq", limit: 250 }),
+  ]);
+  if (token !== linkToken) return;      // 已切别的标的：丢弃过期响应
+  if (klRes.status === "fulfilled") {
     // 日K：默认 MA 主图 + 量副图
     klD!.setPeriod("d");
     klD!.setMain(["ma"]);
     klD!.setSub(["vol"]);
-    klD!.setData(kl.bars ?? []);
-  } catch {
-    if (token === linkToken) quote.innerHTML = `<span style="color:var(--faint)">行情加载失败</span>`;
+    klD!.setData(klRes.value.bars ?? []);
+  }
+  if (miRes.status === "fulfilled") {
+    const mi = miRes.value;
+    // 分时：价格曲线 + 均价线 + 昨收虚线（TIME_AVG base）+ VOLFS 逐分钟量柱（通达信分时同款）
+    const minBars = (mi.bars ?? []).map((b) => ({ ...b, baseline: mi.prev_close ?? undefined }));
+    klT!.setPeriod("t");
+    klT!.setMain(["avg"]);
+    klT!.setSub(["volfs"]);
+    klT!.setData(minBars as Bar[]);
+  } else {
+    klT!.setData([]);
+    quote.innerHTML = `<span style="color:var(--faint)">分时源暂不可用（日K 正常）</span>`;
   }
 }
 

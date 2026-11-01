@@ -869,7 +869,8 @@ export async function ensurePeriodData(p: PKey): Promise<void> {
     if (p === "t" && !mk.minuteData) {
       const d = await marketApi.minute(s.symbol);
       if (mk.cur?.symbol !== s.symbol) return;
-      mk.minuteData = { date: d.date, prevClose: d.prev_close ?? null, bars: d.bars as Bar[] };
+      mk.minuteData = { date: d.date, prevClose: d.prev_close ?? null,
+        bars: d.bars.map((b) => ({ ...b, baseline: d.prev_close ?? undefined })) as Bar[] };
     } else if (p === "60" && !mk.m60) {
       const k = await marketApi.kline({ symbol: s.symbol, freq: "60" });
       if (mk.cur?.symbol !== s.symbol) return;
@@ -1041,7 +1042,7 @@ function applyPanel(i: number): void {
   kl.setPeriod(p === "q" ? "m" : p);           // 季线按月线引擎聚 65 根；t/60 原样透传
   // 分时主图固定为均价线（MA/趋势通道对每分钟假 K 线无意义），其余周期走默认预设
   kl.setMain(p === "t" ? ["avg"] : mk.mainInds);
-  kl.setSub(SUB_OK[currentLayout()]?.[i] ? (p === "t" ? ["vol"] : mk.subInds) : []);
+  kl.setSub(SUB_OK[currentLayout()]?.[i] ? (p === "t" ? ["volfs"] : mk.subInds) : []);
   // 同标的同周期的重灌（盘中 12s 轮询）保留视图窗口，换标的/切周期才回到最新
   const key = `${mk.cur.symbol}|${p}`;
   const keep = panelKey[i] === key;
