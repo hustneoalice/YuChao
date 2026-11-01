@@ -162,25 +162,31 @@
         <input id="pan-q" type="search" placeholder="搜代码 / 名称" style="width:130px">
         <button class="hbtn" id="pan-refresh" data-ic="arrows-clockwise" data-sz="13">刷新</button>
       </div>
-      <!-- 指数条：固定清单 × 当日快照（点击进行情页 K 线） -->
-      <div class="pan-indexbar" id="pan-indexbar"></div>
       <!-- 双栏联动（众赢全景同款）：左列表，右分时+日K 上下分布；行点击页内联动不跳页 -->
       <div class="pan-split" style="flex:1;min-height:0">
         <div class="pan-left">
           <div class="phead2">
             <span class="seg" id="pan-tabs">
-              <button class="on" data-t="hsa">沪深A股</button><button data-t="sha">沪市A股</button><button data-t="sza">深市A股</button><button data-t="cyb">创业板</button><button data-t="kc">科创板</button><button data-t="bj">北交所</button><button data-t="fund_sh">上证基金</button><button data-t="fund_sz">深证基金</button><button data-t="block">板块监测</button>
+              <button class="on" data-t="hsa">沪深A股</button><button data-t="sha">沪市A股</button><button data-t="sza">深市A股</button><button data-t="cyb">创业板</button><button data-t="kc">科创板</button><button data-t="fund_sh">上证基金</button><button data-t="fund_sz">深证基金</button><button data-t="block">板块监测</button><button data-t="index">指数</button>
             </span>
             <span class="seg" id="pan-btypes" hidden>
               <button class="on" data-bt="2">概念</button><button data-bt="4">行业</button><button data-bt="9">题材</button><button data-bt="1">地域</button><button data-bt="8">风格</button>
             </span>
             <span class="sub" id="pan-asof"></span>
             <span class="sp"></span>
-            <button class="hbtn" id="pan-back" hidden><span data-ic="arrow-left" data-sz="12"></span>返回板块</button>
             <span class="sub" id="pan-count"></span>
           </div>
           <div class="tblwrap" style="flex:1" id="pan-wrap"></div>
           <div class="pager" id="pan-pager"></div>
+          <!-- 板块监测下半区：上方选中板块 → 下方成分股（点击成分联动右侧分时/日K） -->
+          <div id="pan-members" hidden>
+            <div class="pan-mem-head">
+              <b id="pan-mem-title">成分股</b>
+              <span class="sub" id="pan-mem-count"></span>
+            </div>
+            <div class="tblwrap" style="flex:1;min-height:0" id="pan-mem"></div>
+            <div class="pager" id="pan-mem-pager"></div>
+          </div>
           <div class="pan-breadth" id="pan-breadth"></div>
           <div class="empty" id="pan-empty" style="display:none;padding:44px 20px">
             <span data-ic="trend-up" data-sz="30" style="color:var(--faint)"></span>

@@ -43,13 +43,19 @@ pip install -e ".[dev]"
 # 放到 data/stock_research.duckdb 后，补齐 2.0 新表与复权视图：
 python scripts/ensure_schema.py
 
-# 终端 1：updater 进程（唯一写者：编排/采集/调度）
-python -m app.updater
+# 一键启动：默认开发模式 = 8031 API + 5178 vite 热更（看 5178）
+./scripts/start.sh
 
-# 终端 2：API 进程（只读挂载）
-uvicorn app.main:app --port 8800
-open http://127.0.0.1:8800/docs
+# 生产模式：只启 8031，前端由后端托管 dist（源码有更新会自动重构建）
+./scripts/start.sh -p
+open http://127.0.0.1:8031
+
+# 停止（8031 + 5178 一起收）
+./scripts/stop.sh
 ```
+
+回退模式（`YUCHAO_API_EMBEDDED_UPDATER=false`，API 只读挂载）才需要拆两个进程：
+终端 1 `python -m app.updater`，终端 2 `uvicorn app.main:app --port 8800`。
 
 自定义路径：`YUCHAO_DUCKDB_PATH=/path/to/stock_research.duckdb`。
 

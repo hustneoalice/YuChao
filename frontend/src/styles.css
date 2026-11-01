@@ -250,6 +250,8 @@ svg{display:block}
 .seg button.on{background:var(--panel);color:var(--text);font-weight:550;
   box-shadow:0 1px 3px rgba(0,0,0,.35)}
 .seg.acc button.on{background:var(--accent);color:var(--accent-ink);font-weight:600;box-shadow:none}
+/* hidden 必须压过 .seg/.hbtn 自身的 display，否则二级类型/返回按钮常显 */
+.seg[hidden],.hbtn[hidden]{display:none!important}
 .chip{display:inline-flex;align-items:center;gap:6px;height:28px;padding:0 12px;border-radius:999px;
   border:1px solid var(--border);font-size:12px;color:var(--dim);background:var(--panel);cursor:pointer;white-space:nowrap}
 .chip:hover{color:var(--text)}
@@ -1041,12 +1043,7 @@ body.mobile.fold .factorgrid{grid-template-columns:1fr 1fr}
   body.mobile.fold .mtabs{max-width:768px}
 }
 
-/* ── 全景页（2.2）：指数条 chip 行 + 底部总貌条 ── */
-.pan-indexbar{display:flex;gap:8px;flex-wrap:wrap;margin-bottom:10px}
-.pan-indexbar .chip{cursor:pointer}
-.pan-indexbar .chip.off{opacity:.55;cursor:default}
-.pan-indexbar .chip b{font-weight:550;color:var(--dim)}
-.pan-indexbar .chip:hover b{color:var(--text)}
+/* ── 全景页（2.2）：底部总貌条 ── */
 .pan-breadth{display:flex;gap:16px;align-items:center;padding:8px 14px;
   border-top:1px solid var(--border);font-size:11.5px;color:var(--dim);flex:none}
 .pan-breadth b{font-weight:600}
@@ -1056,6 +1053,14 @@ body.mobile.fold .factorgrid{grid-template-columns:1fr 1fr}
 .pan-left{flex:1;min-width:0;display:flex;flex-direction:column;
   background:var(--panel);border:1px solid var(--border);border-radius:12px;overflow:hidden}
 .pan-left .phead2{flex-wrap:wrap}
+/* 板块监测左栏上下分区：上=板块分类，下=成分股（选中行高亮联动） */
+#pan-members{display:flex;flex-direction:column;flex:1.25;min-height:0;
+  border-top:1px solid var(--border)}
+#pan-members[hidden]{display:none!important}
+.pan-mem-head{display:flex;align-items:center;gap:8px;flex:none;padding:7px 14px;
+  border-bottom:1px solid var(--border);font-size:11.5px;color:var(--dim)}
+.pan-mem-head b{font-size:12.5px;font-weight:650;color:var(--text)}
+.pan-left tr.sel td{background:var(--accent-soft)}
 .pan-right{width:clamp(380px,38%,560px);flex:none;display:flex;flex-direction:column;gap:10px;min-height:0}
 .pan-linkhead{display:flex;align-items:baseline;gap:8px;padding:2px 4px;flex:none}
 .pan-linkhead b{font-size:13.5px;font-weight:650}

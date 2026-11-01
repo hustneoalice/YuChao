@@ -1,7 +1,8 @@
 #!/usr/bin/env bash
-# 驭潮 启动脚本：后端 uvicorn(8031) 同时托管前端 dist —— 只开一个口。
-#   ./scripts/start.sh        日常使用（前端由 8031 托管，无 vite）
-#   ./scripts/start.sh -d     开发模式：额外启动 vite(5178) 热更
+# 驭潮 启动脚本：后端 uvicorn(8031) + 前端 vite(5178)
+#   ./scripts/start.sh        默认开发模式：8031 API + 5178 vite 热更（看最新代码用这个）
+#   ./scripts/start.sh -d     同默认（兼容旧写法）
+#   ./scripts/start.sh -p     生产模式：只启 8031，由后端托管 dist（源码有更新会自动重构建）
 #   ./scripts/start.sh -n     启动后不跟随日志
 set -euo pipefail
 ROOT="$(cd "$(dirname "$0")/.." && pwd)"
@@ -9,8 +10,15 @@ LOG_DIR="$ROOT/.logs"
 PID_DIR="$LOG_DIR"
 mkdir -p "$LOG_DIR"
 
-DEV=0
-for a in "$@"; do [ "$a" = "-d" ] && DEV=1; done
+DEV=1
+FOLLOW=1
+for a in "$@"; do
+  case "$a" in
+    -d|--dev) DEV=1 ;;
+    -p|--prod) DEV=0 ;;
+    -n|--no-log) FOLLOW=0 ;;
+  esac
+done
 
 port_pid() { lsof -nP -tiTCP:"$1" -sTCP:LISTEN 2>/dev/null || true; }
 
@@ -39,9 +47,17 @@ start_one() { # name port wait_secs start_cmd
   fi
 }
 
-# dist 缺失则先构建（8031 托管的前提）
-if [ ! -f "$ROOT/frontend/dist/index.html" ]; then
-  echo "[frontend] dist 缺失，构建中…"
+# 生产模式下 dist 必须是最新的：缺失或前端源码比它新都重构建
+# （旧逻辑只在缺失时构建，改了代码再 start 会一直看到旧界面）
+dist_stale() {
+  local dist="$ROOT/frontend/dist/index.html"
+  [ -f "$dist" ] || return 0
+  [ -n "$(find "$ROOT/frontend/src" "$ROOT/frontend/index.html" "$ROOT/frontend/vite.config.ts" \
+      -newer "$dist" -type f 2>/dev/null | head -1)" ]
+}
+
+if [ "$DEV" = "0" ] && dist_stale; then
+  echo "[frontend] dist 落后于源码，构建中…"
   (cd "$ROOT/frontend" && npm run build >/dev/null)
 fi
 
@@ -59,14 +75,15 @@ fi
 
 echo
 if [ "$DEV" = "1" ]; then
-  echo "驭潮已就绪：开发前端 http://localhost:5178 · 生产前端/后端 http://127.0.0.1:8031"
+  echo "驭潮已就绪：开发前端 http://localhost:5178 （热更，看最新代码）"
+  echo "            API/生产前端 http://127.0.0.1:8031"
 else
-  echo "驭潮已就绪：http://localhost:8031 （前端+后端同一端口）"
+  echo "驭潮已就绪：http://localhost:8031 （生产模式，前端由后端托管）"
 fi
-echo "停止：./scripts/stop.sh · 日志：.logs/backend.log"
+echo "停止：./scripts/stop.sh · 日志：.logs/backend.log$([ "$DEV" = "1" ] && printf ' · .logs/frontend.log' || true)"
 
 # 默认实时显示日志（Ctrl+C 退出查看，服务继续后台运行）；-n 跳过
-if ! printf '%s\n' "$@" | grep -q '^-*n$'; then
+if [ "$FOLLOW" = "1" ]; then
   echo
   echo "──── 实时日志（Ctrl+C 退出，服务继续运行）────"
   if [ "$DEV" = "1" ]; then
