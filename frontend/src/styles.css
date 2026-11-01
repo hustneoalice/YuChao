@@ -13,6 +13,8 @@
   --shadow:0 1px 0 rgba(255,255,255,.05) inset,0 18px 44px -18px rgba(0,0,0,.55);
   --topbar:rgba(10,10,11,.78);
   --grid:rgba(255,255,255,.05); --axis:rgba(255,255,255,.07);
+  --intra-avg:#2E6BD6;
+  --intra-fill-top:rgba(58,130,220,.40); --intra-fill-bottom:rgba(58,130,220,.03);
   --scroll:#2D2D31;
   --mono:ui-monospace,SFMono-Regular,Menlo,Consolas,monospace;
 }
@@ -29,6 +31,8 @@
   --glow:rgba(180,83,9,.30);
   --shadow:0 1px 0 rgba(255,255,255,.7) inset,0 16px 40px -18px rgba(29,29,31,.14);
   --topbar:rgba(255,255,255,.82);
+  --intra-avg:#2E6BD6;
+  --intra-fill-top:rgba(58,130,220,.26); --intra-fill-bottom:rgba(58,130,220,.02);
   --grid:rgba(20,20,22,.05); --axis:rgba(20,20,22,.08);
   --scroll:#D8D8DE;
 }
@@ -973,14 +977,18 @@ body.mobile.fold .factorgrid{grid-template-columns:1fr 1fr}
 .pan-left{flex:1;min-width:0;display:flex;flex-direction:column;
   background:var(--panel);border:1px solid var(--border);border-radius:12px;overflow:hidden}
 .pan-left .phead2{flex-wrap:wrap}
-.pan-right{width:clamp(320px,34%,460px);flex:none;display:flex;flex-direction:column;gap:10px;min-height:0}
+.pan-right{width:clamp(380px,38%,560px);flex:none;display:flex;flex-direction:column;gap:10px;min-height:0}
 .pan-linkhead{display:flex;align-items:baseline;gap:8px;padding:2px 4px;flex:none}
 .pan-linkhead b{font-size:13.5px;font-weight:650}
 .pan-linkhead .sub{font-size:11px;color:var(--faint)}
 .pan-chartbox{display:flex;flex-direction:column;min-height:0;
   background:var(--panel);border:1px solid var(--border);border-radius:12px;overflow:hidden}
-.pan-charttitle{flex:none;font-size:11px;font-weight:600;color:var(--dim);
-  padding:6px 12px 0;border-bottom:1px solid var(--border-soft)}
+.pan-charttitle{display:flex;align-items:center;gap:12px;flex:none;font-size:11px;font-weight:600;color:var(--dim);
+  padding:7px 12px 5px;border-bottom:1px solid var(--border-soft)}
+.pan-charttitle .pan-lg{display:inline-flex;align-items:center;gap:5px;font-weight:500;color:var(--faint)}
+.pan-charttitle .pan-lg i{display:block;width:11px;height:2px;border-radius:2px;background:var(--text)}
+.pan-charttitle .pan-lg i.a,.pan-charttitle .pan-lg i.b{background:var(--intra-avg)}
+.pan-charttitle .pan-lg i.b{height:0;border-top:1px dashed var(--intra-avg);background:none;border-radius:0}
 .pan-kl{flex:1;min-height:0;position:relative}
 body.mobile .pan-right{width:100%;flex:none}
 body.mobile .pan-split{flex-direction:column}

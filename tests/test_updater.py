@@ -423,6 +423,97 @@ def test_market_snapshot_offhours_skip(updater_env, monkeypatch):
                                        ctx={"cancel_check": lambda: False})
     assert res["status"] == "skipped(fresh)" and called["n"] == 0
 
+    # force=True：非交易时段也补一轮（清单扩充后手动刷新快照）
+    monkeypatch.setattr(msnap, "_MIN_SNAPSHOT_ROWS", 5)
+
+    def fake_snap(codes, progress=None, cancel=None):
+        called["n"] += 1
+        out = {}
+        for c in codes:
+            key = c if "." in c else f"{c}.{market_prefix(c).upper()}"
+            out[key] = ("某", 10.0, 0.1, 1.0, 9.9, 10.1, 9.8, 9.9,
+                        10.89, 8.91, 100000.0, 9.9e7, 2.5, 1.2, 3.0,
+                        10.0, 500.0, 10.01, 300.0, 51000.0, 49000.0,
+                        5.0e9, 4.2e9)
+        return out
+
+    monkeypatch.setattr(msnap.sources, "fetch_qt_snapshot", fake_snap)
+    res = msnap.update_market_snapshot(
+        progress=None, ctx={"cancel_check": lambda: False, "force": True})
+    assert res["status"] == "success" and called["n"] == 1
+
+
+# ---------------------------------------------------------------------------
+# 场内基金清单（新浪 ETF/LOF/REIT 三节点，东财 fallback）
+# ---------------------------------------------------------------------------
+
+def test_fetch_fund_list_parse(monkeypatch):
+    """新浪节点为无引号键 JS 数组：裸码/市场判定、假数据与非法码丢弃、去重升序。"""
+    from app.updater.collectors import sources
+    from app.updater.collectors import http as hq
+
+    pages = {
+        "etf_hq_fund": {1: '[{symbol:"sh510300",code:"510300",name:"沪深300ETF"},'
+                           '{symbol:"sz159915",code:"159915",name:"创业板ETF"},'
+                           '{symbol:"sh510300",code:"510300",name:"沪深300ETF重复"},'
+                           '{symbol:"sh999999",code:"999999",name:"sys_auth FAILED"},'
+                           '{symbol:"sh12345",code:"12345",name:"非法代码"}]',
+                        2: "null"},
+        "lof_hq_fund": {1: '[{symbol:"sh501001",code:"501001",name:"财通精选混合LOF"},'
+                           '{symbol:"sz160105",code:"160105",name:"南方积配LOF"}]',
+                        2: "null"},
+        "close_fund": {1: '[{symbol:"sh508000",code:"508000",name:"张江REIT"}]',
+                       2: "null"},
+    }
+
+    class _Resp:
+        def __init__(self, text):
+            self.text = text
+
+        def raise_for_status(self):
+            pass
+
+    class _Client:
+        def get(self, url, params=None, headers=None, timeout=None):
+            return _Resp((pages.get(params["node"]) or {}).get(params["page"], "null"))
+
+    monkeypatch.setattr(hq, "client", _Client())
+    monkeypatch.setattr(sources.time, "sleep", lambda s: None)
+    out = sources.fetch_fund_list()
+    assert [r["symbol"] for r in out] == [
+        "159915", "160105", "501001", "508000", "510300"]
+    assert {r["symbol"]: r["market"] for r in out}["501001"] == "SH"
+    assert {r["symbol"]: r["market"] for r in out}["160105"] == "SZ"
+    assert {r["symbol"]: r["name"] for r in out}["510300"] == "沪深300ETF"
+
+
+def test_fund_universe_task(updater_env, monkeypatch):
+    """清单任务：新浪全量落表；不足 1500 行 → failed 且不覆盖旧清单。"""
+    from app.updater.collectors import fund_universe as fu
+
+    fake = [{"symbol": f"{i:06d}", "name": f"基金{i}",
+             "market": "SH" if i % 2 else "SZ"} for i in range(1, 1601)]
+    monkeypatch.setattr(fu.sources, "fetch_fund_list",
+                        lambda progress=None, cancel=None: fake)
+    res = fu.update_fund_universe(progress=None,
+                                  ctx={"cancel_check": lambda: False})
+    assert res["status"] == "success" and res["rows"] == 1600
+    assert "沪 800" in res["detail"] and "深 800" in res["detail"]
+    conn = duckdb.connect(str(updater_env))
+    assert conn.execute("SELECT COUNT(*) FROM fund_universe").fetchone()[0] == 1600
+    conn.close()
+
+    monkeypatch.setattr(fu.sources, "fetch_fund_list",
+                        lambda progress=None, cancel=None: fake[:1])
+    monkeypatch.setattr(fu.sources, "fetch_etf_list",
+                        lambda progress=None, cancel=None: [])
+    res = fu.update_fund_universe(progress=None,
+                                 ctx={"cancel_check": lambda: False})
+    assert res["status"] == "failed"
+    conn = duckdb.connect(str(updater_env))
+    assert conn.execute("SELECT COUNT(*) FROM fund_universe").fetchone()[0] == 1600
+    conn.close()
+
 
 # ---------------------------------------------------------------------------
 # 流总线（文件 backplane，M3 换 Redis 接口不变）

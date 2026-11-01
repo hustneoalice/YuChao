@@ -3,11 +3,12 @@
  * 右：分时（上）+ 日K（下）上下分布，行点击页内联动不跳页。
  * 板块监测走众赢清单 × market_snapshot 本地聚合（/market/zy_blocks）。
  * 驻留期间 30s 轮询左表；右侧图表点选时拉取（腾讯实时）。 */
-import { marketApi, type Bar, type BoardRow, type IndexBarItem, type BreadthOut,
+import { marketApi, type BoardRow, type IndexBarItem, type BreadthOut,
          type ZyBlockRow } from "../api";
 import { esc, fmt, fmtChg, fmtVol, fmtYi } from "../fmt";
 import { createPager, type Pager } from "../pager";
 import { createDataTable, type DataTable, type DataTableCol } from "../table";
+import { createIntraday, type IntradayHandle } from "../intraday";
 import { mountKline, type KlineChartHandle } from "./kline";
 
 /* 表头 label → 服务端排序白名单键（dir 由点击时 sortState 决定） */
@@ -96,20 +97,20 @@ function sortParam(): string {
   return tblKind === "blocks" ? "-avg_change" : "-change_rate";
 }
 
-/* ── 右栏联动：分时（上）+ 日K（下）双 klinecharts 实例 ── */
-let klT: KlineChartHandle | null = null;
+/* ── 右栏联动：分时（独立 canvas 画法）+ 日K（klinecharts） ── */
+let intra: IntradayHandle | null = null;
 let klD: KlineChartHandle | null = null;
 let linkSymbol: string | null = null;    // 当前联动标的（同标的点击不重拉）
 let linkToken = 0;                       // 竞态守卫：快速连点只认最后一次
 
-function ensureKls(): void {
-  if (!klT) klT = mountKline(document.getElementById("pan-kl-t")!);
+function ensureCharts(): void {
+  if (!intra) intra = createIntraday(document.getElementById("pan-kl-t")!);
   if (!klD) klD = mountKline(document.getElementById("pan-kl-d")!);
 }
 
 /** 行点击 → 右侧分时+日K 联动（页内，不跳详情页） */
 async function setLink(symbol: string, name: string, row?: BoardRow): Promise<void> {
-  ensureKls();
+  ensureCharts();
   const head = document.getElementById("pan-link-name")!;
   const code = document.getElementById("pan-link-code")!;
   const quote = document.getElementById("pan-link-quote")!;
@@ -135,15 +136,10 @@ async function setLink(symbol: string, name: string, row?: BoardRow): Promise<vo
     klD!.setData(klRes.value.bars ?? []);
   }
   if (miRes.status === "fulfilled") {
-    const mi = miRes.value;
-    // 分时：价格曲线 + 均价线 + 昨收虚线（TIME_AVG base）+ VOLFS 逐分钟量柱（通达信分时同款）
-    const minBars = (mi.bars ?? []).map((b) => ({ ...b, baseline: mi.prev_close ?? undefined }));
-    klT!.setPeriod("t");
-    klT!.setMain(["avg"]);
-    klT!.setSub(["volfs"]);
-    klT!.setData(minBars as Bar[]);
+    // 分时：左涨跌幅轴 + 右价格轴 + 昨收虚线 + 均价线 + VOLFS 逐分钟量柱
+    intra!.setData(miRes.value);
   } else {
-    klT!.setData([]);
+    intra!.setMessage("分时源暂不可用（日K 正常）");
     quote.innerHTML = `<span style="color:var(--faint)">分时源暂不可用（日K 正常）</span>`;
   }
 }
@@ -287,9 +283,10 @@ function loadAll(): void {
 }
 
 export function loadPanorama(): void {
+  ensureCharts();
   loadAll();
-  if (klT) klT.resize();
-  if (klD) klD.resize();
+  intra?.resize();
+  klD?.resize();
   if (!timer) {
     timer = setInterval(() => {
       if (document.getElementById("page-panorama")?.classList.contains("on")) loadAll();

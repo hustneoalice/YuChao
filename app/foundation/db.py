@@ -134,8 +134,9 @@ NEW_TABLES_DDL = """
         PRIMARY KEY (block_code, symbol)
     );
 
-    -- 场内基金清单（ETF 日级同步，东财 MK0021-24）：不进 stock_universe
-    -- （避免污染选股宇宙），快照任务读此表拉行情 kind='fund' 落 market_snapshot。
+    -- 场内基金清单（ETF/LOF/REIT，新浪节点日级同步，东财 ETF 为 fallback）：
+    -- 不进 stock_universe（避免污染选股宇宙），快照任务读此表拉行情
+    -- kind='fund' 落 market_snapshot。
     CREATE TABLE IF NOT EXISTS fund_universe (
         symbol VARCHAR PRIMARY KEY,        -- 510300 / 159915（裸码）
         name   VARCHAR,

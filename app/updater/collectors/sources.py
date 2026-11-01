@@ -11,6 +11,7 @@
 """
 from __future__ import annotations
 
+import json
 import re
 import time
 from typing import Any, Dict, List, Optional, Tuple
@@ -565,3 +566,80 @@ def fetch_etf_list(progress=None, cancel=None) -> List[Dict[str, str]]:
         page += 1
         time.sleep(0.12)
     return out
+
+
+# ---------------------------------------------------------------------------
+# 新浪：场内基金清单（ETF + LOF + REIT/封闭，fund_universe 日级同步）
+# ---------------------------------------------------------------------------
+_SINA_HQ_NODE = ("https://vip.stock.finance.sina.com.cn"
+                 "/quotes_service/api/json_v2.php/Market_Center.getHQNodeData")
+_SINA_FUND_NODES = ("etf_hq_fund", "lof_hq_fund", "close_fund")
+_SINA_FUND_REFERER = "https://vip.stock.finance.sina.com.cn/"
+_JS_KEY_RE = re.compile(r'([{,])\s*([A-Za-z_][A-Za-z0-9_]*)\s*:')
+
+
+def _parse_js_array(text: str) -> Any:
+    """新浪行情节点返回键名不带引号的 JS 数组：先按 JSON 解，失败再补引号。"""
+    text = (text or "").strip()
+    if not text:
+        return None
+    try:
+        return json.loads(text)
+    except json.JSONDecodeError:
+        return json.loads(_JS_KEY_RE.sub(r'\1"\2":', text))
+
+
+def fetch_fund_list(progress=None, cancel=None) -> List[Dict[str, str]]:
+    """新浪场内基金清单（ETF+LOF+REIT/封闭，实测 2168 只）→ [{symbol, name, market}]。
+
+    东财 clist 被封后的等价源：节点 etf_hq_fund / lof_hq_fund / close_fund 按
+    symbol 升序全量；crefund（场外）返回 sys_auth 假数据，不采。
+    """
+    from .http import client, _UA, market_prefix
+
+    out: Dict[str, Dict[str, str]] = {}
+    for node in _SINA_FUND_NODES:
+        page = 1
+        while page <= 50:
+            params = {"page": page, "num": 80, "sort": "symbol", "asc": 1,
+                      "node": node, "symbol": "", "_s_r_a": "page"}
+            try:
+                r = client.get(_SINA_HQ_NODE, params=params,
+                               headers={"User-Agent": _UA,
+                                        "Referer": _SINA_FUND_REFERER,
+                                        "Accept": "*/*"},
+                               timeout=15.0)
+                r.raise_for_status()
+                rows = _parse_js_array(r.text)
+            except Exception as e:
+                raise RuntimeError(
+                    f"新浪基金节点 {node} 第 {page} 页失败（{type(e).__name__}）") from e
+            if not rows:
+                break
+            for it in rows:
+                it = it or {}
+                sym = str(it.get("symbol") or "").strip().lower()
+                name = str(it.get("name") or "").strip()
+                code = sym[2:] if sym[:2] in ("sh", "sz") \
+                    else str(it.get("code") or "").strip()
+                if not re.fullmatch(r"\d{6}", code) or not name:
+                    continue
+                if "FAILED" in name or "sys_auth" in name:
+                    continue
+                market = sym[:2].upper() if sym[:2] in ("sh", "sz") else ""
+                if not market:
+                    try:
+                        market = market_prefix(code).upper()
+                    except ValueError:
+                        continue
+                if market not in ("SH", "SZ"):
+                    continue
+                out.setdefault(code, {"symbol": code, "name": name,
+                                      "market": market})
+            _emit(progress, done=len(out), total=None,
+                  log=f"基金清单 [{len(out)}]")
+            if cancel and cancel():
+                break
+            page += 1
+            time.sleep(0.2)
+    return [out[k] for k in sorted(out)]

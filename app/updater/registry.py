@@ -37,8 +37,8 @@ TASKS: tuple[dict, ...] = (
     {"kind": "fund_universe_sync", "label": "基金清单同步",
      "fn": "app.updater.collectors.fund_universe:update_fund_universe",
      "freshness": {"table": "fund_universe", "col": "sync_date"},
-     "description": "09:05 东财场内 ETF 清单（MK0021-24）→ fund_universe；"
-                    "盘中快照任务读此表 kind='fund' 落 market_snapshot"},
+     "description": "09:05 场内基金清单（ETF/LOF/REIT，新浪节点 + 东财 fallback）"
+                    " → fund_universe；盘中快照任务读此表 kind='fund' 落 market_snapshot"},
     {"kind": "quotes", "label": "行情快照",
      "fn": "app.updater.collectors.quotes:update_quotes",
      "freshness": {"log": True},

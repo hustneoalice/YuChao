@@ -29,6 +29,8 @@ def _in_trading_hours(now: datetime) -> bool:
 def update_market_snapshot(progress=None, ctx=None) -> dict:
     start = time.time()
     cancel = (ctx or {}).get("cancel_check")
+    # force：非交易时段也强制补一轮（清单扩充/节假日修数时手动触发）
+    force = bool((ctx or {}).get("force"))
     result: dict = {"task": "market_snapshot", "status": "running", "rows": 0}
     progress = progress or (lambda **k: None)
     try:
@@ -40,7 +42,7 @@ def update_market_snapshot(progress=None, ctx=None) -> dict:
             have = conn0.execute(
                 "SELECT COUNT(*) FROM market_snapshot WHERE trade_date = ?",
                 [day]).fetchone()[0]
-            if have:
+            if have and not force:
                 result.update(status="skipped(fresh)",
                               detail=f"{day} 非交易时段，快照已有 {have} 行")
                 result["elapsed"] = round(time.time() - start, 1)
