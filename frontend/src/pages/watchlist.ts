@@ -6,8 +6,11 @@ import { getState, setWlGroup, removeWatch, addWatch, isWatched } from "../store
 import { toast, openModal, closeModals } from "../ui";
 import { stockSearch, type StockSearchHandle } from "../searchbox";
 import { refreshSparksIn, sparkSvg } from "../sparks";
+import { createPager, slicePage, type Pager } from "../pager";
 
 let filter: "all" | "up" | "down" = "all";
+let wlPager: Pager | null = null;
+let wlReset = false;
 const chgCache = new Map<string, number>();
 const amtCache = new Map<string, number>();
 
@@ -19,7 +22,7 @@ function drawChips(): void {
     `<span class="chip${getState().wlGroup === g ? " on" : ""}" data-g="${esc(g)}">${esc(g)}</span>`).join("") +
     `<span class="chip" id="wl-newgrp" style="border-style:dashed">${ic("plus", 11)}新建分组</span>`;
   el.querySelectorAll<HTMLElement>(".chip[data-g]").forEach((c) =>
-    c.addEventListener("click", () => setWlGroup(c.dataset.g!)));
+    c.addEventListener("click", () => { wlReset = true; setWlGroup(c.dataset.g!); }));
   el.querySelector("#wl-newgrp")!.addEventListener("click", () => {
     const g = prompt("分组名称：");
     if (g && g.trim()) { toast(`分组「${g.trim()}」已创建，添加自选时可选`); }
@@ -40,7 +43,8 @@ export async function fetchChg(symbols: string[]): Promise<void> {
   }
 }
 
-function renderRows(): void {
+function renderRows(reset = false): void {
+  if (reset) wlReset = true;
   const wl = getState().watchlist;
   const g = getState().wlGroup;
   let rows = wl.filter((w) => g === "全部" || !g || w.group === g);
@@ -48,12 +52,17 @@ function renderRows(): void {
     filter === "all" || (filter === "up" ? (chgCache.get(w.symbol) ?? 0) >= 0 : (chgCache.get(w.symbol) ?? 0) < 0));
   document.getElementById("wl-title")!.textContent = !g || g === "全部" ? "全部自选" : g;
   document.getElementById("wl-count")!.textContent = `共 ${rows.length} 只`;
+  if (!wlPager) wlPager = createPager(document.getElementById("wl-pager")!, "watchlist", renderRows);
+  if (wlReset) { wlPager.reset(); wlReset = false; }
+  wlPager.update(rows.length);
+  const start = (wlPager.page - 1) * wlPager.size;
+  const pageRows = slicePage(wlPager, rows);
   const body = document.getElementById("wl-body")!;
-  body.innerHTML = rows.map((w, i) => {
+  body.innerHTML = pageRows.map((w, i) => {
     const ch = chgCache.get(w.symbol) ?? 0;
     const up = ch >= 0;
     const segI = 3; // 信号标签需核心标数据，此处展示中性
-    return `<tr data-stock="${w.symbol}"><td class="num" style="color:var(--faint)">${i + 1}</td><td class="num">${w.symbol}</td><td><span style="font-weight:600">${esc(w.name)}</span></td>` +
+    return `<tr data-stock="${w.symbol}"><td class="num" style="color:var(--faint)">${start + i + 1}</td><td class="num">${w.symbol}</td><td><span style="font-weight:600">${esc(w.name)}</span></td>` +
       `<td class="n num" id="wl-price-${w.symbol}">${fmt(0)}</td>` +
       `<td class="n num ${up ? "up" : "down"}">${fmtChg(ch)}%</td>` +
       `<td class="n">${sparkSvg(w.symbol, 72, 22)}</td>` +
@@ -76,7 +85,7 @@ function renderRows(): void {
       toast("已移出自选");
     }));
   document.getElementById("wl-empty")!.style.display = rows.length ? "none" : "grid";
-  void loadPrices(rows.map((r) => r.symbol));
+  void loadPrices(pageRows.map((r) => r.symbol));
   void refreshSparksIn(document.getElementById("wl-body")!);
 }
 
@@ -101,7 +110,7 @@ export function initWatchlist(): void {
     if (!b) return;
     filter = b.dataset.f as "all" | "up" | "down";
     document.querySelectorAll("#wl-filter button").forEach((x) => x.classList.toggle("on", x === b));
-    renderRows();
+    renderRows(true);
   });
   /* 添加自选弹窗：共享搜索组件（与顶栏一致：代码/名称/拼音模糊 + 最近搜索历史 + 涨跌幅），
      行尾「+ 加入」直加自选；点行打开个股 */

@@ -1,6 +1,7 @@
 /* 板块页：热力 + 排行双视图 + 成分股（策影板块强度表移植版） */
 import { sectorsApi, type SectorSummary, type SectorMember } from "../api";
 import { esc, fmt, fmtChg, fmtYi } from "../fmt";
+import { createPager, slicePage, type Pager } from "../pager";
 import { getState } from "../store";
 import { toast } from "../ui";
 
@@ -13,6 +14,10 @@ let lookback: 5 | 10 | 20 = 20;
 let sectors: SectorSummary[] = [];
 let curSector = "";
 let members: SectorMember[] = [];
+let rankPager: Pager | null = null;
+let memPager: Pager | null = null;
+let rankReset = false;
+let memReset = false;
 
 type SortKey = "pct_change" | "main_net_today" | "main_net_5d" | "up_count";
 
@@ -43,6 +48,7 @@ function applyViewUI(): void {
     x.classList.toggle("on", x.dataset.v === view));
   document.getElementById("sec-heatwrap")!.style.display = view === "heat" ? "" : "none";
   document.getElementById("sec-rankwrap")!.style.display = view === "rank" ? "" : "none";
+  document.getElementById("sec-rank-pager")!.style.display = view === "rank" ? "" : "none";
 }
 
 export async function loadSectors(): Promise<void> {
@@ -95,10 +101,15 @@ function renderRank(): void {
       `${c.label}${sortKey === c.k ? " ▾" : ""}</th>`).join("");
   const rows = filtered().slice().sort((a, b) =>
     (b[sortKey] ?? -Infinity) - (a[sortKey] ?? -Infinity));
-  document.getElementById("sec-rank")!.innerHTML = rows.map((s, i) => {
+  if (!rankPager) rankPager = createPager(document.getElementById("sec-rank-pager")!, "secrank", renderRank);
+  if (rankReset) { rankPager.reset(); rankReset = false; }
+  rankPager.update(rows.length);
+  const start = (rankPager.page - 1) * rankPager.size;
+  const pageRows = slicePage(rankPager, rows);
+  document.getElementById("sec-rank")!.innerHTML = pageRows.map((s, i) => {
     const up = (s.pct_change ?? 0) >= 0;
     const lu = (s.leader_change ?? 0) >= 0;
-    return `<tr data-sec="${esc(s.id)}"><td class="num" style="color:var(--faint)">${i + 1}</td>` +
+    return `<tr data-sec="${esc(s.id)}"><td class="num" style="color:var(--faint)">${start + i + 1}</td>` +
       `<td><span style="font-weight:600">${esc(s.name)}</span></td>` +
       `<td class="n num ${up ? "up" : "down"}">${fmtChg(s.pct_change)}%</td>` +
       `<td class="n num">${flowCell(s.main_net_today)}</td>` +
@@ -130,9 +141,20 @@ export async function openSector(id: string): Promise<void> {
     members = [];
     toast((e as Error).message || "成分股加载失败");
   }
-  body.innerHTML = members.map((m, i) => {
+  memReset = true;                          // 新板块成分 → 回第一页
+  renderMembers();
+}
+
+function renderMembers(): void {
+  const body = document.getElementById("mem-body")!;
+  if (!memPager) memPager = createPager(document.getElementById("mem-pager")!, "secmem", renderMembers);
+  if (memReset) { memPager.reset(); memReset = false; }
+  memPager.update(members.length);
+  const start = (memPager.page - 1) * memPager.size;
+  const pageRows = slicePage(memPager, members);
+  body.innerHTML = pageRows.map((m, i) => {
     const up = (m.lookback_pct ?? 0) >= 0;
-    return `<tr data-stock="${m.symbol}"><td class="num" style="color:var(--faint)">${i + 1}</td><td class="num">${m.symbol}</td><td><span style="font-weight:600">${esc(m.name)}</span></td>` +
+    return `<tr data-stock="${m.symbol}"><td class="num" style="color:var(--faint)">${start + i + 1}</td><td class="num">${m.symbol}</td><td><span style="font-weight:600">${esc(m.name)}</span></td>` +
       `<td class="n num">${fmt(m.last_close)}</td>` +
       `<td class="n num ${up ? "up" : "down"}">${fmtChg(m.lookback_pct)}%</td>` +
       `<td class="n num" style="color:var(--faint)">${m.main_net != null ? fmtYi(m.main_net, 1) : "—"}</td></tr>`;
@@ -158,6 +180,7 @@ export function initSectors(): void {
   });
   document.getElementById("sec-q")!.addEventListener("input", (e) => {
     q = (e.target as HTMLInputElement).value || "";
+    rankReset = true;                       // 搜索条件变化 → 回第一页
     renderView();
   });
   document.getElementById("sec-type")!.addEventListener("click", (e) => {

@@ -159,7 +159,7 @@
             <tbody id="tgt-body"></tbody>
           </table>
         </div>
-        <div id="tgt-pager" style="display:flex;gap:10px;align-items:center;justify-content:flex-end;padding:10px 2px 0"></div>
+        <div id="tgt-pager" class="pager"></div>
         <div class="empty" id="tgt-empty" style="display:none;padding:44px 20px">
           <b>没有满足当前勾选条件的标的</b>
           <span>放宽条件勾选后即时重筛。</span>
@@ -192,6 +192,7 @@
             <tbody id="wl-body"></tbody>
           </table>
         </div>
+        <div class="pager" id="wl-pager"></div>
         <div class="empty" id="wl-empty" style="display:none;padding:44px 20px">
           <span data-ic="star" data-sz="30" style="color:var(--faint)"></span>
           <b>这个分组还没有自选股</b>
@@ -227,6 +228,7 @@
               <tbody id="sec-rank"></tbody>
             </table>
           </div>
+          <div class="pager" id="sec-rank-pager" style="display:none"></div>
         </div>
         <div class="panel" style="flex:1;min-width:0;display:flex;flex-direction:column" id="sec-members">
           <div class="phead2">
@@ -240,6 +242,7 @@
               <tbody id="mem-body"></tbody>
             </table>
           </div>
+          <div class="pager" id="mem-pager"></div>
         </div>
       </div>
     </section>
@@ -268,6 +271,7 @@
               <tbody id="cp-body"></tbody>
             </table>
           </div>
+          <div class="pager" id="cp-pager"></div>
           <div style="padding:10px 14px;border-top:1px solid var(--border);display:flex;gap:16px;align-items:center;font-size:11px;color:var(--faint)">
             <span>资金分公开展示 · 趋势 / 位置 / 六分段属 VIP 三因子明细（服务端计算）</span>
             <span class="sp" style="flex:1"></span>

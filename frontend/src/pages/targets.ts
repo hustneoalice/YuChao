@@ -4,6 +4,7 @@
  * 页面打开时加载，驻留期间 60s 轮询（数据更新即新结果）。 */
 import { marketApi, type TargetItem } from "../api";
 import { esc, fmt, fmtChg } from "../fmt";
+import { createPager, slicePage, type Pager } from "../pager";
 import { trendPalette } from "./kline";
 
 type Cond = "vol" | "short" | "mid" | "up20";
@@ -21,10 +22,9 @@ try {
 let timer: ReturnType<typeof setInterval> | null = null;
 let busy = false;
 
-/* 分页：指标层一次算完返回全量，前端每页 50 条本地翻页 */
-const PAGE_SIZE = 50;
+/* 分页（通用组件）：指标层一次算完返回全量，前端切片渲染 */
+let pager: Pager | null = null;
 let items: TargetItem[] = [];
-let page = 1;
 let scanned = 0;
 
 function condsParam(): string {
@@ -40,7 +40,7 @@ async function load(resetPage = false): Promise<void> {
     const r = await marketApi.targets(condsParam(), 500);
     items = r.items;
     scanned = r.scanned;
-    if (resetPage) page = 1;
+    if (resetPage) pager?.reset();
     drawPage();
     st.textContent = r.as_of ? `数据截至 ${r.as_of}` : "";
   } catch {
@@ -53,14 +53,14 @@ async function load(resetPage = false): Promise<void> {
 function drawPage(): void {
   const body = document.getElementById("tgt-body")!;
   const empty = document.getElementById("tgt-empty")!;
-  const pager = document.getElementById("tgt-pager")!;
+  if (!pager) pager = createPager(document.getElementById("tgt-pager")!, "targets", drawPage);
+  pager.update(items.length);
+  const start = (pager.page - 1) * pager.size;
+  const slice = slicePage(pager, items);
+
   document.getElementById("tgt-hits")!.textContent =
     `命中 ${items.length} / 扫描 ${scanned} 只`;
   empty.style.display = items.length ? "none" : "grid";
-  const pages = Math.max(1, Math.ceil(items.length / PAGE_SIZE));
-  page = Math.min(Math.max(1, page), pages);
-  const start = (page - 1) * PAGE_SIZE;
-  const slice = items.slice(start, start + PAGE_SIZE);
 
   const pal = trendPalette();
   const ORANGE = `rgb(${pal.fr.join(",")})`, BLUE = `rgb(${pal.sr.join(",")})`;
@@ -85,14 +85,6 @@ function drawPage(): void {
       document.dispatchEvent(new CustomEvent("yc:open-stock", {
         detail: { symbol: tr.dataset.stock, name: tr.dataset.name,
           from: { page: "targets", label: "目标监控" } } }))));
-
-  pager.innerHTML = items.length === 0 ? "" :
-    pages === 1 ? `<span style="font-size:11.5px;color:var(--faint)">共 ${items.length} 条</span>` :
-      `<button class="hbtn" id="pg-prev" ${page <= 1 ? "disabled" : ""}>上一页</button>` +
-      `<span style="font-size:11.5px;color:var(--dim)">第 ${page} / ${pages} 页 · 共 ${items.length} 条</span>` +
-      `<button class="hbtn" id="pg-next" ${page >= pages ? "disabled" : ""}>下一页</button>`;
-  pager.querySelector("#pg-prev")?.addEventListener("click", () => { page -= 1; drawPage(); });
-  pager.querySelector("#pg-next")?.addEventListener("click", () => { page += 1; drawPage(); });
 }
 
 function renderConds(): void {

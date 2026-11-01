@@ -1,6 +1,7 @@
 /* 核心标页：公开名单 + VIP 因子明细（403 → 锁定） */
 import { corepicksApi, type Corepick } from "../api";
 import { esc, fmt, fmtChg } from "../fmt";
+import { createPager, slicePage, type Pager } from "../pager";
 import { ic } from "../icons";
 import { getState, isVip } from "../store";
 import { openModal, closeModals } from "../ui";
@@ -9,6 +10,8 @@ import { openWatchPanel } from "../watch";
 let tab: "chase" | "dip" | "all" = "chase";
 let picks: Corepick[] = [];
 let date = "";
+let cpPager: Pager | null = null;
+let cpReset = false;
 
 function showCore(name: string): void {
   document.querySelectorAll("[data-core-state]").forEach((s) =>
@@ -37,9 +40,14 @@ function scoreCell(v: number | null | undefined, color: string): string {
 
 function renderRows(): void {
   const body = document.getElementById("cp-body")!;
-  body.innerHTML = picks.map((r, i) => {
+  if (!cpPager) cpPager = createPager(document.getElementById("cp-pager")!, "corepicks", renderRows);
+  if (cpReset) { cpPager.reset(); cpReset = false; }
+  cpPager.update(picks.length);
+  const start = (cpPager.page - 1) * cpPager.size;
+  const pageRows = slicePage(cpPager, picks);
+  body.innerHTML = pageRows.map((r, i) => {
     const poolTag = `<span class="tag ${r.pool === "chase" ? "acc" : "p1"}">${r.pool === "chase" ? "追涨" : "低吸"}</span>`;
-    return `<tr data-cp="${r.symbol}"><td class="num" style="color:var(--faint)">${i + 1}</td><td class="num">${r.symbol}</td>` +
+    return `<tr data-cp="${r.symbol}"><td class="num" style="color:var(--faint)">${start + i + 1}</td><td class="num">${r.symbol}</td>` +
       `<td><span style="font-weight:600">${esc(r.name)}</span></td>` +
       `<td>${poolTag}</td>` +
       `<td>${esc(r.sector || "—")}</td>` +
@@ -140,6 +148,7 @@ export function initCorepicks(): void {
     if (!b) return;
     tab = b.dataset.t as "chase" | "dip" | "all";
     document.querySelectorAll("#cp-tabs button").forEach((x) => x.classList.toggle("on", x === b));
+    cpReset = true;
     void renderCorepicks();
   });
   document.getElementById("cp-retry")!.addEventListener("click", () => void renderCorepicks());

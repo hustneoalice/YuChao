@@ -250,6 +250,11 @@ th.n{color:var(--dim)}
 #page-targets td:nth-child(9){min-width:66px}
 #page-targets td:nth-child(10){min-width:112px}
 #page-targets td:nth-child(11){min-width:96px}
+/* 通用分页条（全列表一套设计） */
+.pager{display:flex;gap:8px;align-items:center;justify-content:flex-end;padding:10px 2px 0;flex-wrap:wrap}
+.pager:empty{display:none}
+.pg-info{font-size:11.5px;color:var(--dim);font-variant-numeric:tabular-nums;white-space:nowrap}
+.pg-size{height:26px;background:var(--panel-2);border:1px solid var(--border);border-radius:6px;color:var(--text);font-size:11.5px;padding:0 4px;outline:none;cursor:pointer}
 td .lnk{color:var(--accent);display:inline-flex;align-items:center;height:28px;cursor:pointer}
 td .lnk:hover{text-decoration:underline}
 .tag{display:inline-flex;align-items:center;gap:4px;padding:1px 9px;border-radius:999px;font-size:11px;font-weight:550;
