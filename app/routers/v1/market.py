@@ -7,7 +7,7 @@ from fastapi import APIRouter, Depends, Query
 
 from ...contracts.common import Adjust, Page, WithParam
 from ...contracts.market import FundFlowRange, Kline, Quote, QuotesOut, SearchHit, TargetScanOut
-from ...errors import vip_required
+from ...errors import not_found, vip_required
 from ...foundation import repo
 from ...foundation.db import get_conn
 from ...foundation import live
@@ -415,7 +415,9 @@ from ...contracts.market import BoardOut, BoardRow, BreadthOut, IndexBarItem  # 
 @router.get("/market/board", response_model=BoardOut,
             summary="全景大表（market_snapshot 排序分页，盘中 5 分钟刷新）")
 def board(tab: str = Query(default="hsa",
-                           description="hsa=沪深A股 cyb=创业板 kc=科创板 bj=北交所 fund=基金"),
+                           description="hsa=沪深A股 sha=沪市A股 sza=深市A股 cyb=创业板 "
+                                       "kc=科创板 bj=北交所 fund=全部基金 "
+                                       "fund_sh=上证基金 fund_sz=深证基金"),
           sort: str = Query(default="-change_rate"),
           page: int = Query(default=1, ge=1), size: int = Query(default=50, ge=1, le=200),
           q: Optional[str] = None, conn=Depends(get_conn)):
@@ -443,3 +445,46 @@ def breadth(conn=Depends(get_conn)):
 def snapshot_one(symbol: str = Query(description="个股裸码 600519 或指数全码 000001.SH"),
                  conn=Depends(get_conn)):
     return repo.market.snapshot_one(conn, symbol)
+
+
+# -- 众赢板块体系（清单逆向接口低频日级同步；行情 = 成分 × 当日快照本地聚合） --
+
+from ...contracts.market import ZyBlockMembersOut, ZyBlocksOut  # noqa: E402
+
+_ZY_TYPE_NAMES = {1: "地域", 2: "概念", 4: "行业", 8: "风格", 9: "题材"}
+
+
+@router.get("/market/zy_blocks", response_model=ZyBlocksOut,
+            summary="众赢板块列表（成分 × 当日快照聚合；type_code 1地域/2概念/4行业/8风格/9题材）")
+def zy_blocks(type_code: int = Query(default=2),
+              sort: str = Query(default="-avg_change"),
+              page: int = Query(default=1, ge=1), size: int = Query(default=50, ge=1, le=200),
+              q: Optional[str] = None, conn=Depends(get_conn)):
+    if type_code not in _ZY_TYPE_NAMES:
+        raise not_found("type_code 仅支持 1/2/4/8/9", {"type_code": type_code})
+    rows, total = repo.zyblock.list_blocks(conn, type_code, sort=sort,
+                                           page=page, size=size, q=q)
+    day = conn.execute(
+        "SELECT MAX(trade_date) FROM market_snapshot").fetchone()[0]
+    return ZyBlocksOut(items=rows, total=total, type_code=type_code,
+                       as_of=str(day) if day else "")
+
+
+@router.get("/market/zy_blocks/{block_code}/members", response_model=ZyBlockMembersOut,
+            summary="众赢板块成分 × 当日快照（股票/基金口径，未采成分行情字段为 null）")
+def zy_block_members(block_code: str,
+                     sort: str = Query(default="-change_rate"),
+                     page: int = Query(default=1, ge=1),
+                     size: int = Query(default=50, ge=1, le=200),
+                     q: Optional[str] = None, conn=Depends(get_conn)):
+    meta = repo.zyblock.block_meta(conn, block_code)
+    if meta is None:
+        raise not_found(f"板块不存在：{block_code}", {"block_code": block_code})
+    rows, total = repo.zyblock.block_members(conn, block_code, sort=sort,
+                                             page=page, size=size, q=q)
+    day = conn.execute(
+        "SELECT MAX(trade_date) FROM market_snapshot").fetchone()[0]
+    return ZyBlockMembersOut(items=rows, total=total,
+                             block_code=block_code,
+                             block_name=meta["block_name"],
+                             as_of=str(day) if day else "")

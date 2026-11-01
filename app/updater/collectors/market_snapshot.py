@@ -47,12 +47,16 @@ def update_market_snapshot(progress=None, ctx=None) -> dict:
                 return result
         conn = writer.conn()
         uni = conn.execute("SELECT symbol, market FROM stock_universe").fetchall()
-        # 股票：裸码 → market 列现成；指数：INDEX_CATALOG 全码（000001.SH 形态）
+        funds = conn.execute("SELECT symbol, market FROM fund_universe").fetchall()
+        # 股票：裸码 → market 列现成；指数：INDEX_CATALOG 全码（000001.SH 形态）；
+        # 基金：fund_universe（ETF，裸码）——三者同一 qt 报文口径
         stock_map = {r[0]: r[1] for r in uni}
-        stocks = list(stock_map)
+        fund_map = {r[0]: r[1] for r in funds}
+        stocks = list(stock_map) + list(fund_map)
         indexes = [s for s, _ in INDEX_CATALOG]
         progress(stage="拉取快照", total=len(stocks) + len(indexes), done=0,
-                 message=f"{day} 快照 {len(stocks)} 股 + {len(indexes)} 指数")
+                 message=f"{day} 快照 {len(stock_map)} 股 + {len(fund_map)} 基金 + "
+                         f"{len(indexes)} 指数")
         snap = sources.fetch_qt_snapshot(stocks + indexes,
                                          progress=progress, cancel=cancel)
         if len(snap) < _MIN_SNAPSHOT_ROWS:
@@ -68,6 +72,8 @@ def update_market_snapshot(progress=None, ctx=None) -> dict:
                 t = t[:8] + (0.0, 0.0) + t[10:12] + (0.0, 0.0) + t[14:]
             elif num in stock_map:
                 kind, sym = "stock", num         # 股票存裸码（与日线主键一致）
+            elif num in fund_map:
+                kind, sym = "fund", num          # 基金存裸码（与 fund_universe 一致）
             else:
                 continue
             rows.append((sym, kind, market) + t + (day,))
@@ -82,8 +88,10 @@ def update_market_snapshot(progress=None, ctx=None) -> dict:
             rows)
         conn.commit()
         n_stk = sum(1 for r in rows if r[1] == "stock")
+        n_fund = sum(1 for r in rows if r[1] == "fund")
         result.update(status="success", rows=len(rows),
-                      detail=f"{day} 股票 {n_stk} / 指数 {len(rows) - n_stk}")
+                      detail=f"{day} 股票 {n_stk} / 基金 {n_fund} / "
+                             f"指数 {len(rows) - n_stk - n_fund}")
     except Exception as e:
         result.update(status="failed", error=f"{type(e).__name__}: {str(e)[:200]}")
         logger.exception("[Snapshot] 全市场快照失败")

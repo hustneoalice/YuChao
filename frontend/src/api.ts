@@ -177,6 +177,16 @@ export interface BreadthOut {
   limit_up: number; limit_down: number;
   amount: number; updated_at?: string | null;
 }
+/* 众赢板块（清单 × 当日快照聚合，查询时计算不落表） */
+export interface ZyBlockRow {
+  block_code: string; block_name: string; type_code: number;
+  parent_code?: string | null;
+  members: number; up_count: number; down_count: number; flat_count: number;
+  avg_change?: number | null; amount?: number | null;
+  leader?: string | null; leader_change?: number | null;
+}
+export interface ZyBlocksOut { items: ZyBlockRow[]; total: number; type_code: number; as_of: string }
+export interface ZyBlockMembersOut { items: BoardRow[]; total: number; block_code: string; block_name: string; as_of: string }
 
 export const marketApi = {
   kline: (
@@ -209,6 +219,23 @@ export const marketApi = {
   },
   indexBar: () => req<IndexBarItem[]>("/market/index_bar"),
   breadth: () => req<BreadthOut>("/market/breadth"),
+  /* 众赢板块监测：板块清单聚合 / 板块成分 × 当日快照 */
+  zyBlocks: (q: { type_code: number; sort?: string; page?: number; size?: number; q?: string }) => {
+    const p = new URLSearchParams({ type_code: String(q.type_code) });
+    if (q.sort) p.set("sort", q.sort);
+    if (q.page) p.set("page", String(q.page));
+    if (q.size) p.set("size", String(q.size));
+    if (q.q) p.set("q", q.q);
+    return req<ZyBlocksOut>(`/market/zy_blocks?${p}`);
+  },
+  zyBlockMembers: (blockCode: string, q: { sort?: string; page?: number; size?: number; q?: string }) => {
+    const p = new URLSearchParams();
+    if (q.sort) p.set("sort", q.sort);
+    if (q.page) p.set("page", String(q.page));
+    if (q.size) p.set("size", String(q.size));
+    if (q.q) p.set("q", q.q);
+    return req<ZyBlockMembersOut>(`/market/zy_blocks/${encodeURIComponent(blockCode)}/members?${p}`);
+  },
   /* 单标的当日快照（个股详情页盘口网格；无快照 → null，前端降级日线口径） */
   snapshotOne: (symbol: string) =>
     req<BoardRow | null>(`/market/snapshot_one?symbol=${encodeURIComponent(symbol)}`),

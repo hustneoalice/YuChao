@@ -28,6 +28,17 @@ TASKS: tuple[dict, ...] = (
      "min_rows": 300,
      "description": "15:35 东财板块清单（行业 t:2 + 概念 t:3）→ sector_index；"
                     "概念成分逐板块 → sector_member"},
+    {"kind": "zy_block_sync", "label": "众赢板块同步",
+     "fn": "app.updater.collectors.zy_blocks:update_zy_blocks",
+     "freshness": {"table": "zy_block", "col": "sync_date"},
+     "description": "16:05 众赢板块体系（1075 个：地域/行业/概念/风格/题材，"
+                    "通达信系匿名接口，低频日级）→ zy_block + 逐板块成分 → "
+                    "zy_block_member；行情一律查询时 × market_snapshot 聚合"},
+    {"kind": "fund_universe_sync", "label": "基金清单同步",
+     "fn": "app.updater.collectors.fund_universe:update_fund_universe",
+     "freshness": {"table": "fund_universe", "col": "sync_date"},
+     "description": "09:05 东财场内 ETF 清单（MK0021-24）→ fund_universe；"
+                    "盘中快照任务读此表 kind='fund' 落 market_snapshot"},
     {"kind": "quotes", "label": "行情快照",
      "fn": "app.updater.collectors.quotes:update_quotes",
      "freshness": {"log": True},
@@ -85,7 +96,9 @@ _KINDS = {t["kind"] for t in TASKS}
 # 不 import apscheduler——API 进程与调度器解耦）
 CRON_CHAIN: tuple[tuple[str, int, int], ...] = (
     ("feishu_push", 8, 35),       # 盘前推送最新核心标名单（F10）
+    ("fund_universe_sync", 9, 5), # 盘前刷新场内基金清单（新上市 ETF 当日进快照）
     ("sector_index", 15, 35),
+    ("zy_block_sync", 16, 5),     # 众赢板块清单+成分（交易日收盘后，成分接口才有数据）
     ("quotes", 16, 0),
     ("valuation", 16, 20),
     ("capital_flow", 16, 30),

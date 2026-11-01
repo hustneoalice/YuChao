@@ -114,6 +114,34 @@ NEW_TABLES_DDL = """
         updated_at    TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
         PRIMARY KEY (symbol, trade_date)
     );
+
+    -- 众赢板块体系（1075 板块清单：地域 32/行业 39+细分/概念 750/风格 32/题材 222）。
+    -- 清单与成分是慢变量，日级任务同步（匿名 GET，低频）；板块行情不落表——
+    -- 查询时以 zy_block_member × market_snapshot 本地聚合（零上游，符合
+    -- 「小厂源只做低频清单、行情一律自有源」的边界）。
+    CREATE TABLE IF NOT EXISTS zy_block (
+        block_code  VARCHAR PRIMARY KEY,   -- H110000/G000021/TC000001/F003491/D181319
+        block_name  VARCHAR NOT NULL,
+        type_code   INTEGER NOT NULL,      -- 1 地域 / 2 概念 / 4 行业 / 8 风格 / 9 题材
+        parent_code VARCHAR,               -- 行业一级代码（type=4 子级挂一级），其余空
+        sort_no     INTEGER,
+        sync_date   DATE DEFAULT current_date   -- 新鲜度守卫（当日已同步 → 秒跳）
+    );
+    CREATE TABLE IF NOT EXISTS zy_block_member (
+        block_code VARCHAR NOT NULL,
+        symbol     VARCHAR NOT NULL,       -- 裸码（与 market_snapshot 主键同口径）
+        stock_name VARCHAR,
+        PRIMARY KEY (block_code, symbol)
+    );
+
+    -- 场内基金清单（ETF 日级同步，东财 MK0021-24）：不进 stock_universe
+    -- （避免污染选股宇宙），快照任务读此表拉行情 kind='fund' 落 market_snapshot。
+    CREATE TABLE IF NOT EXISTS fund_universe (
+        symbol VARCHAR PRIMARY KEY,        -- 510300 / 159915（裸码）
+        name   VARCHAR,
+        market VARCHAR NOT NULL,           -- SH / SZ
+        sync_date DATE DEFAULT current_date   -- 新鲜度守卫
+    );
 """
 
 # 存量表迁移（幂等；writer.ensure_schema / scripts/ensure_schema.py 共用执行）。

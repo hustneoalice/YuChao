@@ -530,3 +530,38 @@ def fetch_fund_flow_sina(symbol: str, days: int = 5) -> Optional[List[Dict]]:
 def _emit(progress, **fields):
     if progress:
         progress(**fields)
+
+
+# ---------------------------------------------------------------------------
+# 东财：场内基金清单（MK0021-24 ETF 四类，fund_universe 日级同步）
+# ---------------------------------------------------------------------------
+
+def fetch_etf_list(progress=None, cancel=None) -> List[Dict[str, str]]:
+    """东财场内 ETF 清单（fs=b:MK0021..24，实测 1655 只）→ [{symbol, name, market}]。
+    f13: 1=SH / 0=SZ；裸码入 fund_universe（行情走 qt 快照 kind='fund'）。"""
+    out: List[Dict[str, str]] = []
+    page, total = 1, None
+    while page <= 30 and (total is None or len(out) < total):
+        params = {"pn": page, "pz": 100, "po": 0, "np": 1, "fltt": 2, "invt": 2,
+                  "fid": "f12", "fs": "b:MK0021,b:MK0022,b:MK0023,b:MK0024",
+                  "fields": "f12,f13,f14"}
+        data = get_json_hosts("/api/qt/clist/get", params, _CLIST_HOSTS,
+                              "https://quote.eastmoney.com/")
+        d = data.get("data") or {}
+        if total is None:
+            total = int(d.get("total") or 0)
+        diff = d.get("diff") or []
+        if not diff:
+            break
+        for r in diff:
+            sym = str(r.get("f12") or "").strip()
+            if len(sym) == 6 and sym.isdigit():
+                out.append({"symbol": sym,
+                            "name": str(r.get("f14") or "").strip(),
+                            "market": "SH" if str(r.get("f13")) == "1" else "SZ"})
+        _emit(progress, done=len(out), total=total, log=f"ETF 清单 [{len(out)}/{total}]")
+        if cancel and cancel():
+            break
+        page += 1
+        time.sleep(0.12)
+    return out

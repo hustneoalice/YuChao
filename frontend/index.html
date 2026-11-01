@@ -164,22 +164,45 @@
       </div>
       <!-- 指数条：固定清单 × 当日快照（点击进行情页 K 线） -->
       <div class="pan-indexbar" id="pan-indexbar"></div>
-      <div class="panel" style="flex:1;min-height:0;display:flex;flex-direction:column">
-        <div class="phead2">
-          <span class="seg" id="pan-tabs">
-            <button class="on" data-t="hsa">沪深A股</button><button data-t="cyb">创业板</button><button data-t="kc">科创板</button><button data-t="bj">北交所</button><button data-t="fund">基金</button>
-          </span>
-          <span class="sub" id="pan-asof"></span>
-          <span class="sp"></span>
-          <span class="sub" id="pan-count"></span>
+      <!-- 双栏联动（众赢全景同款）：左列表，右分时+日K 上下分布；行点击页内联动不跳页 -->
+      <div class="pan-split" style="flex:1;min-height:0">
+        <div class="pan-left">
+          <div class="phead2">
+            <span class="seg" id="pan-tabs">
+              <button class="on" data-t="hsa">沪深A股</button><button data-t="sha">沪市A股</button><button data-t="sza">深市A股</button><button data-t="cyb">创业板</button><button data-t="kc">科创板</button><button data-t="bj">北交所</button><button data-t="fund_sh">上证基金</button><button data-t="fund_sz">深证基金</button><button data-t="block">板块监测</button>
+            </span>
+            <span class="seg" id="pan-btypes" hidden>
+              <button class="on" data-bt="2">概念</button><button data-bt="4">行业</button><button data-bt="9">题材</button><button data-bt="1">地域</button><button data-bt="8">风格</button>
+            </span>
+            <span class="sub" id="pan-asof"></span>
+            <span class="sp"></span>
+            <button class="hbtn" id="pan-back" hidden><span data-ic="arrow-left" data-sz="12"></span>返回板块</button>
+            <span class="sub" id="pan-count"></span>
+          </div>
+          <div class="tblwrap" style="flex:1" id="pan-wrap"></div>
+          <div class="pager" id="pan-pager"></div>
+          <div class="pan-breadth" id="pan-breadth"></div>
+          <div class="empty" id="pan-empty" style="display:none;padding:44px 20px">
+            <span data-ic="trend-up" data-sz="30" style="color:var(--faint)"></span>
+            <b>暂无快照数据</b>
+            <span>快照由 updater 盘中每 5 分钟采集；非交易时段显示最近一轮。</span>
+          </div>
         </div>
-        <div class="tblwrap" style="flex:1" id="pan-wrap"></div>
-        <div class="pager" id="pan-pager"></div>
-        <div class="pan-breadth" id="pan-breadth"></div>
-        <div class="empty" id="pan-empty" style="display:none;padding:44px 20px">
-          <span data-ic="trend-up" data-sz="30" style="color:var(--faint)"></span>
-          <b>暂无快照数据</b>
-          <span>快照由 updater 盘中每 5 分钟采集；非交易时段显示最近一轮。</span>
+        <div class="pan-right">
+          <div class="pan-linkhead">
+            <b id="pan-link-name">点击左侧股票联动</b>
+            <span class="sub num" id="pan-link-code"></span>
+            <span class="sp"></span>
+            <span class="num" id="pan-link-quote"></span>
+          </div>
+          <div class="pan-chartbox" style="flex:1">
+            <div class="pan-charttitle">分时</div>
+            <div class="pan-kl" id="pan-kl-t"></div>
+          </div>
+          <div class="pan-chartbox" style="flex:1.2">
+            <div class="pan-charttitle">日K</div>
+            <div class="pan-kl" id="pan-kl-d"></div>
+          </div>
         </div>
       </div>
     </section>

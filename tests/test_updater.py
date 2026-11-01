@@ -179,12 +179,20 @@ def test_orchestrator_failure_and_ledger(updater_env, tmp_path):
     assert t["status"] == "failed"
     assert "数据源整体不可达" in t["error"]
 
-    # 落账：update_log 必须留一行（1.0 record_update 语义）
-    conn = duckdb.connect(str(updater_env))
-    rows = conn.execute(
-        "SELECT data_type, status, error FROM update_log WHERE data_type='boom'"
-    ).fetchall()
-    conn.close()
+    # 落账：update_log 必须留一行（1.0 record_update 语义）。
+    # 落账发生在 busy 清零之后（orchestrator 先收尾状态再写账），轮询等账避免竞态。
+    import time
+    deadline = time.time() + 5
+    rows = []
+    while time.time() < deadline:
+        conn = duckdb.connect(str(updater_env))
+        rows = conn.execute(
+            "SELECT data_type, status, error FROM update_log WHERE data_type='boom'"
+        ).fetchall()
+        conn.close()
+        if rows:
+            break
+        time.sleep(0.05)
     assert len(rows) == 1 and rows[0][1] == "failed" and "不可达" in rows[0][2]
 
 
@@ -393,7 +401,8 @@ def test_market_snapshot_task(updater_env, monkeypatch):
         "WHERE trade_date='2026-11-02' AND kind='index' AND symbol='000001.SH'"
     ).fetchone()
     conn.close()
-    assert kinds == {"stock": 3, "index": len(INDEX_CATALOG)}   # 夹具 3 股 + 指数清单全命中
+    assert kinds == {"stock": 3, "fund": 2,
+                     "index": len(INDEX_CATALOG)}   # 夹具 3 股 + 2 基金（fund_universe）+ 指数清单
     assert idx[0] == 3599.02 and idx[1] == 0.0        # 指数涨跌停兜 0（总貌只按股票算）
 
 

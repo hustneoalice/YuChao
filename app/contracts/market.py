@@ -210,3 +210,34 @@ class BreadthOut(BaseModel):
     limit_down: int = 0
     amount: float = 0.0
     updated_at: Optional[str] = None
+
+
+class ZyBlockRow(BaseModel):
+    """众赢板块行（清单 × 当日快照聚合；无成分/无快照时行情字段 NULL）。"""
+    block_code: str
+    block_name: str
+    type_code: int                          # 1 地域 / 2 概念 / 4 行业 / 8 风格 / 9 题材
+    parent_code: Optional[str] = None
+    members: int = 0                        # 有当日快照的成分数
+    up_count: int = 0
+    down_count: int = 0
+    flat_count: int = 0
+    avg_change: Optional[float] = None      # 成分涨跌幅平均 %
+    amount: Optional[float] = None          # 成分合计成交额（元）
+    leader: Optional[str] = None            # 领涨股
+    leader_change: Optional[float] = None
+
+
+class ZyBlocksOut(BaseModel):
+    items: list[ZyBlockRow] = Field(default_factory=list)
+    total: int = 0
+    type_code: int = 2
+    as_of: str = Field(default="", description="快照交易日")
+
+
+class ZyBlockMembersOut(BaseModel):
+    items: list[BoardRow] = Field(default_factory=list)
+    total: int = 0
+    block_code: str = ""
+    block_name: str = ""
+    as_of: str = ""

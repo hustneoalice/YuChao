@@ -434,11 +434,15 @@ def _pinyin_variants(name: str) -> dict[str, str]:
 # -- 2.2 全景大页（market_snapshot 派生层：一条本地 SQL，零上游） -------------
 
 _TAB_WHERE = {
-    "hsa":  "kind = 'stock' AND market IN ('SH','SZ') AND symbol NOT LIKE '68%'",
-    "cyb":  "kind = 'stock' AND market = 'SZ' AND symbol LIKE '30%'",
-    "kc":   "kind = 'stock' AND market = 'SH' AND symbol LIKE '68%'",
-    "bj":   "kind = 'stock' AND market = 'BJ'",
-    "fund": "kind = 'fund'",
+    "hsa":     "kind = 'stock' AND market IN ('SH','SZ')",
+    "sha":     "kind = 'stock' AND market = 'SH'",
+    "sza":     "kind = 'stock' AND market = 'SZ'",
+    "cyb":     "kind = 'stock' AND market = 'SZ' AND symbol LIKE '30%'",
+    "kc":      "kind = 'stock' AND market = 'SH' AND symbol LIKE '68%'",
+    "bj":      "kind = 'stock' AND market = 'BJ'",
+    "fund":    "kind = 'fund'",
+    "fund_sh": "kind = 'fund' AND market = 'SH'",
+    "fund_sz": "kind = 'fund' AND market = 'SZ'",
 }
 _BOARD_SORT = {
     "-change_rate": "change_rate DESC", "change_rate": "change_rate ASC",

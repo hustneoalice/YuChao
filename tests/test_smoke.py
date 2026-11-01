@@ -204,14 +204,15 @@ def test_market_board(client: TestClient):
     r = client.get("/api/v1/market/board")
     assert r.status_code == 200
     body = r.json()
-    assert body["total"] == 2 and body["as_of"] == "2026-10-30"
+    assert body["total"] == 3 and body["as_of"] == "2026-10-30"
     syms = [it["symbol"] for it in body["items"]]
-    assert syms == ["000858", "600519"]     # +10.0% 在 +0.67% 前
+    assert syms == ["000858", "600519", "300750"]     # +10.0% / +0.67% / -1.18%
     top = body["items"][0]
     assert top["current"] == 132.0 and top["up_limit"] == 132.0
     assert top["bid1"] == 132.0 and top["bid1_vol"] == 5000.0
-    # tab 过滤：创业板（300 开头）为空；搜索命中
-    assert client.get("/api/v1/market/board", params={"tab": "cyb"}).json()["total"] == 0
+    # tab 过滤：创业板（300 开头）命中 300750；搜索命中
+    rc = client.get("/api/v1/market/board", params={"tab": "cyb"}).json()
+    assert rc["total"] == 1 and rc["items"][0]["symbol"] == "300750"
     rq = client.get("/api/v1/market/board", params={"q": "茅台"})
     assert rq.json()["total"] == 1 and rq.json()["items"][0]["symbol"] == "600519"
 
@@ -230,10 +231,10 @@ def test_market_breadth(client: TestClient):
     r = client.get("/api/v1/market/breadth")
     assert r.status_code == 200
     b = r.json()
-    assert b["up"] == 2 and b["down"] == 0 and b["flat"] == 0
+    assert b["up"] == 2 and b["down"] == 1 and b["flat"] == 0   # 300750 -1.18%
     assert b["limit_up"] == 1                          # 000858 触板精确命中
     assert b["limit_down"] == 0
-    assert b["amount"] == pytest.approx(3.78e9 + 1.06e10)
+    assert b["amount"] == pytest.approx(3.78e9 + 1.06e10 + 7.5e9)
 
 
 def test_market_snapshot_one(client: TestClient):
@@ -256,6 +257,52 @@ def test_market_snapshot_one(client: TestClient):
     # 未入库标的 → null（前端降级为「无盘中快照」而不是报错）
     r3 = client.get("/api/v1/market/snapshot_one", params={"symbol": "688981"})
     assert r3.status_code == 200 and r3.json() is None
+
+
+def test_board_fund_tabs(client: TestClient):
+    """基金 tab：fund 命中 ETF 行；fund_sh 沪市过滤；stocks tab 不串基金。"""
+    r = client.get("/api/v1/market/board", params={"tab": "fund"})
+    b = r.json()
+    assert r.status_code == 200 and b["total"] == 1
+    assert b["items"][0]["symbol"] == "510300" and b["items"][0]["name"] == "沪深300ETF"
+    r2 = client.get("/api/v1/market/board", params={"tab": "fund_sh"})
+    assert r2.json()["total"] == 1
+    r3 = client.get("/api/v1/market/board", params={"tab": "fund_sz"})
+    assert r3.json()["total"] == 0
+    r4 = client.get("/api/v1/market/board", params={"tab": "hsa"})
+    syms = {it["symbol"] for it in r4.json()["items"]}
+    assert "510300" not in syms            # 基金绝不混进股票 tab
+
+
+def test_zy_blocks(client: TestClient):
+    """众赢板块：清单 × 快照聚合（成员数/涨跌家数/均涨/领涨股），类型过滤。"""
+    r = client.get("/api/v1/market/zy_blocks", params={"type_code": 2})
+    b = r.json()
+    assert r.status_code == 200 and b["total"] == 1
+    row = b["items"][0]
+    assert row["block_code"] == "G000021" and row["block_name"] == "大飞机"
+    assert row["members"] == 2 and row["up_count"] == 2 and row["down_count"] == 0
+    assert row["leader"] == "五粮液" and row["leader_change"] == 10.0   # seed 000858 +10%
+    assert row["avg_change"] is not None
+    # 题材板（TC000001，成员 300750 有快照）
+    r2 = client.get("/api/v1/market/zy_blocks", params={"type_code": 9})
+    assert r2.json()["items"][0]["members"] == 1
+    # 非法 type_code → 404
+    assert client.get("/api/v1/market/zy_blocks",
+                      params={"type_code": 7}).status_code == 404
+
+
+def test_zy_block_members(client: TestClient):
+    """板块成分 × 快照：命中快照的行有行情，未入库成分行情字段为 null。"""
+    r = client.get("/api/v1/market/zy_blocks/G000021/members")
+    b = r.json()
+    assert r.status_code == 200 and b["total"] == 2
+    assert b["block_name"] == "大飞机"
+    by_sym = {it["symbol"]: it for it in b["items"]}
+    assert by_sym["600519"]["name"] == "贵州茅台"
+    assert by_sym["600519"]["current"] is not None
+    # 不存在的板块 → 404
+    assert client.get("/api/v1/market/zy_blocks/G999999/members").status_code == 404
 
 
 def test_corepicks_list(client: TestClient):
