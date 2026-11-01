@@ -841,11 +841,9 @@ function styles() {
         text: { show: true, color: cssv("--text") || "#F5F5F7", size: 12, backgroundColor: cssv("--panel-3") || "#2D2D31", borderSize: 1, borderColor: text, borderRadius: 4 },
       },
     },
-    xAxis: {
-      show: true, size: "auto" as const,
-      axisLine: { color: axis, size: 1 }, tickLine: { color: axis, size: 1, length: 3 },
-      tickText: { show: true, color: text, size: 11 },
-    },
+    // 时间轴交给底部控制条（顶部一条细刻度），图表内不重复画 x 轴日期
+    // （多窗格各自一条 x 轴 = 视觉上「两个时间轴」，同时白占高度）
+    xAxis: { show: false, size: "auto" as const },
     yAxis: {
       show: true, size: "auto" as const,
       axisLine: { color: axis, size: 1 }, tickLine: { color: axis, size: 1, length: 3 },
@@ -1177,9 +1175,10 @@ export function mountKline(el: HTMLElement): KlineChartHandle {
   el.addEventListener("mousemove", onSelMove, true);
   el.addEventListener("mouseup", onSelUp, true);
 
-  /* ── 底部 K 线滚动条（众赢同款）：日期标尺 + 滑块窗口 + 两端翻页箭头 ──
+  /* ── 底部 K 线控制条（众赢同款）：顶部细时间刻度 + 条内年份段 + 滑块窗口 + 两端翻页箭头 ──
+   *  · 时间刻度只保留一条（图表自带 x 轴已隐藏，避免多窗格各自画轴 → 视觉上「两个时间轴」）
+   *  · 年份段按全量数据的年份边界划分，条内标 2021 / 2022 … 直观看出总年份跨度
    *  · 滑块拖动 = 平移可见区间，点轨道任意位置 = 直接跳到该处
-   *  · 中间胶囊显示可见区间的自然时长（如「4个月6天」）
    *  必须挂到面板(.klp / .sd-chart 父级)下沿：klinecharts 的 canvas 是 100% 高，
    *  放在图表容器内会被挤出可视区 */
   const nav = document.createElement("div");
@@ -1188,15 +1187,15 @@ export function mountKline(el: HTMLElement): KlineChartHandle {
     `<div class="kl-nav-ruler"></div>` +
     `<div class="kl-nav-btns"><button data-j="first" title="跳到最早">⇤</button>` +
     `<button data-j="prev" title="向前一页">‹</button></div>` +
-    `<div class="kl-nav-track"><div class="kl-nav-win" title="拖动平移可见区间"></div></div>` +
+    `<div class="kl-nav-track"><div class="kl-nav-win" title="拖动平移可见区间"></div>` +
+    `<div class="kl-nav-yrs"></div></div>` +
     `<div class="kl-nav-btns r"><button data-j="next" title="向后一页">›</button>` +
-    `<button data-j="last" title="回到最新">⇥</button></div>` +
-    `<span class="kl-nav-time"></span>`;
+    `<button data-j="last" title="回到最新">⇥</button></div>`;
   (el.parentElement ?? el).appendChild(nav);
   const navRuler = nav.querySelector(".kl-nav-ruler") as HTMLElement;
   const navTrack = nav.querySelector(".kl-nav-track") as HTMLElement;
   const navWin = nav.querySelector(".kl-nav-win") as HTMLElement;
-  const navTime = nav.querySelector(".kl-nav-time") as HTMLElement;
+  const navYears = nav.querySelector(".kl-nav-yrs") as HTMLElement;
 
   // 快速跳转（策影 navJump 同款：first / ±0.8 页 / last）
   // klinecharts 的 scrollToDataIndex(idx) 是把第 idx 根贴到「右边界」，所以翻页锚点要用右边界索引
@@ -1256,7 +1255,38 @@ export function mountKline(el: HTMLElement): KlineChartHandle {
     }
   };
 
-  /** 按可见区间刷新滑块位置/宽度 + 中间时长胶囊 */
+  /** 年份段：按全量数据年份边界在条内画分隔线 + 年份标（覆盖总年份跨度；过窄的段只留线不标字） */
+  const navYearDraw = (list: { date?: string }[]) => {
+    navYears.innerHTML = "";
+    const w = navTrack.clientWidth;
+    const L = list.length;
+    if (!w || L < 2) return;
+    const marks: { year: string; i: number }[] = [];
+    let prev = "";
+    for (let i = 0; i < L; i++) {
+      const y = (list[i]?.date || "").slice(0, 4);
+      if (!/^\d{4}$/.test(y)) continue;
+      if (y !== prev) { marks.push({ year: y, i }); prev = y; }
+    }
+    marks.forEach((m, k) => {
+      const left = (m.i / (L - 1)) * 100;
+      const next = k + 1 < marks.length ? (marks[k + 1].i / (L - 1)) * 100 : 100;
+      if (m.i > 0) {                       // 年界竖线（首年不画，避免贴边）
+        const line = document.createElement("u");
+        line.className = "kl-nav-yrline";
+        line.style.left = `${left}%`;
+        navYears.appendChild(line);
+      }
+      if (((next - left) / 100) * w < 22) return;   // 段太窄：不标年份
+      const lab = document.createElement("i");
+      lab.className = "kl-nav-yr";
+      lab.style.left = `${left}%`;
+      lab.textContent = m.year;
+      navYears.appendChild(lab);
+    });
+  };
+
+  /** 按可见区间刷新滑块位置/宽度 + 悬停提示（可见区间自然时长） */
   const navUpdateWin = () => {
     const list = chart.getDataList() as { date?: string }[];
     const r = chart.getVisibleRange?.() as { from: number; to: number } | undefined;
@@ -1269,8 +1299,7 @@ export function mountKline(el: HTMLElement): KlineChartHandle {
     const d = (i: number) => list[Math.max(0, Math.min(L - 1, i))]?.date || "";
     const s0 = d(from), s1 = d(to - 1);
     if (s0 && s1) {
-      navTime.textContent = navSpan(s0, s1, cnt);
-      navTime.title = `${s0} ~ ${s1} · ${cnt} 根`;
+      navWin.title = `${s0} ~ ${s1} · ${cnt} 根 · ${navSpan(s0, s1, cnt)}`;
       nav.title = `全量 ${list[0]?.date ?? s0} ~ ${list[L - 1]?.date ?? s1}`;
     }
   };
@@ -1278,6 +1307,7 @@ export function mountKline(el: HTMLElement): KlineChartHandle {
     const list = chart.getDataList() as { date?: string }[];
     nav.style.display = list.length > 1 ? "" : "none";
     navRulerDraw(list);
+    navYearDraw(list);
     navUpdateWin();
   };
   const onVisChange = () => { requestAnimationFrame(navUpdateWin); };
