@@ -68,4 +68,10 @@ API 只经 `src/api.ts` 且只 import `clients/ts/yuchao.d.ts`（契约生成物
 - [ ] 只用语义变量上色；涨跌语义用 `--up`/`--down` 不写死红绿
 - [ ] 列表/排行可排序 + localStorage 记忆视图状态
 - [ ] 空态明确提示（数据未采集 vs 接口错误，两者文案不同）
+- [ ] **垂直间距对齐全局节奏**：`.phead2` 自带 `border-bottom`，其下第一行
+      （条件 chips / 工具条 / seg）必须 `padding-top:10px`，否则内容贴线——
+      目标页翻过车；直接 `tblwrap` 开头的不用（表格自带内边距）
+- [ ] **构建退出码不许被管道吞掉**：`npm run build | tail` 的退出码是 tail 的，
+      TS 报错也显示"成功"。用 `npm run build > /tmp/b.log 2>&1; echo exit=$?`
+      再看日志，或 vite 的 `--boot-odd` 前检查 `echo $?`
 - [ ] `npm run build` 过 TS 校验后再提交

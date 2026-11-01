@@ -91,7 +91,7 @@ tests/
    测 API 口径；`.venv/bin/python -m pytest tests/ -q` 全绿 + `npm run build` 再提交。
    可靠性机制必须有回归测试覆盖真实故障场景。
 
-## 踩坑速查（高频 Top 12，完整清单见 references/pitfalls.md）
+## 踩坑速查（高频 Top 14，完整清单见 references/pitfalls.md）
 
 | 坑 | 对策 |
 |---|---|
@@ -102,11 +102,13 @@ tests/
 | 单位 100 倍脏数据入库 | normalize 隐含均价自证纠偏 |
 | 连续失败不熔断 → 空转 2 小时 | 连续 40 只失败早停 + 车道熔断 300s + 半开探测 |
 | klinecharts v10 画布空白无报错 | dataLoader 门控：setSymbol/setPeriod 必须先显式配置 |
-| 最新 K 线右侧多 50px 空隙 | offsetRightDistance 显式设 0 |
+| 最新 K 线右侧留白 | offsetRightDistance 显式设 12px：0 被轴线/刻度盖住，过大最新根脱轴 |
 | 前端拿到的字段缺失 | pydantic response_model 静默过滤未声明字段，契约补全 |
 | [hidden] 元素意外显示 | 全局 `[hidden]{display:none!important}` 压过 display:flex |
 | 下拉点击被吞 | innerHTML 重渲染吞事件 → 事件委托 + 定点 span 插入 |
 | 交易日历依赖包过期 → 幽灵交易日 | calendar_health 断言覆盖当年次年，进体检报警 |
+| phead2 下第一行贴 border 线 | 条件 chips/工具条必须 padding-top:10px（目标页翻过车） |
+| `npm run build \| tail` 吞退出码 → 带病提交 | 重定向到文件后 `echo $?` 检查，再提交 |
 
 ## 深入阅读（按需加载，勿整包读入）
 
