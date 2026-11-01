@@ -2,7 +2,7 @@
 from typing import Optional
 
 from .. import db
-from ..symbol import INDEX_NAMES, index_form, is_bj, normalize_symbol
+from ..symbol import INDEX_CATALOG, INDEX_NAMES, index_form, is_bj, normalize_symbol
 from ...config import settings
 from ...errors import not_found
 from ...contracts.common import Adjust
@@ -429,3 +429,130 @@ def _pinyin_variants(name: str) -> dict[str, str]:
     out = {"abbr": abbr.lower(), "full": full.lower()}
     _PY_CACHE[name] = out
     return out
+
+
+# -- 2.2 全景大页（market_snapshot 派生层：一条本地 SQL，零上游） -------------
+
+_TAB_WHERE = {
+    "hsa":  "kind = 'stock' AND market IN ('SH','SZ') AND symbol NOT LIKE '68%'",
+    "cyb":  "kind = 'stock' AND market = 'SZ' AND symbol LIKE '30%'",
+    "kc":   "kind = 'stock' AND market = 'SH' AND symbol LIKE '68%'",
+    "bj":   "kind = 'stock' AND market = 'BJ'",
+    "fund": "kind = 'fund'",
+}
+_BOARD_SORT = {
+    "-change_rate": "change_rate DESC", "change_rate": "change_rate ASC",
+    "-amount": "amount DESC", "-turnover_rate": "turnover_rate DESC",
+    "-vol_ratio": "vol_ratio DESC", "-amplitude": "amplitude DESC",
+    "symbol": "symbol", "name": "name",
+}
+
+
+def board_rows(conn, tab: str = "hsa", sort: str = "-change_rate",
+               page: int = 1, size: int = 50, q: Optional[str] = None):
+    """全景大表：快照表排序分页（毫秒级），market tab 走 kind/market 过滤。"""
+    where = _TAB_WHERE.get(tab, _TAB_WHERE["hsa"])
+    if tab == "bj" and not settings.bj_enabled:
+        return [], 0                                # 北交开关关闭：视图为空
+    order = _BOARD_SORT.get(sort, _BOARD_SORT["-change_rate"])
+    cond, params = where, []
+    if q:
+        cond += " AND (symbol LIKE ? OR name LIKE ?)"
+        params += [f"%{q}%", f"%{q}%"]
+    total = conn.execute(
+        f"SELECT COUNT(*) FROM market_snapshot WHERE trade_date = "
+        f"(SELECT MAX(trade_date) FROM market_snapshot) AND {cond}", params
+    ).fetchone()[0]
+    off = max(0, (max(1, page) - 1) * size)
+    rows = conn.execute(
+        f"SELECT symbol, name, current, change_amount, change_rate, open, high, "
+        f"low, pre_close, volume, amount, turnover_rate, vol_ratio, amplitude, "
+        f"bid1, bid1_vol, ask1, ask1_vol, outer_vol, inner_vol, "
+        f"market_value, circ_value, up_limit, down_limit, updated_at "
+        f"FROM market_snapshot WHERE trade_date = "
+        f"(SELECT MAX(trade_date) FROM market_snapshot) AND {cond} "
+        f"ORDER BY {order} LIMIT ? OFFSET ?",
+        params + [size, off]).fetchall()
+    cols = ("symbol name current change_amount change_rate open high low "
+            "pre_close volume amount turnover_rate vol_ratio amplitude "
+            "bid1 bid1_vol ask1 ask1_vol outer_vol inner_vol "
+            "market_value circ_value up_limit down_limit updated_at").split()
+    out = []
+    for r in rows:
+        d = dict(zip(cols, r))
+        d["updated_at"] = str(d["updated_at"]) if d["updated_at"] else None
+        out.append(d)
+    return out, total
+
+
+def index_bar(conn) -> list[dict]:
+    """底部指数条：INDEX_CATALOG 顺序 × 当日快照（缺失指数 null 占位，前端隐藏）。"""
+    day = conn.execute(
+        "SELECT MAX(trade_date) FROM market_snapshot").fetchone()[0]
+    if not day:
+        return []
+    rows = conn.execute(
+        "SELECT symbol, name, current, change_amount, change_rate, amount "
+        "FROM market_snapshot WHERE trade_date = ? AND kind = 'index'", [day]
+    ).fetchall()
+    by = {r[0]: r for r in rows}
+    out = []
+    for sym, name in INDEX_CATALOG:
+        r = by.get(sym)
+        out.append({
+            "symbol": sym, "name": name,
+            "current": r[2] if r else None,
+            "change_amount": r[3] if r else None,
+            "change_rate": r[4] if r else None,
+            "amount": r[5] if r else None,
+        })
+    return out
+
+
+def market_breadth(conn) -> dict:
+    """市场总貌：涨跌家数/涨跌停精确家数（现价 vs 涨跌停价）/两市成交额。"""
+    row = conn.execute(
+        "SELECT SUM(CASE WHEN change_rate > 0 THEN 1 ELSE 0 END),"
+        "       SUM(CASE WHEN change_rate < 0 THEN 1 ELSE 0 END),"
+        "       SUM(CASE WHEN change_rate = 0 THEN 1 ELSE 0 END),"
+        "       SUM(CASE WHEN up_limit > 0 AND current >= up_limit THEN 1 ELSE 0 END),"
+        "       SUM(CASE WHEN down_limit > 0 AND current <= down_limit THEN 1 ELSE 0 END),"
+        "       SUM(amount), MAX(updated_at)"
+        " FROM market_snapshot WHERE trade_date = "
+        " (SELECT MAX(trade_date) FROM market_snapshot) AND kind = 'stock'"
+    ).fetchone()
+    return {"up": row[0] or 0, "down": row[1] or 0, "flat": row[2] or 0,
+            "limit_up": row[3] or 0, "limit_down": row[4] or 0,
+            "amount": row[5] or 0.0,
+            "updated_at": str(row[6]) if row[6] else None}
+
+
+_SNAP_COLS = ("symbol name current change_amount change_rate open high low "
+              "pre_close volume amount turnover_rate vol_ratio amplitude "
+              "bid1 bid1_vol ask1 ask1_vol outer_vol inner_vol "
+              "market_value circ_value up_limit down_limit updated_at").split()
+
+
+def snapshot_one(conn, symbol: str) -> Optional[dict]:
+    """单标的当日快照（个股详情页盘口网格）。
+    表中个股存裸码、指数存全码，000001 双重身份——两段精确查询：
+    目录内指数请求只认全码（000001.SH 绝不落回平安银行裸码）；
+    其余（含个股带后缀形态）先裸码后退全码。"""
+    idx = index_form(symbol)
+    bare = normalize_symbol(symbol)
+    if idx and bare in {s.split(".")[0] for s, _ in INDEX_CATALOG}:
+        cands = [idx]
+    elif idx:
+        cands = [bare, idx]
+    else:
+        cands = [bare]
+    for cand in cands:
+        row = conn.execute(
+            f"SELECT {', '.join(_SNAP_COLS)} FROM market_snapshot "
+            f"WHERE trade_date = (SELECT MAX(trade_date) FROM market_snapshot) "
+            f"AND symbol = ?", [cand]).fetchone()
+        if row:
+            d = dict(zip(_SNAP_COLS, row))
+            d["updated_at"] = str(d["updated_at"]) if d["updated_at"] else None
+            return d
+    return None

@@ -196,6 +196,68 @@ def test_sector_unknown_404(client: TestClient):
     assert r.status_code == 404
 
 
+# -- 2.2 全景大页（market_snapshot 派生层） ----------------------------------
+
+
+def test_market_board(client: TestClient):
+    """全景大表：沪深 tab 默认按涨跌幅降序；指数不混入股票表。"""
+    r = client.get("/api/v1/market/board")
+    assert r.status_code == 200
+    body = r.json()
+    assert body["total"] == 2 and body["as_of"] == "2026-10-30"
+    syms = [it["symbol"] for it in body["items"]]
+    assert syms == ["000858", "600519"]     # +10.0% 在 +0.67% 前
+    top = body["items"][0]
+    assert top["current"] == 132.0 and top["up_limit"] == 132.0
+    assert top["bid1"] == 132.0 and top["bid1_vol"] == 5000.0
+    # tab 过滤：创业板（300 开头）为空；搜索命中
+    assert client.get("/api/v1/market/board", params={"tab": "cyb"}).json()["total"] == 0
+    rq = client.get("/api/v1/market/board", params={"q": "茅台"})
+    assert rq.json()["total"] == 1 and rq.json()["items"][0]["symbol"] == "600519"
+
+
+def test_market_index_bar(client: TestClient):
+    r = client.get("/api/v1/market/index_bar")
+    assert r.status_code == 200
+    bar = {it["symbol"]: it for it in r.json()}
+    assert bar["000001.SH"]["current"] == 3599.02     # 上证指数快照直出
+    assert bar["000001.SH"]["change_rate"] == -1.44
+    assert bar["399001.SZ"]["current"] is None        # 未采指数 → null 占位
+
+
+def test_market_breadth(client: TestClient):
+    """市场总貌：涨停用现价 vs 涨停价精确判定（000858 132.0 == up_limit）。"""
+    r = client.get("/api/v1/market/breadth")
+    assert r.status_code == 200
+    b = r.json()
+    assert b["up"] == 2 and b["down"] == 0 and b["flat"] == 0
+    assert b["limit_up"] == 1                          # 000858 触板精确命中
+    assert b["limit_down"] == 0
+    assert b["amount"] == pytest.approx(3.78e9 + 1.06e10)
+
+
+def test_market_snapshot_one(client: TestClient):
+    """单标的快照：目录指数只认全码（000001.SH 不落回裸码歧义），
+    未命中返回 null。"""
+    r = client.get("/api/v1/market/snapshot_one", params={"symbol": "600519"})
+    assert r.status_code == 200
+    b = r.json()
+    assert b["symbol"] == "600519" and b["current"] is not None
+    assert b["name"] == "贵州茅台"
+    # 指数全码形态：精确命中指数行，绝不落回 000001 裸码（平安银行）
+    r2 = client.get("/api/v1/market/snapshot_one", params={"symbol": "000001.SH"})
+    assert r2.status_code == 200
+    b2 = r2.json()
+    assert b2 is not None and b2["symbol"] == "000001.SH"
+    assert b2["name"] == "上证指数" and b2["current"] is not None
+    # 裸码 000001（seed 无平安银行快照行）→ null，验证两段式不串位
+    r2b = client.get("/api/v1/market/snapshot_one", params={"symbol": "000001"})
+    assert r2b.status_code == 200 and r2b.json() is None
+    # 未入库标的 → null（前端降级为「无盘中快照」而不是报错）
+    r3 = client.get("/api/v1/market/snapshot_one", params={"symbol": "688981"})
+    assert r3.status_code == 200 and r3.json() is None
+
+
 def test_corepicks_list(client: TestClient):
     r = client.get("/api/v1/corepicks", params={"pool": "chase"})
     assert r.status_code == 200

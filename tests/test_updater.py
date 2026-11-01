@@ -7,6 +7,7 @@ import pytest
 from app.config import settings
 from app.stream.bus import (ControlRequests, FileJournal, StreamBus,
                             channel_matches, make_sse_frame, tail_events)
+from app.foundation.symbol import INDEX_CATALOG
 from app.updater.collectors.financials import _last_periods
 from app.updater.collectors.http import market_prefix, pure_of, suffixed_symbol
 from app.updater.collectors.kline import _gap_count
@@ -352,6 +353,66 @@ def test_sector_index_task(updater_env, tmp_path, monkeypatch):
         "SELECT COUNT(*) FROM sector_member WHERE bk_code='BK0580'").fetchone()[0]
     conn.close()
     assert kinds == {"industry": 1, "concept": 1} and m == 1
+
+
+def test_market_snapshot_task(updater_env, monkeypatch):
+    """盘中快照：qt 全字段 → market_snapshot（股票+指数同表 kind 区分）。"""
+    from app.updater.collectors import market_snapshot as msnap
+
+    def fake_snap(codes, progress=None, cancel=None):
+        # 与真实 fetch_qt_snapshot 同口径：入参股票裸码/指数全码混合，
+        # 出键一律 full 形态（600519.SH）——裸码会撞 000001 双重身份
+        out = {}
+        for c in codes:
+            key = c if "." in c else f"{c}.{market_prefix(c).upper()}"
+            if key.endswith((".SH", ".SZ", ".BJ")) and key[:6] in {
+                    s.split(".")[0] for s, _ in INDEX_CATALOG}:     # 指数形态
+                out[key] = ("上证指数", 3599.02, -52.6, -1.44, 3651.6, 3651.6,
+                            3594.1, 3651.62, None, None, 6.2e8, 8.9e11,
+                            None, None, 1.57, None, None, None, None,
+                            0.0, 0.0, None, None)
+            else:                                                  # 个股 23 元组
+                out[key] = ("某股", 10.0, 0.1, 1.0, 9.9, 10.1, 9.8, 9.9,
+                            10.89, 8.91, 100000.0, 9.9e7, 2.5, 1.2, 3.0,
+                            10.0, 500.0, 10.01, 300.0, 51000.0, 49000.0,
+                            5.0e9, 4.2e9)
+        return out
+
+    monkeypatch.setattr(msnap, "expected_asof", lambda: "2026-11-02")
+    monkeypatch.setattr(msnap, "_MIN_SNAPSHOT_ROWS", 5)   # 夹具小数据集
+    monkeypatch.setattr(msnap.sources, "fetch_qt_snapshot", fake_snap)
+    res = msnap.update_market_snapshot(progress=None,
+                                       ctx={"cancel_check": lambda: False})
+    assert res["status"] == "success"
+    conn = duckdb.connect(str(updater_env))
+    kinds = dict(conn.execute(
+        "SELECT kind, COUNT(*) FROM market_snapshot WHERE trade_date='2026-11-02' "
+        "GROUP BY kind").fetchall())
+    idx = conn.execute(
+        "SELECT current, up_limit FROM market_snapshot "
+        "WHERE trade_date='2026-11-02' AND kind='index' AND symbol='000001.SH'"
+    ).fetchone()
+    conn.close()
+    assert kinds == {"stock": 3, "index": len(INDEX_CATALOG)}   # 夹具 3 股 + 指数清单全命中
+    assert idx[0] == 3599.02 and idx[1] == 0.0        # 指数涨跌停兜 0（总貌只按股票算）
+
+
+def test_market_snapshot_offhours_skip(updater_env, monkeypatch):
+    """非交易时段且当日已有快照 → 幂等秒跳（interval 触发的重复轮次不重拉）。"""
+    from app.updater.collectors import market_snapshot as msnap
+
+    monkeypatch.setattr(msnap, "expected_asof", lambda: "2026-10-30")
+    monkeypatch.setattr(msnap, "_in_trading_hours", lambda now: False)  # 模拟收盘后
+    called = {"n": 0}
+
+    def boom(*a, **k):
+        called["n"] += 1
+        raise AssertionError("非交易时段不应触发上游拉取")
+
+    monkeypatch.setattr(msnap.sources, "fetch_qt_snapshot", boom)
+    res = msnap.update_market_snapshot(progress=None,
+                                       ctx={"cancel_check": lambda: False})
+    assert res["status"] == "skipped(fresh)" and called["n"] == 0
 
 
 # ---------------------------------------------------------------------------

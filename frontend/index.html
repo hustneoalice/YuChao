@@ -53,6 +53,8 @@
 <div class="shell">
   <nav class="rail" id="rail">
     <a class="on" data-page="market" data-ic="chart-line-up" data-t="行情" data-sz="21"></a>
+    <a data-page="panorama" data-ic="trend-up" data-t="全景" data-sz="21"></a>
+    <a data-page="stock" data-ic="chart-line" data-t="个股" data-sz="21"></a>
     <a data-page="watchlist" data-ic="star" data-t="自选" data-sz="21"></a>
     <a data-page="targets" data-ic="funnel-simple" data-t="目标" data-sz="21"></a>
     <a data-page="sectors" data-ic="squares-four" data-t="板块" data-sz="21"></a>
@@ -148,6 +150,71 @@
 
         <div class="rcol-grip" id="rcol-grip" title="拖拽调整卡片栏宽度"></div>
         <aside class="rightcol" id="rightcol"></aside>
+      </div>
+    </section>
+
+    <!-- ═══════════ 全景 ═══════════ -->
+    <section class="page" id="page-panorama">
+      <div class="phead">
+        <span class="crumb">全景 /</span><h1>A股全景</h1>
+        <span class="sub" style="font-size:12px;color:var(--faint)">盘中快照 5 分钟一轮</span>
+        <span class="sp"></span>
+        <input id="pan-q" type="search" placeholder="搜代码 / 名称" style="width:130px">
+        <button class="hbtn" id="pan-refresh" data-ic="arrows-clockwise" data-sz="13">刷新</button>
+      </div>
+      <!-- 指数条：固定清单 × 当日快照（点击进行情页 K 线） -->
+      <div class="pan-indexbar" id="pan-indexbar"></div>
+      <div class="panel" style="flex:1;min-height:0;display:flex;flex-direction:column">
+        <div class="phead2">
+          <span class="seg" id="pan-tabs">
+            <button class="on" data-t="hsa">沪深A股</button><button data-t="cyb">创业板</button><button data-t="kc">科创板</button><button data-t="bj">北交所</button><button data-t="fund">基金</button>
+          </span>
+          <span class="sub" id="pan-asof"></span>
+          <span class="sp"></span>
+          <span class="sub" id="pan-count"></span>
+        </div>
+        <div class="tblwrap" style="flex:1" id="pan-wrap"></div>
+        <div class="pager" id="pan-pager"></div>
+        <div class="pan-breadth" id="pan-breadth"></div>
+        <div class="empty" id="pan-empty" style="display:none;padding:44px 20px">
+          <span data-ic="trend-up" data-sz="30" style="color:var(--faint)"></span>
+          <b>暂无快照数据</b>
+          <span>快照由 updater 盘中每 5 分钟采集；非交易时段显示最近一轮。</span>
+        </div>
+      </div>
+    </section>
+
+    <!-- ═══════════ 个股详情 ═══════════ -->
+    <section class="page" id="page-stock">
+      <div class="phead">
+        <span class="crumb">个股 /</span><h1 id="sd-title">个股详情</h1>
+        <span class="sub num" id="sd-code" style="font-size:12px;color:var(--faint)"></span>
+        <span class="sp"></span>
+        <button class="cbtn" id="sd-watch" title="加自选 / 管理分组"><span data-ic="star" data-sz="13"></span></button>
+      </div>
+      <div class="empty" id="sd-empty" style="display:none;flex:1">
+        <span data-ic="chart-line" data-sz="30" style="color:var(--faint)"></span>
+        <b>选择一个标的查看详情</b>
+        <span>从「全景」大表点击任意标的进入，盘口与关键数据一屏尽览。</span>
+      </div>
+      <div id="sd-body" style="display:none;flex-direction:column;gap:10px;flex:1;min-height:0">
+        <!-- 报价头：现价大字 + 涨跌 + 涨停跌停 + 快照时间 -->
+        <div class="sd-quote" id="sd-quote"></div>
+        <div style="display:flex;gap:12px;flex:1;min-height:0">
+          <div class="panel" style="flex:1.6;min-width:0;display:flex;flex-direction:column">
+            <div class="phead2">
+              <span class="seg" id="sd-period">
+                <button data-p="60">60分</button><button class="on" data-p="d">日K</button><button data-p="w">周K</button><button data-p="m">月K</button>
+              </span>
+              <span class="sub" id="sd-asof"></span>
+            </div>
+            <div class="sd-chart" id="sd-chart"></div>
+          </div>
+          <div class="panel" style="flex:1;min-width:0;display:flex;flex-direction:column">
+            <div class="phead2"><h3>盘口 · 关键数据</h3><span class="sub" id="sd-snaptime"></span></div>
+            <div class="sd-grid" id="sd-grid"></div>
+          </div>
+        </div>
       </div>
     </section>
 
@@ -311,6 +378,8 @@
 <!-- ═══ 手机版底部页签（body.mobile 时显示，替代左侧图标栏） ═══ -->
 <nav class="mtabs" id="mtabs">
   <a class="on" data-page="market"><span data-ic="chart-line-up" data-sz="19"></span><span>行情</span></a>
+  <a data-page="panorama"><span data-ic="trend-up" data-sz="19"></span><span>全景</span></a>
+  <a data-page="stock"><span data-ic="chart-line" data-sz="19"></span><span>个股</span></a>
   <a data-page="watchlist"><span data-ic="star" data-sz="19"></span><span>自选</span></a>
   <a data-page="targets"><span data-ic="funnel-simple" data-sz="19"></span><span>目标</span></a>
   <a data-page="sectors"><span data-ic="squares-four" data-sz="19"></span><span>板块</span></a>

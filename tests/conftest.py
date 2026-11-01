@@ -119,13 +119,35 @@ def duckdb_file(tmp_path):
         "(bk_code, bk_name, symbol, stock_name) VALUES (?,?,?,?)",
         [
             ("BK0580", "免税概念", "600519", "贵州茅台"),
-            ("BK0580", "免税概念", "300750", "宁德时代"),
-        ],
+            ("BK0580", "免税概念", "300750", "宁德时代"),        ],
     )
     conn.execute(
         "INSERT INTO corepicks_result VALUES "
         "('2026-10-30', 'chase', '白酒', '600519', 1, 86.5, 'strong', "
         "'{\"trend\": 0.82, \"volume\": 0.77, \"position\": 0.91}')"
+    )
+    # 全市场快照（2.2 全景大页：2 股 + 1 指数；涨跌停精确判定用例用 000858）
+    conn.executemany(
+        "INSERT OR REPLACE INTO market_snapshot "
+        "(symbol, kind, market, name, current, change_amount, change_rate, "
+        "open, high, low, pre_close, up_limit, down_limit, volume, amount, "
+        "turnover_rate, vol_ratio, amplitude, bid1, bid1_vol, ask1, ask1_vol, "
+        "outer_vol, inner_vol, market_value, circ_value, trade_date) "
+        "VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)",
+        [
+            ("600519", "stock", "SH", "贵州茅台", 1510.0, 10.0, 0.67,
+             1502.0, 1520.0, 1498.0, 1500.0, 1650.0, 1350.0, 25000, 3.78e9,
+             0.31, 0.9, 1.47, 1509.8, 100, 1510.2, 80, 13000, 12000,
+             1.9e12, 1.9e12, "2026-10-30"),
+            ("000858", "stock", "SZ", "五粮液", 132.0, 12.0, 10.0,
+             120.0, 132.0, 119.5, 120.0, 132.0, 108.0, 800000, 1.06e10,
+             6.72, 2.4, 10.42, 132.0, 5000, None, 0, 410000, 390000,
+             5.13e11, 5.13e11, "2026-10-30"),
+            ("000001.SH", "index", "SH", "上证指数", 3599.02, -52.6, -1.44,
+             3651.6, 3651.6, 3594.1, 3651.62, 0.0, 0.0, 6.2e8, 8.9e11,
+             0.0, 0.0, 1.57, 0, 0, 0, 0, 0, 0,
+             None, None, "2026-10-30"),
+        ],
     )
     conn.execute("CHECKPOINT")
     conn.close()

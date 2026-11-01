@@ -20,6 +20,9 @@ export interface DataTable<T> {
   sort(rows: T[]): T[];
   render(rows: T[], startIndex?: number): void;
   resetSort(): void;
+  /* 当前表头排序态（label + dir）。服务端分页表用：onChange 里读它
+   * 换算成 sort 参数重新请求；客户端全量排序表用不到。 */
+  readonly sortState: { label: string | null; dir: 1 | -1 };
 }
 
 export function createDataTable<T>(
@@ -95,5 +98,6 @@ export function createDataTable<T>(
     sort,
     render,
     resetSort() { sortLabel = null; sortDir = -1; },
+    get sortState() { return { label: sortLabel, dir: sortDir }; },
   };
 }

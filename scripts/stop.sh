@@ -17,14 +17,22 @@ stop_one() { # name port
   for p in $pids $port_pids; do
     kill -TERM "$p" 2>/dev/null || true
   done
-  # 最多等 5s，未退出则 KILL
+  # 最多等 5s：以「进程是否退出」为准——收尾阶段端口可能先释放而进程仍在持库锁
+  local alive
   for _ in $(seq 1 10); do
-    port_pids=$(lsof -nP -tiTCP:"$port" -sTCP:LISTEN 2>/dev/null || true)
-    [ -z "$port_pids" ] && break
+    alive=""
+    for p in $pids $port_pids; do
+      kill -0 "$p" 2>/dev/null && alive="$alive $p"
+    done
+    [ -z "$alive" ] && break
     sleep 0.5
   done
-  port_pids=$(lsof -nP -tiTCP:"$port" -sTCP:LISTEN 2>/dev/null || true)
-  for p in $port_pids; do kill -KILL "$p" 2>/dev/null || true; done
+  # 兜底 KILL：凡仍存活的（含已释放端口但未退出的）一律强杀
+  for p in $pids $port_pids; do
+    if kill -0 "$p" 2>/dev/null; then
+      kill -KILL "$p" 2>/dev/null || true
+    fi
+  done
   echo "[$name] 已停止 (port $port)"
   rm -f "$pid_file"
 }

@@ -300,6 +300,62 @@ def fetch_qt_batch(codes: List[str], progress=None, cancel=None) -> Dict[str, Tu
     return out
 
 
+def fetch_qt_snapshot(codes: List[str], progress=None, cancel=None) -> Dict[str, Tuple]:
+    """腾讯 qt 全字段快照 → {sym: 快照元组}（全景大页 market_snapshot 专用）。
+
+    字段口径（qt payload 下标实测）：[3]现价 [4]昨收 [5]今开 [6]成交量(手)
+    [7]外盘 [8]内盘 [9][10]买一价量 [19][20]卖一价量 [31]涨跌 [32]涨跌%
+    [33]最高 [34]最低 [37]成交额(万元) [38]换手% [43]振幅% [44]流通市值(亿)
+    [45]总市值(亿) [47]涨停价 [48]跌停价 [49]量比。返回元组顺序 =
+    (name, current, change_amount, change_rate, open, high, low, pre_close,
+     up_limit, down_limit, volume, amount, turnover_rate, vol_ratio,
+     amplitude, bid1, bid1_vol, ask1, ask1_vol, outer_vol, inner_vol,
+     market_value, circ_value)。
+    指数同样适用（涨跌停/换手等为空，写入侧按 kind 兜底 0）。"""
+    out: Dict[str, Tuple] = {}
+    from .http import tx_symbol
+    total = len(codes)
+    for i in range(0, total, _QT_BATCH):
+        chunk = codes[i:i + _QT_BATCH]
+        prefixed = [c for c in (tx_symbol(s) for s in chunk) if c]
+        if not prefixed:
+            continue
+        url = f"https://qt.gtimg.cn/q={','.join(prefixed)}"
+        resp = _get_text(url)
+        for m in re.finditer(r'v_(sh|sz|bj)(\d{6})="([^"]*)"', resp):
+            pfx, num, payload = m.group(1), m.group(2), m.group(3).split("~")
+            sym = f"{num}.{pfx.upper()}"      # 完整码键：上证指数 000001.SH 与
+            p = payload                        # 平安银行 000001.SZ 裸码冲突必须区分
+            if len(p) <= 49:
+                continue
+            price = _num(p[3])
+            if not price:
+                continue
+            chg = _num(p[31])
+            chg_pct = _num(p[32])
+            amt = _num(p[37])
+            total_mv = _num(p[45])
+            circ_mv = _num(p[44])
+            out[sym] = (
+                p[1], price, chg, chg_pct,
+                _num(p[5]), _num(p[33]), _num(p[34]), _num(p[4]),
+                _num(p[47]), _num(p[48]),
+                _num(p[6]),
+                (amt * 1e4) if amt else 0.0,
+                _num(p[38]) or 0.0, _num(p[49]) or 0.0, _num(p[43]) or 0.0,
+                _num(p[9]), _num(p[10]), _num(p[19]), _num(p[20]),
+                _num(p[7]) or 0.0, _num(p[8]) or 0.0,
+                total_mv * 1e8 if total_mv else None,
+                circ_mv * 1e8 if circ_mv else None,
+            )
+        _emit(progress, done=min(i + _QT_BATCH, total), total=total,
+              log=f"快照 [{min(i + _QT_BATCH, total)}/{total}]")
+        if cancel and cancel():
+            break
+        time.sleep(0.12)
+    return out
+
+
 def _get_text(url: str) -> str:
     from .http import client, _UA
 

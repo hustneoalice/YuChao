@@ -94,6 +94,7 @@ def start_core(*, scheduler: bool) -> EmbeddedCore:
     for spec in TASKS:
         orchestrator.register(spec["kind"], spec["label"], resolve_fn(spec),
                               description=spec["description"],
+                              cooldown_s=spec.get("cooldown_s"),
                               meta={k: spec[k] for k in
                                     ("freshness", "needs", "min_rows")
                                     if k in spec})

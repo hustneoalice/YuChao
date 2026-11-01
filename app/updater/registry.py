@@ -15,6 +15,13 @@ fn 用「模块:函数」字符串延迟解析——API 进程只读这份元数
 """
 
 TASKS: tuple[dict, ...] = (
+    {"kind": "market_snapshot", "label": "盘中快照",
+     "fn": "app.updater.collectors.market_snapshot:update_market_snapshot",
+     "min_rows": 3000,
+     "cooldown_s": 0,     # interval 自带 5min 节律，冷却会拦掉一半轮次
+     "description": "盘中每 5 分钟 qt 全字段快照（价/涨跌停/量额/换手/量比/"
+                    "振幅/买卖一/内外盘/市值 + 10 指数）→ market_snapshot；"
+                    "非交易时段幂等秒跳，全景大页/指数条/市场总貌数据源"},
     {"kind": "sector_index", "label": "板块快照",
      "fn": "app.updater.collectors.sector_index:update_sector_index",
      "freshness": {"table": "sector_index", "col": "trade_date"},

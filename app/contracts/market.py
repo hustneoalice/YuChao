@@ -154,3 +154,59 @@ class TargetScanOut(BaseModel):
     total_hits: int = Field(description="命中当前勾选条件的总数")
     as_of: str = Field(default="", description="数据截至（最新 K 线日期）")
     items: list[TargetItem] = Field(default_factory=list, description="命中列表（强势段在前，截断至 limit）")
+
+
+class BoardRow(BaseModel):
+    """全景大表行（2.2，market_snapshot 快照口径；ST 已在采集侧不排除——
+    全景需要全市场口径，ST 过滤只在目标页做）。"""
+    symbol: str
+    name: Optional[str] = None
+    current: Optional[float] = None
+    change_amount: Optional[float] = None
+    change_rate: Optional[float] = None
+    open: Optional[float] = None
+    high: Optional[float] = None
+    low: Optional[float] = None
+    pre_close: Optional[float] = None
+    volume: Optional[float] = None          # 手
+    amount: Optional[float] = None          # 元
+    turnover_rate: Optional[float] = None
+    vol_ratio: Optional[float] = None
+    amplitude: Optional[float] = None
+    bid1: Optional[float] = None
+    bid1_vol: Optional[float] = None
+    ask1: Optional[float] = None
+    ask1_vol: Optional[float] = None
+    outer_vol: Optional[float] = None
+    inner_vol: Optional[float] = None
+    market_value: Optional[float] = None    # 元
+    circ_value: Optional[float] = None      # 元
+    up_limit: Optional[float] = None
+    down_limit: Optional[float] = None
+    updated_at: Optional[str] = None
+
+
+class BoardOut(BaseModel):
+    items: list[BoardRow] = Field(default_factory=list)
+    total: int = 0
+    tab: str = "hsa"
+    as_of: str = Field(default="", description="快照交易日")
+
+
+class IndexBarItem(BaseModel):
+    symbol: str
+    name: str
+    current: Optional[float] = None
+    change_amount: Optional[float] = None
+    change_rate: Optional[float] = None
+    amount: Optional[float] = None
+
+
+class BreadthOut(BaseModel):
+    up: int = 0
+    down: int = 0
+    flat: int = 0
+    limit_up: int = 0
+    limit_down: int = 0
+    amount: float = 0.0
+    updated_at: Optional[str] = None

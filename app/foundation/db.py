@@ -93,6 +93,27 @@ NEW_TABLES_DDL = """
         updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
         PRIMARY KEY (bk_code, symbol)
     );
+
+    -- 当日全市场快照（2.2 全景大页地基；股票+指数+ETF 同表 kind 区分）。
+    -- 盘中 5 分钟一轮覆盖写（按 trade_date DELETE+INSERT），收盘后最后一轮
+    -- 即当日收盘快照；派生层（指数条/市场总貌/板块聚合）全部查询时算，不落表。
+    CREATE TABLE IF NOT EXISTS market_snapshot (
+        symbol        VARCHAR NOT NULL,   -- 600519 / 000001（指数裸码，与日线一致）
+        kind          VARCHAR NOT NULL,   -- 'stock' | 'index'
+        market        VARCHAR NOT NULL,   -- SH / SZ / BJ
+        name          VARCHAR,
+        current       DOUBLE, change_amount DOUBLE, change_rate DOUBLE,
+        open          DOUBLE, high DOUBLE, low DOUBLE, pre_close DOUBLE,
+        up_limit      DOUBLE, down_limit DOUBLE,
+        volume        DOUBLE, amount DOUBLE,           -- 手 / 元
+        turnover_rate DOUBLE, vol_ratio DOUBLE, amplitude DOUBLE,
+        bid1 DOUBLE, bid1_vol DOUBLE, ask1 DOUBLE, ask1_vol DOUBLE,
+        outer_vol DOUBLE, inner_vol DOUBLE,
+        market_value  DOUBLE, circ_value DOUBLE,      -- 元
+        trade_date    DATE NOT NULL,
+        updated_at    TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+        PRIMARY KEY (symbol, trade_date)
+    );
 """
 
 # 存量表迁移（幂等；writer.ensure_schema / scripts/ensure_schema.py 共用执行）。

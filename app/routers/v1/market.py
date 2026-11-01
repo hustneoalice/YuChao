@@ -405,3 +405,41 @@ def targets(conds: str = Query(default="vol,short,mid,up20",
                    key=lambda t: (-t["seg"], -(t["vol_ratio"] or 0)))
     return TargetScanOut(items=items[:limit], total_hits=len(items),
                          scanned=meta["scanned"], as_of=meta["as_of"])
+
+
+# -- 2.2 全景大页 ----------------------------------------------------------
+
+from ...contracts.market import BoardOut, BoardRow, BreadthOut, IndexBarItem  # noqa: E402
+
+
+@router.get("/market/board", response_model=BoardOut,
+            summary="全景大表（market_snapshot 排序分页，盘中 5 分钟刷新）")
+def board(tab: str = Query(default="hsa",
+                           description="hsa=沪深A股 cyb=创业板 kc=科创板 bj=北交所 fund=基金"),
+          sort: str = Query(default="-change_rate"),
+          page: int = Query(default=1, ge=1), size: int = Query(default=50, ge=1, le=200),
+          q: Optional[str] = None, conn=Depends(get_conn)):
+    rows, total = repo.market.board_rows(conn, tab=tab, sort=sort,
+                                         page=page, size=size, q=q)
+    day = conn.execute(
+        "SELECT MAX(trade_date) FROM market_snapshot").fetchone()[0]
+    return BoardOut(items=rows, total=total, tab=tab, as_of=str(day) if day else "")
+
+
+@router.get("/market/index_bar", response_model=list[IndexBarItem],
+            summary="指数条（INDEX_CATALOG × 当日快照）")
+def index_bar_ep(conn=Depends(get_conn)):
+    return repo.market.index_bar(conn)
+
+
+@router.get("/market/breadth", response_model=BreadthOut,
+            summary="市场总貌（涨跌家数/涨跌停精确家数/两市成交额）")
+def breadth(conn=Depends(get_conn)):
+    return repo.market.market_breadth(conn)
+
+
+@router.get("/market/snapshot_one", response_model=Optional[BoardRow],
+            summary="单标的当日快照（个股详情页盘口网格；无快照返回 null）")
+def snapshot_one(symbol: str = Query(description="个股裸码 600519 或指数全码 000001.SH"),
+                 conn=Depends(get_conn)):
+    return repo.market.snapshot_one(conn, symbol)

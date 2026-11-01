@@ -957,3 +957,27 @@ body.mobile.fold .factorgrid{grid-template-columns:1fr 1fr}
   body.mobile.phone .mtabs{max-width:400px}
   body.mobile.fold .mtabs{max-width:768px}
 }
+
+/* ── 全景页（2.2）：指数条 chip 行 + 底部总貌条 ── */
+.pan-indexbar{display:flex;gap:8px;flex-wrap:wrap;margin-bottom:10px}
+.pan-indexbar .chip{cursor:pointer}
+.pan-indexbar .chip.off{opacity:.55;cursor:default}
+.pan-indexbar .chip b{font-weight:550;color:var(--dim)}
+.pan-indexbar .chip:hover b{color:var(--text)}
+.pan-breadth{display:flex;gap:16px;align-items:center;padding:8px 14px;
+  border-top:1px solid var(--border);font-size:11.5px;color:var(--dim);flex:none}
+.pan-breadth b{font-weight:600}
+
+/* ── 个股详情页（2.2）：报价头 + 盘口关键网格 ── */
+.sd-quote{display:flex;gap:14px;align-items:baseline;padding:10px 16px;
+  background:var(--panel);border:1px solid var(--border);border-radius:12px;flex:none}
+.sd-quote .sd-price{font-size:26px;font-weight:650;letter-spacing:.3px}
+.sd-quote>span{font-size:13px;font-weight:550}
+.sd-lims{display:inline-flex;gap:6px;margin-left:4px}
+.sd-chart{flex:1;min-height:0;position:relative}
+.sd-grid{flex:1;overflow:auto;display:grid;grid-template-columns:1fr 1fr 1fr;
+  gap:1px;background:var(--border-soft);padding:1px;align-content:start}
+.sd-cell{display:flex;flex-direction:column;gap:3px;padding:9px 12px;background:var(--panel)}
+.sd-cell span{font-size:10.5px;color:var(--faint)}
+.sd-cell b{font-size:13px;font-weight:600}
+body.mobile .sd-grid{grid-template-columns:1fr 1fr}

@@ -152,6 +152,32 @@ export interface TargetScanOut {
   scanned: number; total_hits: number; as_of: string; items: TargetItem[];
 }
 
+/* ── 2.2 全景大页（market_snapshot 派生，盘中 5 分钟刷新） ── */
+export interface BoardRow {
+  symbol: string; name?: string | null;
+  current?: number | null; change_amount?: number | null; change_rate?: number | null;
+  open?: number | null; high?: number | null; low?: number | null; pre_close?: number | null;
+  volume?: number | null;               // 手
+  amount?: number | null;               // 元
+  turnover_rate?: number | null; vol_ratio?: number | null; amplitude?: number | null;
+  bid1?: number | null; bid1_vol?: number | null; ask1?: number | null; ask1_vol?: number | null;
+  outer_vol?: number | null; inner_vol?: number | null;
+  market_value?: number | null; circ_value?: number | null;   // 元
+  up_limit?: number | null; down_limit?: number | null;
+  updated_at?: string | null;
+}
+export interface BoardOut { items: BoardRow[]; total: number; tab: string; as_of: string }
+export interface IndexBarItem {
+  symbol: string; name: string;
+  current?: number | null; change_amount?: number | null;
+  change_rate?: number | null; amount?: number | null;
+}
+export interface BreadthOut {
+  up: number; down: number; flat: number;
+  limit_up: number; limit_down: number;
+  amount: number; updated_at?: string | null;
+}
+
 export const marketApi = {
   kline: (
     q: { symbol: string; adjust?: string; with?: string; limit?: number; start?: string; end?: string; freq?: string },
@@ -172,6 +198,20 @@ export const marketApi = {
     req<{ items: Quote[]; missing: string[] }>(`/market/quotes?symbols=${encodeURIComponent(symbols.join(","))}`),
   targets: (conds: string, limit = 300) =>
     req<TargetScanOut>(`/market/targets?conds=${encodeURIComponent(conds)}&limit=${limit}`),
+  /* 全景大表：服务端排序分页（market_snapshot 毫秒级 SQL） */
+  board: (q: { tab: string; sort?: string; page?: number; size?: number; q?: string }) => {
+    const p = new URLSearchParams({ tab: q.tab });
+    if (q.sort) p.set("sort", q.sort);
+    if (q.page) p.set("page", String(q.page));
+    if (q.size) p.set("size", String(q.size));
+    if (q.q) p.set("q", q.q);
+    return req<BoardOut>(`/market/board?${p}`);
+  },
+  indexBar: () => req<IndexBarItem[]>("/market/index_bar"),
+  breadth: () => req<BreadthOut>("/market/breadth"),
+  /* 单标的当日快照（个股详情页盘口网格；无快照 → null，前端降级日线口径） */
+  snapshotOne: (symbol: string) =>
+    req<BoardRow | null>(`/market/snapshot_one?symbol=${encodeURIComponent(symbol)}`),
   sparks: (symbols: string[]) =>
     req<{ items: { symbol: string; prev_close: number | null; points: number[] }[]; missing: string[] }>(`/market/sparks?symbols=${encodeURIComponent(symbols.join(","))}`),
   search: (q: string, limit = 10) => req<{ items: SearchHit[]; total: number }>(`/market/search?q=${encodeURIComponent(q)}&limit=${limit}`),

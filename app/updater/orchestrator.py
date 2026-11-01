@@ -65,6 +65,13 @@ KIND_DATASETS: Dict[str, List[str]] = {
     "package_export": [],                    # 只读导出，底座数据未变
     "backup": [],                            # 快照写库外文件，不触发前端失效
     "backfill": ["daily_ohlcv", "daily_valuation", "capital_flow"],
+    "market_snapshot": ["market_snapshot"],
+}
+
+# 间隔型任务（秒）：start() 时起独立轮询线程到点 submit；与 CRON（固定时刻）
+# 互补——盘中快照这类「交易时段内每 N 分钟」的节奏用 interval 表达。
+INTERVAL_TASKS: Dict[str, int] = {
+    "market_snapshot": 300,   # 5 分钟一轮（交易时段门控在任务内部）
 }
 
 
@@ -281,8 +288,21 @@ class UpdateOrchestrator:
             self._worker.start()
 
     def start(self) -> None:
-        """常驻启动（updater 进程入口调用）：恢复快照 + 起工作线程。"""
+        """常驻启动（updater 进程入口调用）：恢复快照 + 起工作线程 + 间隔任务。"""
         self._ensure_worker()
+        for kind, sec in INTERVAL_TASKS.items():
+            threading.Thread(target=self._interval_loop, args=(kind, sec),
+                             daemon=True, name=f"interval-{kind}").start()
+
+    def _interval_loop(self, kind: str, seconds: int):
+        """间隔型任务轮询（盘中快照等）：到点 submit，串行队列 + submit 去重
+        天然防堆积；交易时段门控在任务内部做（非时段幂等秒跳）。"""
+        while True:
+            time.sleep(seconds)
+            try:
+                self.submit(kind, trigger="interval")
+            except Exception:
+                logger.exception("[Orchestrator] 间隔任务 %s 提交失败", kind)
 
     def _loop(self):
         while True:
@@ -298,6 +318,10 @@ class UpdateOrchestrator:
                         t = self._tasks[tid]
                         t.status = "running"
                         t.started_ts = time.time()
+                        # _running_id 必须同块置位：去重扫描查的是
+                        # [_running_id] + _queue，晚到 _run_task 再置会留
+                        # 「既不在队列也不在 running」的第二空窗（同缝隙二段）
+                        self._running_id = tid
             if tid is None:
                 # 空队列：等待唤醒（带超时兜底，避免事件丢失导致线程永不退出）
                 self._wake.wait(timeout=5)

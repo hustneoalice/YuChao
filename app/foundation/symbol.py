@@ -23,6 +23,14 @@ INDEX_NAMES: dict[str, str] = {s: n for s, n, _ in TICKER_INDICES} | {
     "000016.SH": "上证50", "399005.SZ": "中小100",
 }
 
+# 全景页指数条固定清单（2.2：静态常识不建表；复用 TICKER_INDICES 的 7 个
+# 并补齐大中盘/小盘代表，快照采集与 index_bar 派生共用同一来源）
+INDEX_CATALOG: tuple[tuple[str, str], ...] = tuple(
+    (s, n) for s, n, _ in TICKER_INDICES
+) + (
+    ("000016.SH", "上证50"), ("000852.SH", "中证1000"), ("399303.SZ", "国证2000"),
+)
+
 # 海外主要指数（滚动行情追加段）：symbol 即腾讯码（qt.gtimg.cn 的 us/hk 形态），
 # 不参与东财 secid / K 线跳转，仅 ticker 展示
 GLOBAL_INDICES: list[tuple[str, str]] = [

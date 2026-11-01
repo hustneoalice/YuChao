@@ -7,6 +7,8 @@ import { toast } from "./ui";
 import { stockSearch } from "./searchbox";
 import { initAuth, refreshVipUI } from "./auth";
 import { initMarket, klResize, openStock, renderKline, renderRight } from "./pages/market";
+import { initPanorama, loadPanorama } from "./pages/panview";
+import { initStockDetail, ensureStockPage, openStockDetail } from "./pages/stockdetail";
 import { initWatchlist, renderWatchlist } from "./pages/watchlist";
 import { initTargets, loadTargets } from "./pages/targets";
 import { initSectors, loadSectors } from "./pages/sectors";
@@ -24,6 +26,8 @@ function goPage(p: string): void {
   document.querySelectorAll("#rail a").forEach((a) => a.classList.toggle("on", (a as HTMLElement).dataset.page === p));
   document.querySelectorAll("#mtabs a").forEach((a) => a.classList.toggle("on", (a as HTMLElement).dataset.page === p));
   if (p === "market") renderKline();
+  if (p === "panorama") loadPanorama();
+  if (p === "stock") ensureStockPage();                        // 菜单直达：无标的时空态引导
   if (p === "watchlist" && !loaded.watchlist) { loaded.watchlist = true; renderWatchlist(); }
   if (p === "targets") loadTargets();
   if (p === "sectors" && !loaded.sectors) { loaded.sectors = true; void loadSectors(); }
@@ -139,6 +143,8 @@ function boot(): void {
   initSearch();
   initAuth();
   initMarket();
+  initPanorama();
+  initStockDetail();
   initWatchlist();
   initTargets();
   initSectors();
@@ -168,6 +174,12 @@ function boot(): void {
   document.addEventListener("yc:open-stock", (e) => {
     const d = (e as CustomEvent).detail;
     void openStock(d, d.from);
+  });
+  // 全景大表行点击 → 个股详情页（众赢 A股全景→个股详情 同链路）
+  document.addEventListener("yc:open-stock-detail", (e) => {
+    const d = (e as CustomEvent).detail;
+    goPage("stock");
+    openStockDetail(d);
   });
   document.addEventListener("yc:goto-settings", (e) => { goPage("settings"); openSettingsTab((e as CustomEvent).detail); });
   document.addEventListener("yc:patch-theme", (e) => {
