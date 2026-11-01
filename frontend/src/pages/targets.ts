@@ -81,6 +81,7 @@ function drawPage(): void {
   const empty = document.getElementById("tgt-empty")!;
   if (!pager) pager = createPager(document.getElementById("tgt-pager")!, "targets", drawPage);
   if (!tbl) tbl = createDataTable(document.getElementById("tgt-wrap")!, TGT_COLS, {
+    rowKey: (t) => t.symbol,
     onRow: (t) => document.dispatchEvent(new CustomEvent("yc:open-stock", {
       detail: { symbol: t.symbol, name: t.name || t.symbol,
         from: { page: "targets", label: "目标监控" } } })),

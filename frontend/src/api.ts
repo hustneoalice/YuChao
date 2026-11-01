@@ -153,12 +153,16 @@ export interface TargetScanOut {
 }
 
 export const marketApi = {
-  kline: (q: { symbol: string; adjust?: string; with?: string; limit?: number; start?: string; end?: string; freq?: string }) =>
-    req<Kline>(`/market/kline?${new URLSearchParams(Object.entries(q).filter(([, v]) => v != null).map(([k, v]) => [k, String(v)]))}`),
+  kline: (
+    q: { symbol: string; adjust?: string; with?: string; limit?: number; start?: string; end?: string; freq?: string },
+    opts?: { signal?: AbortSignal },
+  ) =>
+    req<Kline>(`/market/kline?${new URLSearchParams(Object.entries(q).filter(([, v]) => v != null).map(([k, v]) => [k, String(v)]))}`, { signal: opts?.signal }),
   /* 当日分时（价格 + VWAP 均价 + 逐分钟量额，腾讯实时） */
   minute: (symbol: string) =>
     req<{ symbol: string; date: string; prev_close?: number; bars: (Bar & { avg: number; has_avg?: boolean })[] }>(`/market/minute?symbol=${encodeURIComponent(symbol)}`),
-  quote: (symbol: string) => req<Quote>(`/market/quote?symbol=${encodeURIComponent(symbol)}`),
+  quote: (symbol: string, opts?: { signal?: AbortSignal }) =>
+    req<Quote>(`/market/quote?symbol=${encodeURIComponent(symbol)}`, { signal: opts?.signal }),
   /* 区间资金流：框选 [start,end] 后一次拉齐，合计由服务端代数和给出 */
   fundflow: (q: { symbol: string; start?: string; end?: string; limit?: number }) =>
     req<FundFlowRange>(`/market/fundflow?${new URLSearchParams(

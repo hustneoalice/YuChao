@@ -132,6 +132,7 @@ export async function openSector(id: string): Promise<void> {
   document.getElementById("mem-date")!.textContent = meta ? `指数日 ${meta.trade_date} · 加权窗口 ${lookback} 日` : "";
   if (!memTbl) memTbl = createDataTable(document.getElementById("mem-wrap")!, MEM_COLS, {
     onChange: renderMembers,
+    rowKey: (m) => m.symbol,
     onRow: (m) => document.dispatchEvent(new CustomEvent("yc:open-stock", {
       detail: { symbol: m.symbol, name: m.name, from: { page: "sectors", label: "板块" } } })),
     empty: "暂无成分股数据",

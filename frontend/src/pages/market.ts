@@ -109,6 +109,42 @@ function applyPreset(p: Preset): void {
   renderKline();
 }
 
+/* ── 切换丝滑三件套（策影的驻留缓存打底，三点超越：hover 预取 / SWR 静默回验 / 在途中止）──
+ * kcache：K线 LRU（30 只）。命中即渲染 0ms 等待，后台再静默回验拿新末根。
+ * qcache：行情快照 5s TTL——预取/回切共用，热 quote 直接先上屏。
+ * hover 预取：列表行悬停 120ms → 预热 K线+行情，点下去时大概率已是热数据。 */
+const KCACHE_MAX = 30;
+const kcache = new Map<string, Kline>();                       // Map 插入序 = LRU 序
+const qcache = new Map<string, { q: Quote; at: number }>();
+let curCtl: AbortController | null = null;                     // 切换即中止上一只在途请求
+
+function kcacheGet(sym: string): Kline | null {
+  const k = kcache.get(sym);
+  if (!k) return null;
+  kcache.delete(sym); kcache.set(sym, k);                      // touch 提到 LRU 头
+  return k;
+}
+function kcachePut(sym: string, k: Kline): void {
+  kcache.set(sym, k);
+  if (kcache.size > KCACHE_MAX) kcache.delete(kcache.keys().next().value!);
+}
+function qcacheGet(sym: string): Quote | null {
+  const c = qcache.get(sym);
+  if (!c) return null;
+  if (Date.now() - c.at > 5000) { qcache.delete(sym); return null; }
+  return c.q;
+}
+/** 预热一只票（K线 + 行情入缓存），失败静默。列表 hover 与邻股切换共用。 */
+export function warmStock(symbol: string): void {
+  if (document.hidden || kcache.has(symbol)) {
+    // K线已热：只补 5s 内会过期的行情
+    if (!qcache.has(symbol)) void marketApi.quote(symbol).then((q) => { if (q) qcache.set(symbol, { q, at: Date.now() }); }).catch(() => {});
+    return;
+  }
+  void marketApi.kline({ symbol, limit: 2000 }).then((k) => kcachePut(symbol, k)).catch(() => {});
+  void marketApi.quote(symbol).then((q) => { if (q) qcache.set(symbol, { q, at: Date.now() }); }).catch(() => {});
+}
+
 /* ── 载入 ── */
 export async function openStock(s: CurStock, from?: { page: string; label: string } | null): Promise<void> {
   mk.cur = s;
@@ -121,11 +157,37 @@ export async function openStock(s: CurStock, from?: { page: string; label: strin
   renderBackbar();
   updateWatchBtn();
   document.dispatchEvent(new CustomEvent("yc:goto-page", { detail: "market" }));
+  curCtl?.abort();                                             // 在途旧请求作废（保护服务端也防乱序）
+  const ctl = new AbortController();
+  curCtl = ctl;
+  const hit = kcacheGet(s.symbol);
+  const hotQ = qcacheGet(s.symbol);
+  if (hotQ) mk.quote = hotQ;                                   // 热 quote 先上屏，不等实时源
+  if (hit) {
+    // 缓存命中：立即整屏渲染，然后 SWR 静默回验（末根可能被盘中轮询推进过）
+    mk.bars = hit.bars;
+    mk.minuteData = null;
+    mk.m60 = null;
+    renderKline();
+    renderRight();
+    showBriefing();
+    startPoll();
+    marketApi.kline({ symbol: s.symbol, limit: 2000 }, { signal: ctl.signal })
+      .then((k) => {
+        kcachePut(s.symbol, k);
+        if (mk.cur?.symbol !== s.symbol) return;               // 用户又切走了：只留缓存
+        mk.bars = k.bars;
+        renderKline();
+      })
+      .catch(() => {});
+    return;
+  }
   // K线先渲染不等 quote（实时快照慢/被掐时不再拖住首屏），
   // quote 到达后单独刷新右列（基本信息卡/资金流/估值等）
   try {
-    const k = await marketApi.kline({ symbol: s.symbol, limit: 2000 });
-    if (mk.cur?.symbol !== s.symbol) return;   // 用户已切到别的标的，丢弃过期回包
+    const k = await marketApi.kline({ symbol: s.symbol, limit: 2000 }, { signal: ctl.signal });
+    kcachePut(s.symbol, k);                                    // 过期回包也入缓存（回切免费）
+    if (mk.cur?.symbol !== s.symbol) return;                   // 用户已切到别的标的，丢弃过期回包
     mk.bars = k.bars;
     mk.quote = null;
     mk.minuteData = null;                      // 换标的：分时/60分缓存作废，切到时重拉
@@ -134,15 +196,19 @@ export async function openStock(s: CurStock, from?: { page: string; label: strin
     renderRight();
     showBriefing();
   } catch (e) {
+    if ((e as Error).name === "AbortError") return;            // 被新切换中止：静默
     toast((e as Error).message || "K线加载失败");
     return;
   }
   try {
-    const q = await marketApi.quote(s.symbol);
+    const q = await marketApi.quote(s.symbol, { signal: ctl.signal });
     if (mk.cur?.symbol !== s.symbol || !q) return;
+    qcache.set(s.symbol, { q, at: Date.now() });
     mk.quote = q;
     renderRight();
-  } catch { /* 实时兜底失败：保持日线数据展示 */ }
+  } catch (e) {
+    if ((e as Error).name !== "AbortError") { /* 实时兜底失败：保持日线数据展示 */ }
+  }
   startPoll();
 }
 
@@ -164,6 +230,7 @@ async function pollTick(): Promise<void> {
   try {
     const q = await marketApi.quote(s.symbol);
     if (mk.cur?.symbol !== s.symbol || !q) return;
+    qcache.set(s.symbol, { q, at: Date.now() });               // 喂缓存：切走再切回时热 quote 秒上屏
     mk.quote = q;
     renderRight();
     // 分时/60分面板：今日浮根只属于日线序列，分钟周期不合并（右列刷新即可）
@@ -300,6 +367,18 @@ function updateWatchBtn(): void {
 export function initMarket(): void {
   initRcolResize();
   initLayoutSeg();
+  // 列表行 hover 预取（全局委托：自选/目标/成分/核心标共用 table 组件的 tr[data-key]）：
+  // 悬停 120ms 才预热——扫过不触发，停留才拉；点下去时 K线大概率已在缓存里，切换 0 等待
+  let hoverT: ReturnType<typeof setTimeout> | null = null;
+  document.addEventListener("mouseover", (ev) => {
+    if (document.hidden) return;
+    const tr = (ev.target as HTMLElement | null)?.closest?.("tr[data-key]");
+    if (!tr) return;
+    const sym = tr.dataset.key || "";
+    if (!/^\d{6}(\.[A-Z]{2})?$/.test(sym)) return;             // 只预热股票键；板块等其它键跳过
+    if (hoverT) clearTimeout(hoverT);
+    hoverT = setTimeout(() => { hoverT = null; warmStock(sym); }, 120);
+  });
   // 加自选：一键入默认组；已自选 → 分组管理面板（换分组 / 新建 / 移除）
   document.getElementById("kl-watch")!.addEventListener("click", () => {
     const s = mk.cur;
@@ -496,6 +575,18 @@ export function initMarket(): void {
       renderIpanel();
       return;
     }
+    // 更多面板行（.imr）：整行点击 = 显影切换
+    const imr = t.closest<HTMLElement>(".imr[data-mi], .imr[data-si]");
+    if (imr) {
+      const k = imr.dataset.mi ?? imr.dataset.si!;
+      const s = new Set(imr.dataset.mi ? mk.mainInds : mk.subInds);
+      s.has(k) ? s.delete(k) : s.add(k);
+      if (imr.dataset.mi) mk.mainInds = [...s]; else mk.subInds = [...s];
+      saveKPrefs();
+      syncIndUI();
+      renderKline();
+      return;
+    }
     const b = t.closest("button") as HTMLElement | null;
     if (!b) return;
     if (b.dataset.psave) {                                 // 当前组合存为自定义方案
@@ -536,18 +627,6 @@ export function initMarket(): void {
         writeIndFavs(readIndFavs().filter((x) => x !== k));
         renderIndBar();
       }
-      return;
-    }
-    // 更多面板行（.imr）：整行点击 = 显影切换
-    const imr = t.closest<HTMLElement>(".imr[data-mi], .imr[data-si]");
-    if (imr) {
-      const k = imr.dataset.mi ?? imr.dataset.si!;
-      const s = new Set(imr.dataset.mi ? mk.mainInds : mk.subInds);
-      s.has(k) ? s.delete(k) : s.add(k);
-      if (imr.dataset.mi) mk.mainInds = [...s]; else mk.subInds = [...s];
-      saveKPrefs();
-      syncIndUI();
-      renderKline();
       return;
     }
     const group = b.dataset.mi ? "main" : "sub";

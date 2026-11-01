@@ -76,6 +76,7 @@ function renderRows(reset = false): void {
   document.getElementById("wl-count")!.textContent = `共 ${rows.length} 只`;
   if (!wlPager) wlPager = createPager(document.getElementById("wl-pager")!, "watchlist", renderRows);
   if (!wlTbl) wlTbl = createDataTable(document.getElementById("wl-wrap")!, WL_COLS, {
+    rowKey: (w) => w.symbol,
     onRow: (w, ev) => {
       const del = (ev.target as HTMLElement).closest("[data-del]") as HTMLElement | null;
       if (del) {                                   // 行内移除按钮

@@ -43,6 +43,7 @@ function scoreCell(v: number | null | undefined, color: string): string {
 function renderRows(): void {
   if (!cpPager) cpPager = createPager(document.getElementById("cp-pager")!, "corepicks", renderRows);
   if (!cpTbl) cpTbl = createDataTable(document.getElementById("cp-wrap")!, CP_COLS, {
+    rowKey: (r) => r.symbol,
     onRow: (r, ev) => {
       const b = (ev.target as HTMLElement).closest("[data-cp-open]") as HTMLElement | null;
       if (b) { void openDetail(b.dataset.cpOpen!, b.dataset.pool || "chase"); return; }

@@ -30,6 +30,7 @@ export function createDataTable<T>(
     onChange?: () => void;                                    // 点表头后回调（页面重渲染）
     onRow?: (row: T, ev: MouseEvent, tr: HTMLElement) => void;
     empty?: string;
+    rowKey?: (row: T) => string;                              // 行标识 → tr[data-key]，hover 预取用
   } = {},
 ): DataTable<T> {
   let sortLabel: string | null = opts.defaultSort?.label ?? null;
@@ -63,9 +64,11 @@ export function createDataTable<T>(
         `${c.title ? ` title="${esc(c.title)}"` : ""}` +
         `${c.sort != null ? ` data-sort="${esc(c.label)}"` : ""}>${esc(c.label)}${arrow}</th>`;
     }).join("");
-    const body = rows.map((row, i) =>
-      `<tr>${cols.map((c) =>
-        `<td${c.num ? ' class="n num"' : c.mono ? ' class="num"' : ""}>${c.render(row, startIndex + i)}</td>`).join("")}</tr>`).join("");
+    const body = rows.map((row, i) => {
+      const rk = opts.rowKey ? opts.rowKey(row) : "";
+      return `<tr${rk ? ` data-key="${esc(rk)}"` : ""}>${cols.map((c) =>
+        `<td${c.num ? ' class="n num"' : c.mono ? ' class="num"' : ""}>${c.render(row, startIndex + i)}</td>`).join("")}</tr>`;
+    }).join("");
     const emptyRow = opts.empty && rows.length === 0
       ? `<tr><td colspan="${cols.length}" style="text-align:center;color:var(--faint)">${esc(opts.empty)}</td></tr>` : "";
     wrap.innerHTML = `<table><thead><tr>${ths}</tr></thead><tbody>${body || emptyRow}</tbody></table>`;

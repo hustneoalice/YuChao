@@ -217,8 +217,8 @@ function ensureRegistered(): void {
     minValue: 0,
     calc: (list) => accumulationSeries(list).map(value => ({ accumulation: value })),
     figures: [{
-      key: "accumulation", title: "吸筹", type: "bar",
-      styles: () => ({ color: "#F000FF", style: "stroke" }),
+      key: "accumulation", title: "吸筹", type: "bar", baseValue: 0,
+      styles: () => ({ color: "#F000FF", borderColor: "#F000FF", borderSize: 1, style: "stroke" }),
     }],
   });
   // ATR 自研（klinecharts v10 未内置）：14 日真实波幅均值
