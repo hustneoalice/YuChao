@@ -12,6 +12,7 @@ import { sixSegmentSeries } from "../indicators";
 import { accumulationSeries } from "../accumulation";
 import { volumeActivitySeries } from "../volume-activity";
 import { trendHistogramSeries } from "../trend-histogram";
+import { strongPullbackSeries } from "../strong-pullback";
 
 /* ── 策影配色（tradingColors） ── */
 const UP = "#EF5350";
@@ -308,6 +309,53 @@ function ensureRegistered(): void {
       return false;
     },
   });
+  registerIndicator({
+    name: "ZY_STRONG_PULLBACK", shortName: "强势调整·约定规则", precision: 2,
+    calc: list => strongPullbackSeries(list).map(v => ({...v, eye: v.hit ? v.eye : null})),
+    figures: [
+      {key: "eye", title: "", type: "line", styles: () => ({color: "transparent"})},
+      {key: "protection", title: "保护位", type: "line", styles: () => ({color: "transparent"})},
+    ],
+    draw: ({ctx, chart, indicator, xAxis, yAxis, bounding}) => {
+      const data = indicator.result as ReturnType<typeof strongPullbackSeries>;
+      const groups = new Map<number, {end: number; hits: number[]}>();
+      data.forEach((v,i) => {
+        if(v.anchor==null) return;
+        let group=groups.get(v.anchor);
+        if(!group){group={end:i,hits:[]};groups.set(v.anchor,group);}
+        group.end=i;if(v.hit)group.hits.push(i);
+      });
+      const visible=chart.getVisibleRange();
+      ctx.save();ctx.beginPath();ctx.rect(0,0,bounding.width,bounding.height);ctx.clip();
+      groups.forEach((g,anchor) => {
+        if(!g.hits.length || g.end<visible.from || anchor>visible.to) return;
+        const first=g.hits[0],last=g.hits[g.hits.length-1];
+        const protection=data[first].protection!,eye=data[first].eye!;
+        const ex=xAxis.convertToPixel((first+last)/2),ey=yAxis.convertToPixel(eye);
+        const py=yAxis.convertToPixel(protection),start=xAxis.convertToPixel(anchor),end=xAxis.convertToPixel(g.end);
+        ctx.strokeStyle="#16D84A";ctx.fillStyle="#16D84A";ctx.lineWidth=1;
+        ctx.beginPath();ctx.moveTo(start,py);ctx.lineTo(end,py);ctx.stroke();
+        ctx.font="11px sans-serif";ctx.textAlign="left";ctx.textBaseline="bottom";
+        ctx.fillText("保护位 "+protection.toFixed(2),Math.min(end+5,bounding.width-100),py-3);
+        ctx.strokeStyle="#FF5356";ctx.fillStyle="#FF5356";
+        g.hits.forEach(i => {
+          const tx=xAxis.convertToPixel(i),ty=yAxis.convertToPixel(data[i].low)+4;
+          const angle=Math.atan2(ty-ey,tx-ex);
+          ctx.beginPath();ctx.moveTo(ex,ey-4);ctx.lineTo(tx,ty);ctx.stroke();
+          ctx.beginPath();ctx.moveTo(tx,ty);
+          ctx.lineTo(tx-6*Math.cos(angle-0.45),ty-6*Math.sin(angle-0.45));
+          ctx.lineTo(tx-6*Math.cos(angle+0.45),ty-6*Math.sin(angle+0.45));ctx.closePath();ctx.fill();
+        });
+        // 共用一只眼睛，位于本组首末命中K线的中间；仅影响绘图，不回写历史信号。
+        ctx.fillStyle="#DDA53E";ctx.strokeStyle="#9C6A20";ctx.lineWidth=1;
+        ctx.beginPath();ctx.ellipse(ex,ey,9,6,0,0,Math.PI*2);ctx.fill();ctx.stroke();
+        ctx.fillStyle="#FFF4D3";ctx.beginPath();ctx.ellipse(ex,ey,6.5,4,0,0,Math.PI*2);ctx.fill();
+        ctx.fillStyle="#171717";ctx.beginPath();ctx.arc(ex,ey,3.5,0,Math.PI*2);ctx.fill();
+        ctx.fillStyle="#FFFFFF";ctx.beginPath();ctx.arc(ex+1,ey-1.5,1.2,0,Math.PI*2);ctx.fill();
+      });
+      ctx.restore();return true;
+    },
+  });
   // ATR 自研（klinecharts v10 未内置）：14 日真实波幅均值
   try {
     registerIndicator({
@@ -539,6 +587,7 @@ export const IND_CATS: { cat: IndCat; label: string }[] = [
 ];
 export const IND_DEFS: IndDef[] = [
   // 主图叠加
+  { key: "strongpullback", kc: "ZY_STRONG_PULLBACK", label: "强势调整", cat: "main", where: "main", desc: "用户约定规则：次日量比(50%,200%)、后续>50%、收盘≥MA45；破保护位/低量结束；同组眼睛连线；非众赢原公式" },
   { key: "ma", kc: "MA", label: "MA", cat: "main", where: "main", desc: "移动平均线 5/10/20" },
   { key: "ema", kc: "EMA", label: "EMA", cat: "main", where: "main", desc: "指数移动平均线" },
   { key: "boll", kc: "BOLLX", label: "BOLL", cat: "main", where: "main", desc: "布林带（虚线三轨+淡填充）" },

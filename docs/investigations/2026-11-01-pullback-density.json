@@ -1,0 +1,325 @@
+{
+  "scope": "本地前复权数据，2025-01-01起的候选组；未逐只核对众赢原软件",
+  "stats": {
+    "stocks": 10,
+    "groups": 19,
+    "hits": 91,
+    "denseGroups": 11,
+    "maxLines": 10
+  },
+  "records": [
+    {
+      "symbol": "002812.SZ",
+      "name": "恩捷股份",
+      "bars": 2000,
+      "groups": [
+        {
+          "anchor": "2025-09-05",
+          "count": 2,
+          "first": "2025-09-08",
+          "last": "2025-09-09",
+          "firstDay": 1,
+          "downClose": 1,
+          "lowerLow": 0,
+          "underAnchorHigh": 0,
+          "lowUnderDay1High": 2,
+          "days2to4": 1,
+          "maxGain": 0.07084910762574381
+        },
+        {
+          "anchor": "2025-09-10",
+          "count": 6,
+          "first": "2025-09-11",
+          "last": "2025-09-18",
+          "firstDay": 1,
+          "downClose": 2,
+          "lowerLow": 3,
+          "underAnchorHigh": 6,
+          "lowUnderDay1High": 6,
+          "days2to4": 3,
+          "maxGain": 0.0440771349862259
+        },
+        {
+          "anchor": "2025-10-31",
+          "count": 8,
+          "first": "2025-11-03",
+          "last": "2025-11-12",
+          "firstDay": 1,
+          "downClose": 4,
+          "lowerLow": 3,
+          "underAnchorHigh": 5,
+          "lowUnderDay1High": 5,
+          "days2to4": 3,
+          "maxGain": 0.15643033800494632
+        },
+        {
+          "anchor": "2025-11-13",
+          "count": 5,
+          "first": "2025-11-14",
+          "last": "2025-11-20",
+          "firstDay": 1,
+          "downClose": 2,
+          "lowerLow": 1,
+          "underAnchorHigh": 5,
+          "lowUnderDay1High": 5,
+          "days2to4": 3,
+          "maxGain": 0.002754374594944764
+        },
+        {
+          "anchor": "2026-02-06",
+          "count": 1,
+          "first": "2026-02-09",
+          "last": "2026-02-09",
+          "firstDay": 1,
+          "downClose": 0,
+          "lowerLow": 0,
+          "underAnchorHigh": 0,
+          "lowUnderDay1High": 1,
+          "days2to4": 0,
+          "maxGain": 0.01149025069637899
+        },
+        {
+          "anchor": "2026-04-24",
+          "count": 9,
+          "first": "2026-04-27",
+          "last": "2026-05-12",
+          "firstDay": 1,
+          "downClose": 4,
+          "lowerLow": 4,
+          "underAnchorHigh": 1,
+          "lowUnderDay1High": 9,
+          "days2to4": 3,
+          "maxGain": 0.13436123348017626
+        }
+      ]
+    },
+    {
+      "symbol": "000876.SZ",
+      "name": "新希望",
+      "bars": 2000,
+      "groups": [
+        {
+          "anchor": "2025-02-19",
+          "count": 1,
+          "first": "2025-02-20",
+          "last": "2025-02-20",
+          "firstDay": 1,
+          "downClose": 1,
+          "lowerLow": 0,
+          "underAnchorHigh": 1,
+          "lowUnderDay1High": 1,
+          "days2to4": 0,
+          "maxGain": 0
+        },
+        {
+          "anchor": "2026-09-04",
+          "count": 3,
+          "first": "2026-09-07",
+          "last": "2026-09-09",
+          "firstDay": 1,
+          "downClose": 1,
+          "lowerLow": 0,
+          "underAnchorHigh": 2,
+          "lowUnderDay1High": 3,
+          "days2to4": 2,
+          "maxGain": 0.027272727272727337
+        }
+      ]
+    },
+    {
+      "symbol": "002594.SZ",
+      "name": "比亚迪",
+      "bars": 2000,
+      "groups": [
+        {
+          "anchor": "2025-02-06",
+          "count": 8,
+          "first": "2025-02-07",
+          "last": "2025-02-18",
+          "firstDay": 1,
+          "downClose": 3,
+          "lowerLow": 1,
+          "underAnchorHigh": 0,
+          "lowUnderDay1High": 4,
+          "days2to4": 3,
+          "maxGain": 0.1451073678796453
+        }
+      ]
+    },
+    {
+      "symbol": "600519.SH",
+      "name": "贵州茅台",
+      "bars": 2000,
+      "groups": []
+    },
+    {
+      "symbol": "600030.SH",
+      "name": "中信证券",
+      "bars": 2000,
+      "groups": []
+    },
+    {
+      "symbol": "601318.SH",
+      "name": "中国平安",
+      "bars": 2000,
+      "groups": []
+    },
+    {
+      "symbol": "300750.SZ",
+      "name": "宁德时代",
+      "bars": 2000,
+      "groups": []
+    },
+    {
+      "symbol": "002475.SZ",
+      "name": "立讯精密",
+      "bars": 2000,
+      "groups": [
+        {
+          "anchor": "2025-09-11",
+          "count": 6,
+          "first": "2025-09-12",
+          "last": "2025-09-19",
+          "firstDay": 1,
+          "downClose": 3,
+          "lowerLow": 3,
+          "underAnchorHigh": 5,
+          "lowUnderDay1High": 6,
+          "days2to4": 3,
+          "maxGain": 0.04744801512287333
+        },
+        {
+          "anchor": "2026-04-20",
+          "count": 7,
+          "first": "2026-04-21",
+          "last": "2026-04-29",
+          "firstDay": 1,
+          "downClose": 4,
+          "lowerLow": 2,
+          "underAnchorHigh": 3,
+          "lowUnderDay1High": 3,
+          "days2to4": 3,
+          "maxGain": 0.09493382017343666
+        }
+      ]
+    },
+    {
+      "symbol": "000977.SZ",
+      "name": "浪潮信息",
+      "bars": 2000,
+      "groups": [
+        {
+          "anchor": "2025-08-20",
+          "count": 10,
+          "first": "2025-08-21",
+          "last": "2025-09-03",
+          "firstDay": 1,
+          "downClose": 6,
+          "lowerLow": 5,
+          "underAnchorHigh": 6,
+          "lowUnderDay1High": 10,
+          "days2to4": 3,
+          "maxGain": 0.04852160727824106
+        },
+        {
+          "anchor": "2025-09-25",
+          "count": 4,
+          "first": "2025-09-26",
+          "last": "2025-10-09",
+          "firstDay": 1,
+          "downClose": 1,
+          "lowerLow": 1,
+          "underAnchorHigh": 4,
+          "lowUnderDay1High": 4,
+          "days2to4": 3,
+          "maxGain": 0
+        },
+        {
+          "anchor": "2026-07-09",
+          "count": 2,
+          "first": "2026-07-10",
+          "last": "2026-07-13",
+          "firstDay": 1,
+          "downClose": 1,
+          "lowerLow": 1,
+          "underAnchorHigh": 1,
+          "lowUnderDay1High": 2,
+          "days2to4": 1,
+          "maxGain": 0.04105128503314348
+        },
+        {
+          "anchor": "2026-08-31",
+          "count": 3,
+          "first": "2026-09-01",
+          "last": "2026-09-03",
+          "firstDay": 1,
+          "downClose": 0,
+          "lowerLow": 1,
+          "underAnchorHigh": 3,
+          "lowUnderDay1High": 3,
+          "days2to4": 2,
+          "maxGain": 0.013735618689833196
+        }
+      ]
+    },
+    {
+      "symbol": "600588.SH",
+      "name": "用友网络",
+      "bars": 2000,
+      "groups": [
+        {
+          "anchor": "2025-02-05",
+          "count": 1,
+          "first": "2025-02-06",
+          "last": "2025-02-06",
+          "firstDay": 1,
+          "downClose": 0,
+          "lowerLow": 0,
+          "underAnchorHigh": 1,
+          "lowUnderDay1High": 1,
+          "days2to4": 0,
+          "maxGain": 0.03749999999999987
+        },
+        {
+          "anchor": "2025-02-07",
+          "count": 3,
+          "first": "2025-02-10",
+          "last": "2025-02-12",
+          "firstDay": 1,
+          "downClose": 0,
+          "lowerLow": 0,
+          "underAnchorHigh": 0,
+          "lowUnderDay1High": 3,
+          "days2to4": 2,
+          "maxGain": 0.15474452554744533
+        },
+        {
+          "anchor": "2025-02-13",
+          "count": 8,
+          "first": "2025-02-14",
+          "last": "2025-02-25",
+          "firstDay": 1,
+          "downClose": 5,
+          "lowerLow": 3,
+          "underAnchorHigh": 8,
+          "lowUnderDay1High": 8,
+          "days2to4": 3,
+          "maxGain": 0.0517241379310347
+        },
+        {
+          "anchor": "2025-07-15",
+          "count": 4,
+          "first": "2025-07-16",
+          "last": "2025-07-21",
+          "firstDay": 1,
+          "downClose": 3,
+          "lowerLow": 2,
+          "underAnchorHigh": 4,
+          "lowUnderDay1High": 4,
+          "days2to4": 3,
+          "maxGain": 0
+        }
+      ]
+    }
+  ]
+}
