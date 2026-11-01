@@ -77,7 +77,7 @@ export const authApi = {
 };
 
 /* ── F04 · 按用户设置云同步 ── */
-export interface WatchItem { symbol: string; name: string; group: string; ts?: string | null }
+export interface WatchItem { symbol: string; name: string; group: string; groups?: string[]; ts?: string | null }
 export interface CardItem { card_id: string; enabled: boolean; sort: number; mode: string }
 export const meApi = {
   prefs: () => req<{ prefs: Record<string, unknown> }>("/me/prefs"),
@@ -146,6 +146,8 @@ export interface TargetItem {
   short_orange: boolean; mid_orange: boolean;
   limit_up_20d: boolean; limit_up_cnt: number;
   seg: number; seg_name: string; pullback: boolean;
+  trend_value?: number | null; trend_cross_date?: string | null; trend_cross_ago?: number | null;
+  trend_above_days: number; trend_data_date: string; trend_provisional: boolean;
 }
 
 export interface TargetScanOut {
@@ -206,8 +208,8 @@ export const marketApi = {
   /* 批量快照（自选股卡片：N 只一次渲染，一次腾讯实时 HTTP；≤50 只） */
   quotes: (symbols: string[]) =>
     req<{ items: Quote[]; missing: string[] }>(`/market/quotes?symbols=${encodeURIComponent(symbols.join(","))}`),
-  targets: (conds: string, limit = 300) =>
-    req<TargetScanOut>(`/market/targets?conds=${encodeURIComponent(conds)}&limit=${limit}`),
+  targets: (conds: string, limit = 10000, trend: { mode: string; recent: number; stillAbove: boolean; aboveDays: number } = { mode: "cross", recent: 5, stillAbove: true, aboveDays: 1 }) =>
+    req<TargetScanOut>(`/market/targets?conds=${encodeURIComponent(conds)}&limit=${limit}&trend_mode=${trend.mode}&trend_recent=${trend.recent}&trend_still_above=${trend.stillAbove}&trend_above_days=${trend.aboveDays}`),
   /* 全景大表：服务端排序分页（market_snapshot 毫秒级 SQL） */
   board: (q: { tab: string; sort?: string; page?: number; size?: number; q?: string }) => {
     const p = new URLSearchParams({ tab: q.tab });

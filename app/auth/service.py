@@ -268,6 +268,23 @@ def put_prefs(user_id: str, prefs: dict) -> dict:
     return stored
 
 
+def _split_groups(raw: Optional[str]) -> list[str]:
+    """group_id 兼容两种存储：旧单组名字 / 新多组 JSON 数组字符串。"""
+    s = (raw or "").strip()
+    if not s:
+        return ["默认"]
+    if s.startswith("["):
+        try:
+            v = json.loads(s)
+            if isinstance(v, list):
+                gs = [str(x).strip() for x in v if str(x).strip()]
+                if gs:
+                    return gs
+        except (ValueError, TypeError):
+            pass
+    return [s]
+
+
 def get_watchlist(user_id: str) -> list[dict]:
     conn = get_conn()
     try:
@@ -276,8 +293,12 @@ def get_watchlist(user_id: str) -> list[dict]:
             "WHERE user_id=? ORDER BY created_at DESC, symbol", (user_id,)).fetchall()
     finally:
         conn.close()
-    return [{"symbol": r["symbol"], "name": r["name"] or r["symbol"],
-             "group": r["group_id"] or "默认", "ts": r["created_at"]} for r in rows]
+    out = []
+    for r in rows:
+        gs = _split_groups(r["group_id"])
+        out.append({"symbol": r["symbol"], "name": r["name"] or r["symbol"],
+                    "group": gs[0], "groups": gs, "ts": r["created_at"]})
+    return out
 
 
 def put_watchlist(user_id: str, items: list[dict]) -> list[dict]:
@@ -292,8 +313,11 @@ def put_watchlist(user_id: str, items: list[dict]) -> list[dict]:
         if not sym or sym in seen:
             continue
         seen.add(sym)
-        rows.append((user_id, sym, str(it.get("group") or "默认"),
-                     str(it.get("name") or sym), now))
+        groups = [str(g).strip() for g in (it.get("groups") or []) if str(g).strip()]
+        if not groups:
+            groups = [str(it.get("group") or "默认").strip() or "默认"]
+        gid = groups[0] if len(groups) == 1 else json.dumps(groups, ensure_ascii=False)
+        rows.append((user_id, sym, gid, str(it.get("name") or sym), now))
     conn = get_conn()
     try:
         conn.execute("BEGIN")

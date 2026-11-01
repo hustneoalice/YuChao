@@ -1,10 +1,15 @@
 """17:00 K 线增量 → daily_ohlcv（腾讯 fqkline 主车道，东财 push2his 备用）。
 
+目标集 = stock_universe 个股 + fund_universe 场内基金（ETF/LOF/REIT）+
+daily_ohlcv 中带后缀的其他品种；基金与个股同一车道、同一口径（无复权因子
+时 qfq 视图自动退化为原始价）。
+
 增量口径（1.0 原样）：
   · 每标的 cutoff = 库内 MAX(date)，只拉缺口：count = 缺口天数×1.6+20
     （周末节假日折算，下限 30 上限 3000）——全市场每天只补 1~2 根，不重拉全史；
   · 覆盖写 INSERT OR REPLACE：(symbol,date) 主键，幂等可重跑；
-  · 新上市标的（库内无任何 K 线）拉 3000 根建底仓；
+  · 库内无任何 K 线的标的建底仓：个股 3000 根、场内基金 800 根（≈3 年，
+    季线 12 根；后续随日增量向前累积），避免基金全史首拉拖垮整批；
   · 单标的两个车道都失败 → 记 failed 继续下一个，不炸整批；
   · 每 50 标的 commit 一次（1.0 节奏），进度条跟随推进；
   · 落库后对近期 pct_chg 缺失行按前收盘补算（腾讯车道不带涨跌幅）。
@@ -18,6 +23,7 @@ import logging
 import time
 from datetime import date, datetime, timedelta
 
+from ...config import settings
 from ..util import expected_asof
 from ..writer import writer
 from . import sources
@@ -38,11 +44,22 @@ _KLINE_LANES = (
     ("eastmoney", "fetch_kline_em"),
 )
 
+#: 场内基金车道顺序：腾讯 fqkline 对基金 count>2000 返回空（实测 501001：
+#: 2000 正常、2500 起空包），而有史建底仓要 3000 根——基金一律先走新浪，
+#: 腾讯只作备用（根数截到 2000），东财基金无数据兜底。
+_KLINE_LANES_FUND = (
+    ("sina", "fetch_kline_sina"),
+    ("tencent", "fetch_kline_tx"),
+    ("eastmoney", "fetch_kline_em"),
+)
+_FUND_TX_CAP = 2000
+_FUND_BASE_BARS = 800       # 基金建底仓根数（≈3 年，季线 12 根；之后靠日增量向前累积）
 
-def _gap_count(cutoff: str | None, target: str) -> int:
+
+def _gap_count(cutoff: str | None, target: str, initial: int = 3000) -> int:
     """缺口 → 请求根数：自然日×1.6（覆盖周末节假日）+20 安全边际。"""
     if not cutoff:
-        return 3000                              # 新标的：建底仓
+        return initial                           # 库内无 K 线：建底仓（个股 3000 / 基金 800）
     d1 = datetime.strptime(cutoff, "%Y-%m-%d").date()
     d2 = datetime.strptime(target, "%Y-%m-%d").date()
     days = max((d2 - d1).days, 0)
@@ -59,18 +76,22 @@ def update_kline(progress=None, ctx=None) -> dict:
         target = expected_asof()
 
         # 读目标集/cutoff：短连接用完立即释放——DuckDB 写锁是连接级排他的，
-        # 抓取阶段（5665 只 × ~150ms ≈ 十几分钟）绝不能持锁，否则 API 进程
-        # 的只读连接全部被拒，前端整个瘫掉（真实踩坑）。
+        # 抓取阶段（个股 5555 + 基金 2168 ≈ 7700 只 × ~150ms ≈ 十几分钟）
+        # 绝不能持锁，否则 API 进程的只读连接全部被拒，前端整个瘫掉（真实踩坑）。
         conn = writer.conn()
         stocks = [str(r[0]) for r in conn.execute(
             "SELECT symbol FROM stock_universe WHERE symbol ~ '^[0-9]{6}$'").fetchall()]
+        funds = [str(r[0]) for r in conn.execute(
+            "SELECT symbol FROM fund_universe WHERE symbol ~ '^[0-9]{6}$'").fetchall()]
         others = [str(r[0]) for r in conn.execute(
             "SELECT DISTINCT symbol FROM daily_ohlcv WHERE symbol LIKE '%.%'").fetchall()]
         latest = {str(r[0]): str(r[1]) for r in conn.execute(
             "SELECT symbol, MAX(date) FROM daily_ohlcv GROUP BY symbol").fetchall()}
         writer.reset()
 
-        targets = sorted(set(stocks) | set(others))
+        fund_set = set(funds)
+        fund_pause = settings.duckdb_path.parent / "fund_kline.paused"
+        targets = sorted(set(stocks) | set(others) | (set() if fund_pause.exists() else fund_set))
 
         pending = []
         for s in targets:
@@ -79,6 +100,8 @@ def update_kline(progress=None, ctx=None) -> dict:
                 pending.append((s, cut))
         progress(stage="增量拉取", total=len(pending), done=0,
                  message=f"{target} 待增量 {len(pending)}/{len(targets)} 个标的"
+                         + (f"（含场内基金 {sum(1 for s, _ in pending if s in fund_set)} 只）"
+                            if funds else "")
                          + ("（已全部最新）" if not pending else ""))
 
         done = failed = 0
@@ -94,34 +117,42 @@ def update_kline(progress=None, ctx=None) -> dict:
                             for name, _ in _KLINE_LANES}
 
         for i, (sym, cut) in enumerate(pending):
+            if sym in fund_set and fund_pause.exists():
+                continue
             if cancel and cancel():
                 result["detail"] = f"取消于 {done}/{len(pending)}"
                 break
-            count = _gap_count(cut, target)
-            # 车道序列（1.0 kline_lanes 语义）：腾讯 4 端点轮换 → 新浪 → 东财；
+            count = _gap_count(cut, target, _FUND_BASE_BARS if sym in fund_set else 3000)
+            # 车道序列（1.0 kline_lanes 语义）：默认腾讯 → 新浪 → 东财；场内基金
+            # 走新浪优先 → 腾讯（截 2000 根）→ 东财。空返回视同车道失败，继续
+            # 换下家（腾讯对基金 count>2000 返回空包，不能当成功跳过备车道）。
             # 车道级熔断：连续 3 失败冷却 300s，冷却中直接跳过换下家，任务不中止。
             # 半开语义：冷却到期后首次尝试若再失败，consec 已 ≥3 → 立即重新
             # 冷却（不用重攒 3 次）；成功则 consec=0 满血恢复——熔断器完整
             # 状态机（open → half-open → closed/re-open）由这三行天然构成。
             rows = None
             used_lane = None
-            for name, fname in _KLINE_LANES:
+            lanes = _KLINE_LANES_FUND if sym in fund_set else _KLINE_LANES
+            for name, fname in lanes:
                 st = lane_state[name]
                 if st["until"] > now:
                     continue                      # 该车道冷却中，跳过不撞墙
+                cnt = min(count, _FUND_TX_CAP) if (name == "tencent" and sym in fund_set) else count
                 try:
-                    rows = getattr(sources, fname)(sym, count)
-                    used_lane = name
-                    st["consec"] = 0
-                    break
+                    rows = getattr(sources, fname)(sym, cnt)
                 except Exception as e:
                     logger.debug("[Kline] %s %s 拉取失败（%s）: %s",
                                  sym, name, type(e).__name__, str(e)[:60])
-                    st["consec"] += 1
-                    if st["consec"] >= 3:
-                        st["until"] = now + 300   # 该车道冷却 5 分钟
-                        logger.warning("[Kline] 车道 %s 连续 %d 失败，冷却 300s",
-                                       name, st["consec"])
+                    rows = None
+                if rows:
+                    used_lane = name
+                    st["consec"] = 0
+                    break                         # 有数据即成功；空返回继续换下家
+                st["consec"] += 1
+                if st["consec"] >= 3:
+                    st["until"] = now + 300       # 该车道冷却 5 分钟
+                    logger.warning("[Kline] 车道 %s 连续 %d 失败，冷却 300s",
+                                   name, st["consec"])
             if not rows:
                 failed += 1
                 done += 1

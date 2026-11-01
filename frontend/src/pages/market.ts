@@ -5,7 +5,7 @@ import { cssv, esc, fmt, fmtChg, fmtVol, fmtYi, fmtYiS } from "../fmt";
 import { sma, bollSeries, kdjSeries, atrSeries, sixSegment, SEGNAME } from "../indicators";
 export { SEGNAME };
 import { ic } from "../icons";
-import { CARD_DEFS, addWatch, getState, isWatched, notifyLocal, removeWatch, setCardPref, subscribe } from "../store";
+import { CARD_DEFS, addWatch, addWatchGroup, allWatchGroups, getState, inWlFilter, isWatched, notifyLocal, removeWatch, setCardPref, subscribe, toggleWatchGroup, toggleWlGroup } from "../store";
 import { openModal, toast } from "../ui";
 import { openWatchPanel } from "../watch";
 import { stockSearch, type StockSearchHandle } from "../searchbox";
@@ -14,7 +14,7 @@ import { TRENDS, mountKline, setTrendPalette, trendPaletteKey, IND_DEFS, IND_CAT
 
 export const SEG6 = ["超卖", "低位", "弱势", "回升", "强势", "超买"];
 
-export interface CurStock { symbol: string; name: string }
+export interface CurStock { symbol: string; name: string; trendFocus?: { date?: string } }
 /** 多周期布局：single 单屏 / h 左右双列 / v 上下两层 / quad 四宫格（策影同款） */
 export type KLayout = "single" | "h" | "v" | "quad";
 type PKey = "t" | "60" | "d" | "w" | "m" | "q";
@@ -149,6 +149,12 @@ export function warmStock(symbol: string): void {
 /* ── 载入 ── */
 export async function openStock(s: CurStock, from?: { page: string; label: string } | null): Promise<void> {
   mk.cur = s;
+  if (s.trendFocus) {
+    mk.layout = "single";
+    mk.panels = ["d"];
+    mk.active = 0;
+    if (!mk.subInds.includes("trendhistogram")) mk.subInds = [...mk.subInds, "trendhistogram"];
+  }
   mk.from = from ?? null;
   // 换标的：框选区间 / 单根选中都作废（选区属于上一只票，跨标的同步资金是错误的）
   mk.range = null;
@@ -356,14 +362,94 @@ function renderBackbar(): void {
   else b.hidden = true;
 }
 
-/* ── 工具栏加自选按钮（TradingView 同款 icon-only）：
-   未自选一键入「默认」组；已自选点击打开分组管理面板；态用高亮 + title 表达 ── */
+/* ── 收藏按钮（心形）+ 快捷分组浮层：
+   未收藏一键进「默认」并弹出分组面板；已收藏点击可换组 / 新建组 / 移出，无需开弹窗 ── */
+let watchPop: HTMLElement | null = null;
+
+function closeWatchPop(): void {
+  watchPop?.remove();
+  watchPop = null;
+}
+
 function updateWatchBtn(): void {
   const b = document.getElementById("kl-watch");
   if (!b) return;
   const on = mk.cur ? isWatched(mk.cur.symbol) : false;
   b.classList.toggle("on", on);
-  b.title = on ? "已自选 · 点击管理分组" : "加自选 / 管理分组";
+  b.title = on ? "已收藏 · 点击设置分组" : "收藏 / 设置分组";
+  b.innerHTML = ic(on ? "heart-filled" : "heart", 13);
+}
+
+function openWatchPop(): void {
+  const s = mk.cur;
+  if (!s) return;
+  closeWatchPop();
+  const pop = document.createElement("div");
+  pop.className = "wpop";
+  pop.style.visibility = "hidden";
+
+  // 多选：点分组 = 加入/移出该组，浮层保持打开，可连续勾多个组
+  const toggleG = (g: string) => {
+    const w = getState().watchlist.find((x) => x.symbol === s.symbol);
+    if (!w) { addWatch(s.symbol, s.name, g); toast(`已收藏 · ${g}`); }
+    else {
+      const on = toggleWatchGroup(s.symbol, g);
+      const now = getState().watchlist.find((x) => x.symbol === s.symbol)?.groups ?? [];
+      toast(`${on ? "已加入" : "已移出"}「${g}」· 当前：${now.join(" / ")}`);
+    }
+    draw();
+  };
+
+  const draw = () => {
+    const w = getState().watchlist.find((x) => x.symbol === s.symbol);
+    const gsel = w?.groups ?? [];
+    pop.innerHTML =
+      `<div class="wpop-head"><b>${esc(s.name)}</b><span class="num">${s.symbol}</span></div>` +
+      `<div class="wpop-tip">${gsel.length ? `已选：${esc(gsel.join(" / "))}` : "尚未收藏（点分组即加入）"}</div>` +
+      `<div class="wpop-list">${allWatchGroups().map((g) =>
+        `<button class="wpop-g${gsel.includes(g) ? " on" : ""}" data-g="${esc(g)}">` +
+        `<span>${esc(g)}</span>${gsel.includes(g) ? ic("check", 12) : ""}</button>`).join("")}</div>` +
+      `<div class="wpop-new"><input class="field" placeholder="新建分组名称"><button class="hbtn" data-act="new">新建</button></div>` +
+      `<div class="wpop-foot">${w ? `<button class="wpop-del" data-act="rm">${ic("trash", 12)}移出自选</button>` : "<span></span>"}` +
+      `<span class="sp"></span><button class="hbtn" data-act="close">完成</button></div>`;
+  };
+
+  pop.addEventListener("click", (e) => {
+    const t = e.target as HTMLElement;
+    const gEl = t.closest<HTMLElement>("[data-g]");
+    if (gEl) { toggleG(gEl.dataset.g!); return; }
+    const act = t.closest<HTMLElement>("[data-act]")?.dataset.act;
+    if (act === "close") { closeWatchPop(); return; }
+    if (act === "rm") { removeWatch(s.symbol); toast(`已将 ${s.name} 移出自选`); closeWatchPop(); return; }
+    if (act === "new") {
+      const inp = pop.querySelector("input") as HTMLInputElement;
+      const name = inp.value.trim();
+      if (!name) { inp.focus(); return; }
+      addWatchGroup(name);
+      toggleG(name);
+    }
+  });
+  pop.addEventListener("keydown", (e) => {
+    if (e.key === "Enter") {
+      const inp = e.target as HTMLInputElement;
+      if (inp.tagName === "INPUT") {
+        const name = inp.value.trim();
+        if (name) { addWatchGroup(name); toggleG(name); }
+      }
+    }
+  });
+
+  draw();
+  document.body.appendChild(pop);
+  watchPop = pop;
+  // 锚定在心形按钮下方；越界自动回收到视口内
+  const a = document.getElementById("kl-watch")!.getBoundingClientRect();
+  const pr = pop.getBoundingClientRect();
+  const left = Math.max(8, Math.min(a.left, innerWidth - pr.width - 8));
+  const top = a.bottom + 6 + pr.height > innerHeight - 8 ? Math.max(8, a.top - pr.height - 6) : a.bottom + 6;
+  pop.style.left = `${left}px`;
+  pop.style.top = `${top}px`;
+  pop.style.visibility = "visible";
 }
 
 export function initMarket(): void {
@@ -381,16 +467,30 @@ export function initMarket(): void {
     if (hoverT) clearTimeout(hoverT);
     hoverT = setTimeout(() => { hoverT = null; warmStock(sym); }, 120);
   });
-  // 加自选：一键入默认组；已自选 → 分组管理面板（换分组 / 新建 / 移除）
+  // 收藏：未收藏一键入「默认」，已收藏直接开快捷分组浮层；浮层开着再点则收起
   document.getElementById("kl-watch")!.addEventListener("click", () => {
     const s = mk.cur;
     if (!s) return;
+    if (watchPop) { closeWatchPop(); return; }
     if (!isWatched(s.symbol)) {
       addWatch(s.symbol, s.name, "默认");
-      toast("已加入自选 · 默认（再次点击可改分组）");
-    } else openWatchPanel(s.symbol, s.name);
+      toast("已收藏 · 默认（可在此处换个分组）");
+    }
+    openWatchPop();
   });
+  // 浮层关闭：点外部 / Esc / 切标的 / 切页 / 窗口尺寸变化
+  document.addEventListener("pointerdown", (e) => {
+    if (!watchPop) return;
+    const t = e.target as HTMLElement;
+    if (t.closest(".wpop") || t.closest("#kl-watch")) return;
+    closeWatchPop();
+  }, true);
+  document.addEventListener("keydown", (e) => { if (e.key === "Escape") closeWatchPop(); });
+  document.addEventListener("yc:open-stock", () => closeWatchPop());
+  document.addEventListener("yc:goto-page", () => closeWatchPop());
+  window.addEventListener("resize", () => closeWatchPop());
   subscribe(updateWatchBtn);   // 自选增删/分组变更（含云同步回放）→ 按钮态同步
+  updateWatchBtn();
   // 实时价轮询：行情页可见时每 20s 静默刷新当前股 quote（后端 10s 缓存兜东财限流）
   window.setInterval(async () => {
     if (!mk.cur || !document.getElementById("page-market")!.classList.contains("on")) return;
@@ -822,43 +922,53 @@ function renderIndMore(): void {
   }).join("") || `<div class="im-none">没有匹配「${esc(q)}」的指标</div>`;
 }
 
-/** 日线聚合为周/月 */
-export function aggDaily(daily: Bar[], n: number): Bar[] {
-  const out: Bar[] = [];
-  let bucket: Bar[] = [];
-  for (const b of daily) {
-    bucket.push(b);
-    if (bucket.length === n) {
-      const o = bucket[0], l = bucket[bucket.length - 1];
-      out.push({
-        date: l.date, open: o.open, high: Math.max(...bucket.map((x) => x.high)),
-        low: Math.min(...bucket.map((x) => x.low)), close: l.close,
-        volume: bucket.reduce((s, x) => s + (x.volume || 0), 0),
-        amount: bucket.reduce((s, x) => s + (x.amount || 0), 0),
-      });
-      bucket = [];
-    }
+/** 日线 → 自然周/月/季线：确定性重采样（开=首根、高=max、低=min、收=末根、量额求和）。
+ *  分桶按自然边界（ISO 周 / 自然月 / 自然季），与通达信/众赢同口径；
+ *  bar 日期取桶内最后一个交易日（周线=该周最后交易日、月线=月末、季线=季末）。 */
+export type AggBucket = "w" | "m" | "q";
+
+function bucketKey(date: string, k: AggBucket): string {
+  if (k === "w") {
+    // ISO 周按该周周四归属年份：跨年周（12/29~1/4）不会被拆成两根
+    const d = new Date(`${date}T00:00:00Z`);
+    d.setUTCDate(d.getUTCDate() + 4 - (d.getUTCDay() || 7));
+    const y = d.getUTCFullYear();
+    const w = Math.ceil(((d.getTime() - Date.UTC(y, 0, 1)) / 86400000 + 1) / 7);
+    return `${y}W${String(w).padStart(2, "0")}`;
   }
-  if (bucket.length) {
-    const o = bucket[0], l = bucket[bucket.length - 1];
-    out.push({
-      date: l.date, open: o.open, high: Math.max(...bucket.map((x) => x.high)),
-      low: Math.min(...bucket.map((x) => x.low)), close: l.close,
-      volume: bucket.reduce((s, x) => s + (x.volume || 0), 0),
-      amount: bucket.reduce((s, x) => s + (x.amount || 0), 0),
-    });
-  }
-  return out;
+  if (k === "m") return date.slice(0, 7);
+  return `${date.slice(0, 4)}Q${Math.floor((Number(date.slice(5, 7)) - 1) / 3) + 1}`;
 }
 
-/** 周期 → 聚合根数（季 ≈ 65 个交易日，一年四根看大趋势）；t/60 不聚合直接用拉取数据 */
-const P_N: Record<PKey, number> = { t: 1, "60": 1, d: 1, w: 5, m: 20, q: 65 };
+export function aggDaily(daily: Bar[], k: AggBucket): Bar[] {
+  const out: Bar[] = [];
+  let key = "";
+  let o: Bar | null = null, l: Bar | null = null;
+  let hi = 0, lo = 0, vol = 0, amt = 0;
+  const flush = () => {
+    if (o && l) out.push({
+      date: l.date, open: o.open, high: hi, low: lo, close: l.close,
+      volume: vol, amount: amt,
+    });
+  };
+  for (const b of daily) {
+    const kb = bucketKey(b.date, k);
+    if (kb !== key) {
+      flush();
+      key = kb; o = b; hi = b.high; lo = b.low; vol = 0; amt = 0;
+    }
+    hi = Math.max(hi, b.high); lo = Math.min(lo, b.low);
+    vol += b.volume || 0; amt += b.amount || 0;
+    l = b;
+  }
+  flush();
+  return out;
+}
 
 export function barsFor(p: PKey): Bar[] {
   if (p === "t") return mk.minuteData?.bars ?? [];
   if (p === "60") return mk.m60 ?? [];
-  const n = P_N[p] ?? 1;
-  return n === 1 ? mk.bars : aggDaily(mk.bars, n);
+  return p === "d" ? mk.bars : aggDaily(mk.bars, p);
 }
 
 /** 分时/60分数据按需拉取（后端 TTL 缓存 30s/120s，重复切回不打接口） */
@@ -1039,7 +1149,7 @@ function applyPanel(i: number): void {
   const kl = kls[i];
   if (!kl || !mk.cur) return;
   const p = mk.panels[i] ?? "d";
-  kl.setPeriod(p === "q" ? "m" : p);           // 季线按月线引擎聚 65 根；t/60 原样透传
+  kl.setPeriod(p);                             // 季线走自然季聚合，独立周期标签
   // 分时主图固定为均价线（MA/趋势通道对每分钟假 K 线无意义），其余周期走默认预设
   kl.setMain(p === "t" ? ["avg"] : mk.mainInds);
   kl.setSub(SUB_OK[currentLayout()]?.[i] ? (p === "t" ? ["volfs"] : mk.subInds) : []);
@@ -1054,7 +1164,9 @@ function applyPanel(i: number): void {
   const stock = market === "sh" ? /^(600|601|603|605|688|689)/.test(code)
     : market === "sz" ? /^(000|001|002|003|300|301)/.test(code)
     : market === "bj" && /^(4|8|92)/.test(code);
-  kl.setData(barsFor(p), keep, stock ? (estimateFloatShares(mk.bars) ?? estimateFloatShares(mk.quote ? [mk.quote] : [])) : null);
+  kl.setData(barsFor(p), keep, stock ? (estimateFloatShares(mk.bars) ?? estimateFloatShares(mk.quote ? [mk.quote] : [])) : null,
+    p === "d" ? mk.cur.trendFocus?.date : undefined);
+  if (p === "d") delete mk.cur.trendFocus;
   kl.drawLegend(p === "t" ? ["avg"] : (SUB_OK[currentLayout()]?.[i] ? [...mk.mainInds] : mk.mainInds));
 }
 
@@ -1251,6 +1363,16 @@ function restoreWatchSearch(kept: { val: string; focus: boolean } | null): void 
   if (kept.val.trim()) inp.dispatchEvent(new Event("input"));   // 重放下拉结果
 }
 
+/** 自选卡分组胶囊：与自选页共享同一个多选筛选（wlGroups），点击即加入/移出 */
+function bindWlGroupChips(scope: HTMLElement): void {
+  scope.querySelectorAll<HTMLElement>("[data-wl-g]").forEach((b) =>
+    b.addEventListener("click", (e) => {
+      e.stopPropagation();                     // 不触发行的打开个股
+      toggleWlGroup(b.dataset.wlG!);
+      renderRight();
+    }));
+}
+
 function redrawWatchBody(): void {
   const el = document.querySelector<HTMLElement>('#rightcol .rcard[data-cid="watch"] .fbody');
   if (!el) return;
@@ -1267,7 +1389,7 @@ function redrawWatchBody(): void {
     mountWatchSearch();
   }
   const list = el.querySelector<HTMLElement>(".wl-list");
-  if (list) void refreshSparksIn(list);
+  if (list) { bindWlGroupChips(list); void refreshSparksIn(list); }
 }
 
 async function refreshWlQuotes(): Promise<void> {
@@ -1472,16 +1594,23 @@ function cardBody(cid: string, mode: string): string {
   }
   if (cid === "watch") {
     const wl = getState().watchlist;
+    const sel = getState().wlGroups;                  // 多选筛选：空 = 全部
+    const list = wl.filter(inWlFilter);
     const det = mode === "detailed";
-    // 行式列表（同花顺自选同款）：序号 | 名称代码 | 当日走势 | (成交额 换手) | 现价 | 涨跌幅 | 移除
-    const rows = wl.map((w, i) => {
+    // 分组胶囊：与自选页共用 wlGroups，任一处勾选/取消两边同步
+    const grpbar = `<div class="wl-grpbar">${["全部", ...allWatchGroups()].map((g) => {
+      const on = g === "全部" ? sel.length === 0 : sel.includes(g);
+      return `<button class="wl-gchip${on ? " on" : ""}" data-wl-g="${esc(g)}">${esc(g)}</button>`;
+    }).join("")}</div>`;
+    // 行式列表（同花顺自选同款）：序号 | 名称代码(分组) | 当日走势 | (成交额 换手) | 现价 | 涨跌幅 | 移除
+    const rows = list.map((w, i) => {
       const wq = wlQ.get(w.symbol);
       const ch = wq?.pct_chg ?? 0;
       const up = ch >= 0;
       const price = wq ? (wq.rt_price ?? wq.close ?? null) : null;
       return `<div class="wl-r${det ? " det" : ""}" data-go-stock="${w.symbol}" data-go-name="${esc(w.name)}" title="打开 ${esc(w.name)}">` +
         `<span class="wl-i num">${i + 1}</span>` +
-        `<div class="wl-nm"><b>${esc(w.name)}</b><span class="num">${w.symbol}</span></div>` +
+        `<div class="wl-nm"><b>${esc(w.name)}</b><span class="num">${w.symbol}<i class="wl-g" title="${esc(w.groups.join("、"))}">· ${esc(w.groups.join(" / "))}</i></span></div>` +
         `<span class="wl-sp">${sparkSvg(w.symbol, 56, 18)}</span>` +
         (det ? `<span class="num wl-d">${fmtYi(wq?.amount ?? null, 1)}</span>` +
           `<span class="num wl-d">${wq?.turnover_rate != null ? fmt(wq.turnover_rate) + "%" : "—"}</span>` : "") +
@@ -1490,9 +1619,10 @@ function cardBody(cid: string, mode: string): string {
         `<button class="wl-x" data-wl-del="${w.symbol}" title="移出自选">${ic("x", 10)}</button>` +
         `</div>`;
     }).join("");
-    // 搜索框已内嵌进卡片头（cardHead），此处仅渲染列表（固定高度滚动，空态也占位）
-    return `<div class="wl-list">${rows}${!wl.length ?
-      `<div class="bempty" style="padding:14px 14px 8px">暂无自选股<br><span style="color:var(--faint)">点右上 ＋ 搜索添加，或从自选页管理</span></div>` : ""}</div>`;
+    // 搜索框已内嵌进卡片头（cardHead），此处渲染「分组胶囊 + 列表」（固定高度滚动，空态也占位）
+    return `<div class="wl-list">${grpbar}${rows || (!wl.length ?
+      `<div class="bempty" style="padding:14px 14px 8px">暂无自选股<br><span style="color:var(--faint)">点右上 ＋ 搜索添加，或从自选页管理</span></div>` :
+      `<div class="bempty" style="padding:14px 14px 8px">「${esc(sel.join(" + "))}」分组暂无股票<br><span style="color:var(--faint)">在上方取消勾选，或用 ♥ 给个股设置分组</span></div>`)}</div>`;
   }
   if (cid === "signals") {
     const segI = sixSegment(mk.bars, mk.bars.length - 1);
@@ -1586,7 +1716,8 @@ function cardBody(cid: string, mode: string): string {
 
 function cardHead(def: { id: string; name: string; icon: string }): string {
   const p = getState().cards[def.id];
-  const mono = def.id === "moneyflow" ? (mk.cur?.symbol || "") : def.id === "corepick" ? "池档案" : def.id === "watch" ? `${getState().watchlist.length}只` : "OPEN";
+  const wlN = getState().watchlist.filter(inWlFilter).length;
+  const mono = def.id === "moneyflow" ? (mk.cur?.symbol || "") : def.id === "corepick" ? "池档案" : def.id === "watch" ? `${wlN}只` : "OPEN";
   // 模式切换收成单颗按钮（图标指示点击后进入的模式）；整组控制钮悬停卡片才浮现
   const nextIcon = p.mode === "simple" ? "faders-horizontal" : "list";
   const nextTitle = p.mode === "simple" ? "切换为详细模式" : "切换为简单模式";
@@ -1795,6 +1926,6 @@ export function renderRight(): void {
   mountWatchSearch();
   restoreWatchSearch(kept);
   const wlList = el.querySelector<HTMLElement>('.rcard[data-cid="watch"] .wl-list');
-  if (wlList) void refreshSparksIn(wlList);
+  if (wlList) { bindWlGroupChips(wlList); void refreshSparksIn(wlList); }
   void refreshWlQuotes();
 }

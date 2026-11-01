@@ -22,13 +22,35 @@ export interface AppState {
   dir: "cn" | "intl";
   accent: "amber" | "teal" | "indigo" | "rose";
   cards: CardPrefs;
-  watchlist: { symbol: string; name: string; group: string; ts: number }[];
-  wlGroup: string;
+  watchlist: WatchEntry[];
+  /** 自选分组注册表（含尚未放股票的空分组），保证「新建分组」不丢 */
+  watchGroups: string[];
+  /** 分组筛选（多选：空数组 = 全部；否则取并集） */
+  wlGroups: string[];
+}
+
+export interface WatchEntry {
+  symbol: string;
+  name: string;
+  /** 一只股票可属于多个分组，至少含「默认」 */
+  groups: string[];
+  ts: number;
+}
+
+/** 旧数据迁移：group: string → groups: string[] */
+function loadWatchlist(): WatchEntry[] {
+  const raw = load<Array<{ symbol: string; name?: string; group?: string; groups?: string[]; ts?: number }>>(LS.watchlist, []);
+  return raw.filter((w) => w && w.symbol).map((w) => ({
+    symbol: w.symbol,
+    name: w.name || w.symbol,
+    groups: w.groups?.length ? w.groups : [w.group || "默认"],
+    ts: w.ts || Date.now(),
+  }));
 }
 
 const LS = {
   user: "yc_user", theme: "yc_theme", dir: "yc_dir", accent: "yc_accent",
-  cards: "yc_cards", watchlist: "yc_watchlist",
+  cards: "yc_cards", watchlist: "yc_watchlist", watchGroups: "yc_watch_groups",
 };
 
 function load<T>(key: string, fallback: T): T {
@@ -54,8 +76,9 @@ const state: AppState = {
   dir: load<"cn" | "intl">(LS.dir, "cn"),
   accent: load<AppState["accent"]>(LS.accent, "amber"),
   cards: loadCards(),
-  watchlist: load<AppState["watchlist"]>(LS.watchlist, []),
-  wlGroup: "",
+  watchlist: loadWatchlist(),
+  watchGroups: load<string[]>(LS.watchGroups, []),
+  wlGroups: [],
 };
 
 type Listener = () => void;
@@ -131,31 +154,93 @@ export function isWatched(symbol: string): boolean {
 }
 export function addWatch(symbol: string, name: string, group = "默认"): boolean {
   if (isWatched(symbol)) return false;
-  state.watchlist.unshift({ symbol, name: name || symbol, group, ts: Date.now() });
-  localStorage.setItem(LS.watchlist, JSON.stringify(state.watchlist));
-  notifyLocal("watchlist");
-  emit();
+  noteGroups([group]);
+  state.watchlist.unshift({ symbol, name: name || symbol, groups: [group || "默认"], ts: Date.now() });
+  saveWatchlist();
   return true;
 }
 export function removeWatch(symbol: string): void {
   state.watchlist = state.watchlist.filter((w) => w.symbol !== symbol);
+  saveWatchlist();
+}
+/** 整组覆盖（多选）：空数组自动回落「默认」，保证一只股票至少有一个组 */
+export function setWatchGroups(symbol: string, groups: string[]): void {
+  const w = state.watchlist.find((x) => x.symbol === symbol);
+  if (!w) return;
+  const gs = Array.from(new Set(groups.map((g) => (g || "").trim()).filter(Boolean)));
+  w.groups = gs.length ? gs : ["默认"];
+  noteGroups(w.groups);
+  saveWatchlist();
+}
+/** 勾选/取消某个分组（多选）；返回操作后是否仍在该组 */
+export function toggleWatchGroup(symbol: string, group: string): boolean {
+  const w = state.watchlist.find((x) => x.symbol === symbol);
+  if (!w) return false;
+  const has = w.groups.includes(group);
+  setWatchGroups(symbol, has ? w.groups.filter((g) => g !== group) : [...w.groups, group]);
+  return !has;
+}
+/** 旧口径兼容：仅保留一个分组 */
+export function moveWatchGroup(symbol: string, group: string): void {
+  setWatchGroups(symbol, [group]);
+}
+
+function saveWatchlist(): void {
   localStorage.setItem(LS.watchlist, JSON.stringify(state.watchlist));
   notifyLocal("watchlist");
   emit();
 }
-export function moveWatchGroup(symbol: string, group: string): void {
-  const w = state.watchlist.find((x) => x.symbol === symbol);
-  if (w) { w.group = group; localStorage.setItem(LS.watchlist, JSON.stringify(state.watchlist)); notifyLocal("watchlist"); emit(); }
+
+/** 分组名登记：自定义分组写进注册表，避免「空分组」因移出股票而消失 */
+function noteGroups(names: string[]): void {
+  let changed = false;
+  names.forEach((g) => {
+    const name = (g || "").trim();
+    if (!name || name === "默认" || state.watchGroups.includes(name)) return;
+    state.watchGroups.push(name);
+    changed = true;
+  });
+  if (changed) localStorage.setItem(LS.watchGroups, JSON.stringify(state.watchGroups));
+}
+
+/** 全部分组名：默认在前 → 注册表顺序 → 再补 watchlist 里实际用到的 */
+export function allWatchGroups(): string[] {
+  const set = new Set<string>(["默认"]);
+  state.watchGroups.forEach((g) => { if (g && g.trim()) set.add(g.trim()); });
+  state.watchlist.forEach((w) => w.groups.forEach((g) => set.add(g || "默认")));
+  return Array.from(set);
+}
+
+/** 新建空分组（持久化到 yc_watch_groups，收藏面板/自选页都能立刻看到） */
+export function addWatchGroup(name: string): boolean {
+  const g = name.trim();
+  if (!g || allWatchGroups().includes(g)) return false;
+  state.watchGroups.push(g);
+  localStorage.setItem(LS.watchGroups, JSON.stringify(state.watchGroups));
+  emit();
+  return true;
 }
 /** 云端自选整批装载（applying 抑制回推） */
-export function loadWatchlistFrom(items: AppState["watchlist"]): void {
+export function loadWatchlistFrom(items: WatchEntry[]): void {
   state.watchlist = items;
   localStorage.setItem(LS.watchlist, JSON.stringify(state.watchlist));
   emit();
 }
-export function setWlGroup(g: string): void {
-  state.wlGroup = g;
+/** 分组筛选（多选）：空 = 全部；点「全部」清空；点某组则加入/移出 */
+export function toggleWlGroup(g: string): void {
+  if (g === "全部") state.wlGroups = [];
+  else state.wlGroups = state.wlGroups.includes(g)
+    ? state.wlGroups.filter((x) => x !== g)
+    : [...state.wlGroups, g];
   emit();
+}
+export function setWlGroups(gs: string[]): void {
+  state.wlGroups = gs.includes("全部") ? [] : gs;
+  emit();
+}
+/** 股票是否命中当前分组筛选（多选取并集） */
+export function inWlFilter(w: WatchEntry): boolean {
+  return state.wlGroups.length === 0 || w.groups.some((g) => state.wlGroups.includes(g));
 }
 
 /* ── 外观应用 ── */

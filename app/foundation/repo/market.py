@@ -1,5 +1,6 @@
 """行情读取：K 线（复权派生视图）/ 快照 / 搜索。"""
 from typing import Optional
+from threading import Lock
 
 from .. import db
 from ..symbol import INDEX_CATALOG, INDEX_NAMES, index_form, is_bj, normalize_symbol
@@ -560,3 +561,52 @@ def snapshot_one(conn, symbol: str) -> Optional[dict]:
             d["updated_at"] = str(d["updated_at"]) if d["updated_at"] else None
             return d
     return None
+
+
+_TGT_TREND_CACHE = {"keys": {}, "rows": {}}
+_TGT_TREND_LOCK = Lock()
+
+
+def stock_target_trends(conn):
+    """逐股票内容缓存；行情增量更新只重算变化的股票。"""
+    from itertools import groupby
+    from ..target_trend import trend_histogram, trend_summary
+
+    with _TGT_TREND_LOCK:
+        fingerprints = conn.execute("""
+            SELECT symbol, COUNT(*), MAX(date), SUM(hash(date, high, low, close))
+            FROM daily_ohlcv WHERE symbol IN (SELECT symbol FROM stock_universe)
+            GROUP BY symbol
+        """).fetchall()
+        factors = dict(conn.execute("""
+            SELECT symbol, SUM(hash(ex_date, fore_adjust_factor)) FROM adjust_factor GROUP BY symbol
+        """).fetchall())
+        keys = {r[0]: (*r[1:], factors.get(r[0])) for r in fingerprints}
+        changed = [symbol for symbol, key in keys.items() if _TGT_TREND_CACHE['keys'].get(symbol) != key]
+        if changed:
+            calendar = {str(row[0]): i for i, row in enumerate(conn.execute(
+                "SELECT DISTINCT date FROM daily_ohlcv ORDER BY date").fetchall())}
+            cursor = conn.cursor()
+            try:
+                placeholders = ','.join('?' for _ in changed)
+                cursor.execute(f"""
+                    SELECT symbol, date, high, low, close FROM v_daily_ohlcv_qfq
+                    WHERE symbol IN ({placeholders})
+                    QUALIFY ROW_NUMBER() OVER (PARTITION BY symbol ORDER BY date DESC) <= 2000
+                    ORDER BY symbol, date
+                """, changed)
+                def records():
+                    while batch := cursor.fetchmany(8192):
+                        yield from batch
+                for symbol, group in groupby(records(), key=lambda row: row[0]):
+                    rows = list(group)
+                    if any(any(value is None for value in row[2:]) for row in rows):
+                        _TGT_TREND_CACHE['rows'].pop(symbol, None)
+                        continue
+                    bars = [dict(high=r[2], low=r[3], close=r[4]) for r in rows]
+                    _TGT_TREND_CACHE['rows'][symbol] = trend_summary(
+                        [str(r[1]) for r in rows], trend_histogram(bars), calendar)
+            finally:
+                cursor.close()
+            _TGT_TREND_CACHE['keys'] = keys
+        return {symbol: row for symbol, row in _TGT_TREND_CACHE['rows'].items() if symbol in keys}

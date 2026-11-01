@@ -61,7 +61,9 @@ function pushPrefs(): void {
 }
 function watchlistPayload(): WatchItem[] {
   return getState().watchlist.map((w) => ({
-    symbol: w.symbol, name: w.name, group: w.group,
+    symbol: w.symbol, name: w.name,
+    group: w.groups[0] || "默认",           // 兼容旧字段（服务端单列）
+    groups: w.groups,                       // 多分组（新字段）
     ts: new Date(w.ts || Date.now()).toISOString(),
   }));
 }
@@ -132,7 +134,8 @@ export async function pullOnLogin(): Promise<void> {
       beginApply();
       try {
         loadWatchlistFrom(wlR.items.map((i) => ({
-          symbol: i.symbol, name: i.name || i.symbol, group: i.group || "默认",
+          symbol: i.symbol, name: i.name || i.symbol,
+          groups: i.groups?.length ? i.groups : [i.group || "默认"],
           ts: i.ts ? Date.parse(i.ts) || Date.now() : Date.now(),
         })));
       } finally { endApply(); }

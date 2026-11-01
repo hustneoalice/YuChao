@@ -2,7 +2,7 @@
 import { marketApi } from "../api";
 import { esc, fmt, fmtChg, fmtYi } from "../fmt";
 import { ic } from "../icons";
-import { getState, setWlGroup, removeWatch, addWatch, isWatched } from "../store";
+import { getState, setWlGroups, toggleWlGroup, inWlFilter, removeWatch, addWatch, isWatched, addWatchGroup, allWatchGroups } from "../store";
 import { toast, openModal, closeModals } from "../ui";
 import { stockSearch, type StockSearchHandle } from "../searchbox";
 import { refreshSparksIn, sparkSvg } from "../sparks";
@@ -10,7 +10,7 @@ import { createPager, slicePage, type Pager } from "../pager";
 import { createDataTable, type DataTable, type DataTableCol } from "../table";
 
 let filter: "all" | "up" | "down" = "all";
-type WatchItem = { symbol: string; name: string; group: string; ts: number };
+type WatchItem = { symbol: string; name: string; groups: string[]; ts: number };
 let wlPager: Pager | null = null;
 let wlTbl: DataTable<WatchItem> | null = null;
 let wlReset = false;
@@ -31,23 +31,55 @@ const WL_COLS: DataTableCol<WatchItem>[] = [
   { label: "成交额", num: true, sort: (w) => amtCache.get(w.symbol) ?? null,
     render: (w) => `<span style="color:var(--faint)">${fmtYi(amtCache.get(w.symbol) ?? null, 1)}</span>` },
   { label: "信号", render: () => `<span class="tag p1">看盘</span>` },
-  { label: "分组", sort: "group", render: (w) => `<span style="font-size:11.5px;color:var(--dim)">${esc(w.group)}</span>` },
+  { label: "分组", sort: (w) => w.groups.join("、"),
+    render: (w) => `<span style="font-size:11.5px;color:var(--dim)">${esc(w.groups.join("、"))}</span>` },
   { label: "", width: 52, render: (w) =>
       `<button class="icbtn" data-del="${w.symbol}" title="移除" style="width:26px;height:26px">${ic("trash", 13)}</button>` },
 ];
 
 function drawChips(): void {
-  const wl = getState().watchlist;
-  const groups = ["全部", ...Array.from(new Set(wl.map((w) => w.group)))];
+  const groups = ["全部", ...allWatchGroups()];
+  const sel = getState().wlGroups;                  // 多选：空 = 全部
   const el = document.getElementById("wl-groups")!;
   el.innerHTML = groups.map((g) =>
-    `<span class="chip${getState().wlGroup === g ? " on" : ""}" data-g="${esc(g)}">${esc(g)}</span>`).join("") +
+    `<span class="chip${(g === "全部" ? sel.length === 0 : sel.includes(g)) ? " on" : ""}" data-g="${esc(g)}">${esc(g)}${g !== "全部" && sel.includes(g) ? ic("check", 10) : ""}</span>`).join("") +
     `<span class="chip" id="wl-newgrp" style="border-style:dashed">${ic("plus", 11)}新建分组</span>`;
   el.querySelectorAll<HTMLElement>(".chip[data-g]").forEach((c) =>
-    c.addEventListener("click", () => { wlReset = true; setWlGroup(c.dataset.g!); }));
+    c.addEventListener("click", () => {
+      wlReset = true;
+      toggleWlGroup(c.dataset.g!);   // 点「全部」清空；点分组加入/移出
+      drawChips();
+      renderRows(true);
+    }));
+  // 新建分组：就地展开输入框（不依赖 prompt，部分浏览器/内嵌窗口会拦截）
   el.querySelector("#wl-newgrp")!.addEventListener("click", () => {
-    const g = prompt("分组名称：");
-    if (g && g.trim()) { toast(`分组「${g.trim()}」已创建，添加自选时可选`); }
+    const host = el.querySelector("#wl-newgrp")!;
+    const box = document.createElement("span");
+    box.className = "chip wl-newgrp-edit";
+    box.innerHTML = `<input placeholder="分组名称" maxlength="16"><button class="wl-ok" title="创建">${ic("check", 11)}</button>`;
+    host.replaceWith(box);
+    const inp = box.querySelector("input")!;
+    inp.focus();
+    let done = false;
+    const submit = (commit: boolean): void => {
+      if (done) return;
+      const g = inp.value.trim();
+      if (!commit || !g) { done = true; drawChips(); return; }
+      if (!addWatchGroup(g)) { toast(`分组「${g}」已存在`); inp.select(); return; }
+      done = true;
+      toast(`分组「${g}」已创建`);
+      wlReset = true;
+      setWlGroups([g]);       // 切到新分组：空列表也能直观看到已创建
+      drawChips();            // 立即重画胶囊，新分组马上可点
+      renderRows(true);
+    };
+    box.querySelector("button")!.addEventListener("mousedown", (e) => e.preventDefault());
+    box.querySelector("button")!.addEventListener("click", () => submit(true));
+    inp.addEventListener("keydown", (e) => {
+      if (e.key === "Enter") { e.preventDefault(); submit(true); }
+      else if (e.key === "Escape") { e.preventDefault(); submit(false); }
+    });
+    inp.addEventListener("blur", () => submit(true));
   });
 }
 
@@ -67,12 +99,11 @@ export async function fetchChg(symbols: string[]): Promise<void> {
 
 function renderRows(reset = false): void {
   if (reset) wlReset = true;
-  const wl = getState().watchlist;
-  const g = getState().wlGroup;
-  let rows = wl.filter((w) => g === "全部" || !g || w.group === g);
+  const sel = getState().wlGroups;
+  let rows = getState().watchlist.filter((w) => inWlFilter(w));   // 多选分组取并集
   rows = rows.filter((w) =>
     filter === "all" || (filter === "up" ? (chgCache.get(w.symbol) ?? 0) >= 0 : (chgCache.get(w.symbol) ?? 0) < 0));
-  document.getElementById("wl-title")!.textContent = !g || g === "全部" ? "全部自选" : g;
+  document.getElementById("wl-title")!.textContent = sel.length ? sel.join(" + ") : "全部自选";
   document.getElementById("wl-count")!.textContent = `共 ${rows.length} 只`;
   if (!wlPager) wlPager = createPager(document.getElementById("wl-pager")!, "watchlist", renderRows);
   if (!wlTbl) wlTbl = createDataTable(document.getElementById("wl-wrap")!, WL_COLS, {

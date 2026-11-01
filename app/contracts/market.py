@@ -148,6 +148,13 @@ class TargetItem(BaseModel):
     seg_name: str = Field(default="", description="六分段名：超卖/低位/弱势/回升/强势/超买")
     pullback: bool = Field(default=False, description="回调中：收盘跌破 MA7 快线")
 
+    trend_value: Optional[float] = None
+    trend_cross_date: Optional[str] = None
+    trend_cross_ago: Optional[int] = None
+    trend_above_days: int = 0
+    trend_data_date: str = ""
+    trend_provisional: bool = False
+
 
 class TargetScanOut(BaseModel):
     scanned: int = Field(description="实际进入判定的标的数（ST/北交剔除后）")

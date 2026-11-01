@@ -109,10 +109,41 @@ svg{display:block}
 .wm-g:hover{border-color:color-mix(in srgb,var(--accent) 40%,transparent)}
 .wm-g.on{border-color:var(--accent);color:var(--text);background:var(--accent-soft)}
 .wm-g i{width:7px;height:7px;border-radius:50%;background:var(--accent)}
+.wm-tick{color:var(--accent);font-size:12px;font-weight:700;line-height:1}
 
 /* 行情页工具栏加自选（icon-only，TradingView 同款）：态 .on 高亮 + title 提示 */
 #kl-watch.on{border-color:color-mix(in srgb,var(--accent) 35%,transparent);color:var(--accent);
   background:color-mix(in srgb,var(--accent) 12%,transparent)}
+#kl-watch svg{width:13px;height:13px}
+
+/* 收藏按钮 · 快捷分组浮层（心形点开即可换组 / 新建 / 移出） */
+.wpop{position:fixed;z-index:250;width:220px;padding:8px;
+  background:var(--panel);border:1px solid var(--border);border-radius:12px;
+  box-shadow:0 18px 44px -14px rgba(0,0,0,.6),0 0 0 1px var(--border-soft) inset;
+  animation:wpopIn .12s ease-out}
+@keyframes wpopIn{from{opacity:0;transform:translateY(-5px)}to{opacity:1;transform:none}}
+.wpop-head{display:flex;align-items:baseline;gap:6px;padding:2px 6px 7px}
+.wpop-head b{font-size:13px;font-weight:650}
+.wpop-head span{font-size:10.5px;color:var(--faint)}
+.wpop-tip{padding:0 6px 6px;font-size:10.5px;color:var(--faint);white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.wpop-list{display:flex;flex-direction:column;gap:2px;max-height:190px;overflow:auto}
+.wpop-g{display:flex;align-items:center;justify-content:space-between;gap:8px;
+  min-height:30px;height:30px;padding:0 8px;border-radius:8px;
+  font-size:12.5px;color:var(--dim);text-align:left}
+.wpop-g:hover{background:var(--panel-2);color:var(--text)}
+.wpop-g.on{background:var(--accent-soft);color:var(--accent);font-weight:600}
+.wpop-g svg{width:12px;height:12px;flex:none}
+.wpop-new{display:flex;gap:6px;margin-top:5px}
+.wpop-new .field{flex:1;min-width:0;height:28px;font-size:12px;border-radius:8px}
+.wpop-new .hbtn{height:28px;padding:0 10px;font-size:11.5px;flex:none}
+.wpop-foot{display:flex;align-items:center;gap:6px;margin-top:6px;padding-top:6px;
+  border-top:1px solid var(--border-soft)}
+.wpop-foot .sp{flex:1}
+.wpop-foot .hbtn{height:26px;padding:0 10px;font-size:11.5px}
+.wpop-del{display:inline-flex;align-items:center;gap:5px;height:26px;min-height:26px;
+  padding:0 8px;border-radius:8px;font-size:11.5px;color:var(--faint)}
+.wpop-del:hover{color:var(--up);background:var(--up-soft)}
+.wpop-del svg{width:12px;height:12px}
 
 /* 自选列表行内走势 sparkline */
 #wl-wrap svg.spark{display:block;margin:0 auto;opacity:.9}
@@ -220,6 +251,15 @@ svg{display:block}
 .chip{display:inline-flex;align-items:center;gap:6px;height:28px;padding:0 12px;border-radius:999px;
   border:1px solid var(--border);font-size:12px;color:var(--dim);background:var(--panel);cursor:pointer;white-space:nowrap}
 .chip:hover{color:var(--text)}
+.chip svg{flex:none}
+/* 自选页「新建分组」就地输入态 */
+.chip.wl-newgrp-edit{padding:0 6px 0 10px;gap:5px}
+.chip.wl-newgrp-edit input{width:100px;min-width:0;background:none;border:0;outline:0;
+  font-size:12px;color:var(--text);padding:0}
+.chip.wl-newgrp-edit input::placeholder{color:var(--faint)}
+.chip.wl-newgrp-edit .wl-ok{width:18px;height:18px;min-height:18px;padding:0;border-radius:50%;
+  display:grid;place-items:center;color:var(--accent);background:var(--accent-soft)}
+.chip.wl-newgrp-edit .wl-ok svg{width:11px;height:11px}
 .chip.on{color:var(--accent);border-color:color-mix(in srgb,var(--accent) 45%,transparent);
   background:var(--accent-soft);font-weight:550}
 .field{height:30px;padding:0 10px;background:var(--panel-2);border:1px solid var(--border);
@@ -364,6 +404,16 @@ body.mobile .rcard .cbar{opacity:1}
 /* 少量自选自适应高度不留白；超过 320px 固定限高出滚动条 */
 .wl-list{display:flex;flex-direction:column;max-height:320px;overflow-y:auto;margin:0 -4px;padding:0 4px}
 .wl-list .bempty{min-height:96px;display:flex;flex-direction:column;justify-content:center;text-align:center}
+/* 自选卡内分组胶囊：与自选页同一 wlGroup，切换即同步 */
+.wl-grpbar{display:flex;flex-wrap:wrap;gap:4px;padding:0 2px 6px;margin-bottom:2px;
+  border-bottom:1px solid var(--border-soft);flex:none}
+.wl-gchip{height:20px;min-height:20px;padding:0 8px;border-radius:999px;
+  border:1px solid var(--border);background:var(--panel);font-size:10.5px;color:var(--dim);white-space:nowrap}
+.wl-gchip:hover{color:var(--text);border-color:var(--axis)}
+.wl-gchip.on{color:var(--accent);border-color:color-mix(in srgb,var(--accent) 45%,transparent);
+  background:var(--accent-soft);font-weight:600}
+.wl-nm .wl-g{font-style:normal;color:var(--faint);display:inline-block;max-width:110px;
+  overflow:hidden;text-overflow:ellipsis;white-space:nowrap;vertical-align:bottom}
 .wl-r{display:grid;grid-template-columns:16px minmax(0,1fr) 56px auto auto 16px;align-items:center;gap:8px;
   padding:5px 6px;border-radius:8px;cursor:pointer;font-size:11.5px;position:relative}
 .wl-r:hover{background:var(--panel-2)}
@@ -583,28 +633,35 @@ body.mobile .rcard .cbar{opacity:1}
 .kl-ipanel .iprow:first-child button{color:var(--dim)}
 .kl-ipanel .iprow:first-child button:hover{color:var(--text)}
 
-/* ── 底部导航条（缩略图 + 可拖拽窗口 + 回到最新） ── */
-.kl-nav{position:relative;flex:none;height:44px;margin-top:5px;
-  border-top:1px solid var(--border-soft);overflow:hidden}
-/* 中心日期范围文字（策影同款）：悬浮于缩略图上方居中，不挡拖拽 */
-.kl-nav-time{position:absolute;left:50%;top:50%;transform:translate(-50%,-50%);z-index:5;
-  pointer-events:none;font-family:var(--mono),ui-monospace,monospace;font-size:10.5px;
-  color:var(--dim);background:color-mix(in srgb,var(--panel) 85%,transparent);
-  padding:1px 7px;border-radius:6px;white-space:nowrap}
-.kl-nav-cv{position:absolute;left:52px;right:52px;top:0;bottom:0;width:auto;height:100%;display:block}
-.kl-nav-win{position:absolute;top:0;bottom:0;cursor:grab;
-  background:color-mix(in srgb,var(--accent) 10%,transparent);
-  border-left:1px solid color-mix(in srgb,var(--accent) 65%,transparent);
-  border-right:1px solid color-mix(in srgb,var(--accent) 65%,transparent)}
-.kl-nav-win:hover{background:color-mix(in srgb,var(--accent) 16%,transparent)}
-.kl-nav-btns{position:absolute;left:0;top:0;bottom:0;display:flex;align-items:center;z-index:2}
+/* ── 底部 K 线滚动条（众赢同款）：日期标尺 + 蓝色滑块 + 两端翻页箭头 ──
+   挂在图表容器下沿（画布之外），拖动滑块/点轨道即可平移可见区间 */
+.kl-nav{position:relative;flex:none;height:36px;margin-top:3px;
+  border-top:1px solid var(--border-soft);background:var(--panel)}
+.kl-nav-ruler{position:absolute;left:70px;right:70px;top:3px;height:12px;overflow:hidden;pointer-events:none}
+.kl-nav-ruler span{position:absolute;top:0;transform:translateX(-50%);white-space:nowrap;
+  font-family:var(--mono),ui-monospace,monospace;font-size:9.5px;line-height:12px;color:var(--faint)}
+.kl-nav-track{position:absolute;left:70px;right:70px;bottom:9px;height:6px;border-radius:99px;
+  background:color-mix(in srgb,var(--faint) 15%,transparent);cursor:pointer}
+.kl-nav-win{position:absolute;top:-2px;height:10px;border-radius:99px;cursor:grab;
+  background:color-mix(in srgb,var(--accent) 80%,#1e3a5f);transition:background .12s}
+.kl-nav-win:hover{background:color-mix(in srgb,var(--accent) 55%,#0A84FF)}
+.kl-nav-win:active{cursor:grabbing}
+.kl-nav-btns{position:absolute;left:0;bottom:1px;height:26px;display:flex;align-items:center;gap:3px;z-index:2}
 .kl-nav-btns.r{left:auto;right:0}
-.kl-nav-btns button{width:24px;height:100%;font-size:13px;color:var(--faint);min-height:0}
-.kl-nav-btns button:hover{color:var(--accent);background:var(--panel-2)}
-.kl-nav-latest{position:absolute;left:6px;bottom:4px;padding:2px 8px;border-radius:99px;
-  font-size:10.5px;color:var(--dim);background:color-mix(in srgb,var(--panel) 80%,transparent);
-  border:1px solid var(--border);min-height:0;z-index:2}
-.kl-nav-latest:hover{color:var(--accent);border-color:color-mix(in srgb,var(--accent) 45%,transparent)}
+/* 翻页箭头：底色 + 描边 + 大字号 + 高对比字色，暗色背景下也一眼可见 */
+.kl-nav-btns button{width:30px;height:24px;min-height:0;padding:0;font-size:15px;font-weight:700;line-height:1;
+  display:flex;align-items:center;justify-content:center;cursor:pointer;
+  color:var(--text);background:var(--panel-3);
+  border:1px solid color-mix(in srgb,var(--text) 18%,transparent);border-radius:7px;
+  box-shadow:0 1px 2px rgba(0,0,0,.28)}
+.kl-nav-btns button:hover{color:var(--accent);background:color-mix(in srgb,var(--accent) 12%,var(--panel-2));
+  border-color:color-mix(in srgb,var(--accent) 55%,transparent)}
+.kl-nav-btns button:active{transform:scale(.94)}
+/* 中间胶囊：当前可见区间的自然时长（4个月6天） */
+.kl-nav-time{position:absolute;left:50%;bottom:5px;transform:translateX(-50%);z-index:4;
+  pointer-events:none;font-family:var(--mono),ui-monospace,monospace;font-size:9.5px;
+  color:var(--dim);background:color-mix(in srgb,var(--panel) 88%,transparent);
+  padding:1px 6px;border-radius:5px;white-space:nowrap}
 
 /* ── 十字光标浮动信息卡（紧凑小卡：分组行 + 半透明，少遮挡 K 线） ── */
 .kl-tip{position:absolute;z-index:8;padding:6px 10px 7px;white-space:nowrap;

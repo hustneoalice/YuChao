@@ -13,6 +13,8 @@ import { accumulationSeries } from "../accumulation";
 import { volumeActivitySeries } from "../volume-activity";
 import { trendHistogramSeries } from "../trend-histogram";
 import { strongPullbackSeries } from "../strong-pullback";
+import { volumeAverageSeries } from "../volume-average";
+import { mountVolumeSettings, readVolumeSettings } from "../volume-settings";
 
 /* ── 策影配色（tradingColors） ── */
 const UP = "#EF5350";
@@ -224,6 +226,7 @@ function ensureRegistered(): void {
   } catch { /* 重复注册忽略 */ }
   // 全局 Y 轴模板：覆盖内置 'normal'，成交量轴自动万/亿（策影 config.ts 同款）
   try {
+    registerYAxis({ name: "trend_value", displayValueToText: (value: number) => value.toFixed(2) });
     registerYAxis({
       name: "normal",
       displayValueToText: (value: number, _precision: number) => {
@@ -268,12 +271,10 @@ function ensureRegistered(): void {
       { key: "short", title: "短线量能", type: "line",
         styles: (raw: unknown) => ({ color: ((raw as {data?: {current?: {short?: number}}}).data?.current?.short ?? 0) >= 0 ? "#FF5356" : "#2D9E00" }) },
       { key: "trend", title: "趋势量能", type: "line", styles: () => ({ color: "#25ACFA", size: 1.5 }) },
-      { key: "marker", title: "", type: "text",
-        attrs: (raw: unknown) => ({ text: (raw as {data?: {current?: {signal?: string}}}).data?.current?.signal ?? "" }),
-        styles: () => ({ color: "#FFD54F", size: 10, textBaseline: "bottom" }) },
+      { key: "marker", title: "", type: "line", styles: () => ({ color: "transparent" }) },
     ],
     draw: ({ ctx, chart, indicator, xAxis, yAxis, bounding }) => {
-      const data = indicator.result as { short: number | null }[];
+      const data = indicator.result as { short: number | null; signal: "TL" | "PP" | "DL" | null }[];
       const range = chart.getVisibleRange();
       const zeroY = yAxis.convertToPixel(0);
       ctx.save();
@@ -301,12 +302,49 @@ function ensureRegistered(): void {
           fill(cross, zeroY, x2, y2, b > 0);
         } else fill(x1, y1, x2, y2, (a || b) >= 0);
       }
+      // PP=太阳（极度活跃），TL=闪电（十分活跃），DL=月亮（极度萎缩）。
+      // 原模型以零轴为锚：正量能放下方，负量能放上方。
+      for (let i = Math.max(0, Math.floor(range.from)); i < Math.min(data.length, Math.ceil(range.to) + 1); i++) {
+        const value = data[i];
+        if (!value?.signal) continue;
+        const x = xAxis.convertToPixel(i);
+        const y = Math.max(11, Math.min(bounding.height - 11, zeroY + ((value.short ?? 0) >= 0 ? 12 : -12)));
+        ctx.save();
+        ctx.translate(x, y);
+        if (value.signal === "PP") {
+          ctx.strokeStyle = "#F4AE19";
+          ctx.lineWidth = 2;
+          for (let ray = 0; ray < 12; ray++) {
+            const angle = ray * Math.PI / 6;
+            ctx.beginPath();
+            ctx.moveTo(Math.cos(angle) * 7, Math.sin(angle) * 7);
+            ctx.lineTo(Math.cos(angle) * 10, Math.sin(angle) * 10);
+            ctx.stroke();
+          }
+          const gradient = ctx.createRadialGradient(-2, -2, 1, 0, 0, 7);
+          gradient.addColorStop(0, "#FFF295"); gradient.addColorStop(1, "#F5B21C");
+          ctx.fillStyle = gradient;
+          ctx.beginPath(); ctx.arc(0, 0, 7, 0, Math.PI * 2); ctx.fill();
+        } else if (value.signal === "TL") {
+          ctx.fillStyle = "#FFD64B"; ctx.strokeStyle = "#DDA51F"; ctx.lineWidth = 1;
+          ctx.beginPath(); ctx.moveTo(-2, -10); ctx.lineTo(6, -10);
+          ctx.lineTo(1, -2); ctx.lineTo(7, -2); ctx.lineTo(-5, 11);
+          ctx.lineTo(-1, 2); ctx.lineTo(-7, 2); ctx.closePath(); ctx.fill(); ctx.stroke();
+        } else {
+          const gradient = ctx.createLinearGradient(-9, 0, 6, 0);
+          gradient.addColorStop(0, "#A8ECFF"); gradient.addColorStop(1, "#269ACF");
+          ctx.fillStyle = gradient;
+          ctx.beginPath(); ctx.arc(0, 0, 10, Math.PI / 2, Math.PI * 1.5);
+          ctx.bezierCurveTo(-5, -7, -5, 7, 0, 10); ctx.closePath(); ctx.fill();
+        }
+        ctx.restore();
+      }
       ctx.restore();
-      return false; // 继续由图表绘制轮廓、蓝线和信号文字。
+      return false; // 继续由图表绘制轮廓和蓝线。
     },
   });
   registerIndicator({
-    name: "ZY_TREND_HISTOGRAM", shortName: "趋势柱线·公式版", precision: 2,
+    name: "ZY_TREND_HISTOGRAM", shortName: "趋势柱线·公式版", precision: 2, shouldFormatBigNumber: false,
     calc: list => trendHistogramSeries(list).map(v => ({...v, zero: 0})),
     figures: [
       { key: "short", title: "STICKV", type: "line", styles: (raw: unknown) => {
@@ -336,6 +374,11 @@ function ensureRegistered(): void {
         column(x, 0, v.base, v.base >= 0);
         column(x, v.base, v.short, v.short > v.base);
       }
+      const selected = data[(indicator.extendData as number | undefined) ?? data.length - 1];
+      ctx.font = "12px sans-serif";
+      ctx.textBaseline = "top";
+      ctx.fillStyle = (selected?.short ?? 0) >= (selected?.base ?? 0) ? "#FF5356" : "#2D9E00";
+      ctx.fillText(`STICKV ${selected?.short == null ? "--" : selected.short.toFixed(2)}`, 8, 6);
       ctx.restore();
       return false;
     },
@@ -408,34 +451,31 @@ function ensureRegistered(): void {
       figures: [{ key: "atr", title: "ATR", type: "line", styles: () => ({ color: "#F2C94C" }) }],
     });
   } catch { /* 重复注册忽略 */ }
-  // VOLX 自研成交量（v10 内置 VOL 只认 MA5/MA10，第三参数 40 会被忽略——BOLLX 同款避坑）：
-  // 量柱涨红跌绿 + MA5/MA10/MA40 三条均量线
+  // VOLX 自研成交量：量柱涨红跌绿，两条均量线周期可调。
   try {
     registerIndicator({
       name: "VOLX",
       shortName: "VOL",
       precision: 0,
       shouldFormatBigNumber: true,
-      calc: (kLineDataList) => {
-        const list = kLineDataList as unknown as { volume?: number; open?: number; close?: number }[];
-        const out: { volume: number | null; ma5: number | null; ma10: number | null; ma40: number | null; open?: number; close?: number }[] = [];
-        let s5 = 0, s10 = 0, s40 = 0;
-        for (let i = 0; i < list.length; i++) {
-          const v = list[i].volume ?? 0;
-          s5 += v; s10 += v; s40 += v;
-          if (i >= 5) s5 -= list[i - 5].volume ?? 0;
-          if (i >= 10) s10 -= list[i - 10].volume ?? 0;
-          if (i >= 40) s40 -= list[i - 40].volume ?? 0;
-          out.push({
-            volume: v,
-            ma5: i >= 4 ? s5 / 5 : null,
-            ma10: i >= 9 ? s10 / 10 : null,
-            ma40: i >= 39 ? s40 / 40 : null,
-            // 复制 open/close 到结果项供柱色回调判断涨跌（策影内置 VOL 同款）
-            open: list[i].open, close: list[i].close,
-          });
-        }
-        return out as never;
+      calcParams: [5, 10],
+      shouldUpdate: () => ({ calc: true, draw: true }),
+      calc: (list, indicator) => volumeAverageSeries(list, indicator.calcParams as number[])
+        .map(value => ({ ...value,
+          ma1: (indicator.extendData as boolean[] | undefined)?.[0] === false ? null : value.ma1,
+          ma2: (indicator.extendData as boolean[] | undefined)?.[1] === false ? null : value.ma2,
+        })) as never,
+      draw: ({ ctx, indicator }) => {
+        ctx.save();
+        ctx.font = "11px sans-serif";
+        ctx.textBaseline = "top";
+        indicator.calcParams.forEach((period, i) => {
+          if ((indicator.extendData as boolean[] | undefined)?.[i] === false) return;
+          ctx.fillStyle = i === 0 ? "#FF9F43" : "#4DD0E1";
+          ctx.fillText(`MA${period}`, 8 + i * 70, 6);
+        });
+        ctx.restore();
+        return false;
       },
       figures: [
         {
@@ -450,9 +490,8 @@ function ensureRegistered(): void {
             return { color: NEUTRAL };
           },
         },
-        { key: "ma5", title: "MA5", type: "line", styles: () => ({ color: "#FF9F43", lineWidth: 1 }) },
-        { key: "ma10", title: "MA10", type: "line", styles: () => ({ color: "#4DD0E1", lineWidth: 1 }) },
-        { key: "ma40", title: "MA40", type: "line", styles: () => ({ color: "#AB47BC", lineWidth: 1.5 }) },
+        { key: "ma1", title: "M1", type: "line", styles: () => ({ color: "#FF9F43", size: 1 }) },
+        { key: "ma2", title: "M2", type: "line", styles: () => ({ color: "#4DD0E1", size: 1 }) },
       ],
     });
   } catch { /* 重复注册忽略 */ }
@@ -648,9 +687,9 @@ export const IND_DEFS: IndDef[] = [
   { key: "osc", kc: "OSC", label: "OSC", cat: "mom", where: "sub", desc: "变动率柱（震荡量指标）" },
   { key: "udl", kc: "UDL", label: "UDL", cat: "mom", where: "sub", desc: "引力线（多周期动量合成）" },
   // 量能类
-  { key: "volumeactivity", kc: "ZY_VOLUME_ACTIVITY", label: "量能活跃", cat: "vol", where: "sub", desc: "短线量能红绿填充区域、趋势量能蓝线及TL/PP/DL标记；以最近有效日量/换手率估算固定股本，尚未与原软件核对；指数或缺少数据不计算" },
+  { key: "volumeactivity", kc: "ZY_VOLUME_ACTIVITY", label: "量能活跃", cat: "vol", where: "sub", desc: "短线量能红绿填充、趋势量能蓝线；太阳=极度活跃、闪电=十分活跃、月亮=极度萎缩；以最近有效日量/换手率估算固定股本，尚未与原软件核对；指数或缺少数据不计算" },
   { key: "accumulation", kc: "ZY_ACCUMULATION", label: "主力吸筹", cat: "vol", where: "sub", desc: "众赢安装包公式移植，尚未与原软件逐点核对；紫色柱为价格推导指标，非实际主力资金" },
-  { key: "vol", kc: "VOLX", label: "VOL", cat: "vol", where: "sub", desc: "成交量（5/10/40 日均量线）" },
+  { key: "vol", kc: "VOLX", label: "VOL", cat: "vol", where: "sub", desc: "成交量（两条均量线，周期可设置）" },
   { key: "volfs", kc: "VOLFS", label: "VOLFS", cat: "vol", where: "sub", desc: "分时逐分钟量柱（分钟价涨红/跌绿，通达信分时同款）" },
   { key: "obv", kc: "OBV", label: "OBV", cat: "vol", where: "sub", desc: "能量潮（量能累积方向）" },
   { key: "vr", kc: "VR", label: "VR", cat: "vol", where: "sub", desc: "成交量比率" },
@@ -705,15 +744,15 @@ export interface RangeFund {
 
 export interface KlineChartHandle {
   chart: Chart;
-  setData: (bars: Bar[], keepView?: boolean, floatShares?: number | null) => void;
+  setData: (bars: Bar[], keepView?: boolean, floatShares?: number | null, focusDate?: string) => void;
   /** 主图多选叠加：增量增删，不动已叠加的同名指标 */
   setMain: (inds: MainKey[]) => void;
   /** 图内右上角指标图例（MA/BOLL/操盘趋势，色块+名称；多面板时每实例一份） */
   drawLegend: (inds: MainKey[]) => void;
   /** 副图多选：每个指标一个窗格，高度均分（策影 autoLayout 同款） */
   setSub: (inds: SubKey[]) => void;
-  /** 当前周期（d/w/m）：决定十字光标卡片的标题形态 */
-  setPeriod: (p: "t" | "60" | "d" | "w" | "m") => void;
+  /** 当前周期（d/w/m/q）：决定十字光标卡片的标题形态 */
+  setPeriod: (p: "t" | "60" | "d" | "w" | "m" | "q") => void;
   /** 智能高度：按容器高重分主/副图（3.6:1，策影同款；开关关时副图固定 100px） */
   applyHeights: () => void;
   /** 缩放：factor>1 放大（K 线变宽），等价策影工具条 ±（barSpace ×1.25 / ×0.8） */
@@ -837,7 +876,7 @@ function periodStyles(p: TipPeriod): ReturnType<typeof styles> {
 }
 
 /* ── 十字光标浮动信息卡（周期区分标题） ── */
-type TipPeriod = "t" | "60" | "d" | "w" | "m";
+type TipPeriod = "t" | "60" | "d" | "w" | "m" | "q";
 
 /** 量/额：万以下原值，万 → 亿（策影 formatVolumeValue 口径 + 手单位） */
 function fmtWanYi(v: number, unit = ""): string {
@@ -852,6 +891,10 @@ function tipTitle(date: string, p: TipPeriod): string {
   if (p === "60") return `${date} · 60分钟`;
   if (p === "m") return `${date.slice(0, 7)} · 月线`;
   if (p === "w") return `${date} 当周 · 周线`;
+  if (p === "q") {
+    const q = Math.floor((Number(date.slice(5, 7)) - 1) / 3) + 1;
+    return `${date.slice(0, 4)}Q${q} · 季线`;
+  }
   return `${date} · 北京时间`;
 }
 
@@ -932,7 +975,19 @@ export function mountKline(el: HTMLElement): KlineChartHandle {
     legend.style.display = parts.length ? "flex" : "none";
   };
 
+  let trendCrosshairValueVisible = false;
   const onCross = (...args: unknown[]) => {
+    const crosshair = args[0] as { paneId?: string } | null;
+    const showTrendValue = !!crosshair?.paneId && chart.getIndicators({ paneId: crosshair.paneId })
+      .some(indicator => indicator.name === "ZY_TREND_HISTOGRAM");
+    if (showTrendValue !== trendCrosshairValueVisible) {
+      trendCrosshairValueVisible = showTrendValue;
+      chart.setStyles({ crosshair: { horizontal: { text: {
+        show: showTrendValue, color: cssv("--text") || "#F5F5F7", size: 12,
+        backgroundColor: cssv("--panel-3") || "#2D2D31", borderSize: 1,
+        borderColor: cssv("--text-muted") || "#888", borderRadius: 4,
+      } } } });
+    }
     // 框选模式下已有区间卡：不再叠一张十字光标卡（两张同风格浮卡会互相打架）
     if (rangeMode && lastSel) { tip.style.display = "none"; return; }
     const ch = args[0] as { x?: number; y?: number } | null;
@@ -941,6 +996,7 @@ export function mountKline(el: HTMLElement): KlineChartHandle {
     // v10 crosshair 事件只带坐标，经 convertFromPixel 反查数据索引（策影同款）
     const hit = chart.convertFromPixel([{ x: ch.x }]) as unknown;
     const di = (Array.isArray(hit) ? hit[0] : hit)?.dataIndex as number | undefined;
+    chart.overrideIndicator({ name: "ZY_TREND_HISTOGRAM", extendData: di ?? list.length - 1 });
     const bar = di != null ? list[di] : undefined;
     if (!bar) { tip.style.display = "none"; return; }
     const prev = di! > 0 ? list[di! - 1] : undefined;
@@ -1121,103 +1177,142 @@ export function mountKline(el: HTMLElement): KlineChartHandle {
   el.addEventListener("mousemove", onSelMove, true);
   el.addEventListener("mouseup", onSelUp, true);
 
-  /* ── 底部导航条（策影同款：缩略图 + 可见窗口日期范围文字 + 拖拽窗口平移 + 回到最新） ── */
+  /* ── 底部 K 线滚动条（众赢同款）：日期标尺 + 滑块窗口 + 两端翻页箭头 ──
+   *  · 滑块拖动 = 平移可见区间，点轨道任意位置 = 直接跳到该处
+   *  · 中间胶囊显示可见区间的自然时长（如「4个月6天」）
+   *  必须挂到面板(.klp / .sd-chart 父级)下沿：klinecharts 的 canvas 是 100% 高，
+   *  放在图表容器内会被挤出可视区 */
   const nav = document.createElement("div");
   nav.className = "kl-nav";
   nav.innerHTML =
+    `<div class="kl-nav-ruler"></div>` +
     `<div class="kl-nav-btns"><button data-j="first" title="跳到最早">⇤</button>` +
     `<button data-j="prev" title="向前一页">‹</button></div>` +
-    `<canvas class="kl-nav-cv"></canvas>` +
-    `<div class="kl-nav-win" title="拖动调整可见范围"><i></i><b></b></div>` +
-    `<span class="kl-nav-time"></span>` +
+    `<div class="kl-nav-track"><div class="kl-nav-win" title="拖动平移可见区间"></div></div>` +
     `<div class="kl-nav-btns r"><button data-j="next" title="向后一页">›</button>` +
     `<button data-j="last" title="回到最新">⇥</button></div>` +
-    `<button class="kl-nav-latest" title="回到最新">最新 ›</button>`;
-  el.appendChild(nav);
-  const navCv = nav.querySelector("canvas")!;
+    `<span class="kl-nav-time"></span>`;
+  (el.parentElement ?? el).appendChild(nav);
+  const navRuler = nav.querySelector(".kl-nav-ruler") as HTMLElement;
+  const navTrack = nav.querySelector(".kl-nav-track") as HTMLElement;
   const navWin = nav.querySelector(".kl-nav-win") as HTMLElement;
   const navTime = nav.querySelector(".kl-nav-time") as HTMLElement;
+
   // 快速跳转（策影 navJump 同款：first / ±0.8 页 / last）
+  // klinecharts 的 scrollToDataIndex(idx) 是把第 idx 根贴到「右边界」，所以翻页锚点要用右边界索引
   nav.addEventListener("click", (e) => {
     const b = (e.target as HTMLElement).closest<HTMLButtonElement>("button[data-j]");
     if (!b) return;
     const list = chart.getDataList();
     const r = chart.getVisibleRange?.() as { from: number; to: number } | undefined;
     if (!list.length || !r) return;
-    const vis = r.to - r.from;
+    const vis = Math.max(1, Math.round(r.to - r.from));
+    const right = Math.max(0, Math.round(r.to) - 1);
     try {
       if (b.dataset.j === "first") chart.scrollToDataIndex(0, 0);
       else if (b.dataset.j === "last") chart.scrollToRealTime(0);
-      else if (b.dataset.j === "prev") chart.scrollToDataIndex(Math.max(0, Math.round(r.from - vis * 0.8)), 0);
-      else if (b.dataset.j === "next") chart.scrollToDataIndex(Math.min(Math.max(0, list.length - vis), Math.round(r.from + vis * 0.8)), 0);
+      else if (b.dataset.j === "prev") chart.scrollToDataIndex(Math.max(0, Math.round(right - vis * 0.8)), 0);
+      else if (b.dataset.j === "next") chart.scrollToDataIndex(Math.min(list.length - 1, Math.round(right + vis * 0.8)), 0);
     } catch { /* 忽略 */ }
   });
 
-  /** 画全量 close 缩略线（涨跌分段染色），并按可见区间刷新窗口位置 */
-  const navDraw = () => {
-    const list = chart.getDataList() as { close: number }[];
-    const w = navCv.clientWidth || 1, h = navCv.clientHeight || 1;
-    const dpr = window.devicePixelRatio || 1;
-    navCv.width = Math.round(w * dpr); navCv.height = Math.round(h * dpr);
-    const ctx = navCv.getContext("2d")!;
-    ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
-    ctx.clearRect(0, 0, w, h);
-    navCv.style.display = list.length > 1 ? "block" : "none";
-    if (list.length > 1) {
-      let mn = Infinity, mx = -Infinity;
-      for (const x of list) { if (x.close < mn) mn = x.close; if (x.close > mx) mx = x.close; }
-      const X = (i: number) => (i / (list.length - 1)) * w;
-      const Y = (v: number) => h - 5 - ((v - mn) / (mx - mn || 1)) * (h - 10);
-      ctx.lineWidth = 1;
-      const up = chartUp(), dn = chartDown();
-      for (let i = 1; i < list.length; i++) {
-        ctx.strokeStyle = list[i].close >= list[i - 1].close ? up : dn;
-        ctx.beginPath(); ctx.moveTo(X(i - 1), Y(list[i - 1].close)); ctx.lineTo(X(i), Y(list[i].close)); ctx.stroke();
-      }
+  /** 可见区间时长：同日分钟线用「X小时Y分」，日线及以上按自然日历差（年 > 月 > 天） */
+  const navSpan = (s0: string, s1: string, n: number): string => {
+    const a = new Date(s0.replace(" ", "T")), b = new Date(s1.replace(" ", "T"));
+    if (isNaN(+a) || isNaN(+b)) return `${n} 根`;
+    if (s0.includes(" ") && s1.includes(" ") && a.toDateString() === b.toDateString()) {
+      const mins = Math.max(1, Math.round((+b - +a) / 60000));
+      return mins >= 60 ? `${Math.floor(mins / 60)}小时${mins % 60}分` : `${mins}分`;
     }
-    navUpdateWin();
+    let y = b.getFullYear() - a.getFullYear();
+    let m = b.getMonth() - a.getMonth();
+    let d = b.getDate() - a.getDate();
+    if (d < 0) { m -= 1; d += new Date(b.getFullYear(), b.getMonth(), 0).getDate(); }
+    if (m < 0) { y -= 1; m += 12; }
+    if (y > 0) return `${y}年${m}个月`;
+    if (m > 0) return `${m}个月${d}天`;
+    return d > 0 ? `${d}天` : `${n} 根`;
   };
+
+  /** 日期标尺：按轨道宽度均分 3~8 个刻度；同日分钟线标 HH:MM，其余标 YYYY/MM */
+  const navRulerDraw = (list: { date?: string }[]) => {
+    navRuler.innerHTML = "";
+    const w = navTrack.clientWidth;
+    if (!w || list.length < 2) return;
+    const s0 = list[0]?.date || "", s1 = list[list.length - 1]?.date || "";
+    const intraday = s0.includes(" ") && s0.slice(0, 10) === s1.slice(0, 10);
+    const n = Math.max(3, Math.min(8, Math.floor(w / 120)));
+    for (let k = 0; k < n; k++) {
+      const raw = list[Math.round((k / (n - 1)) * (list.length - 1))]?.date || "";
+      if (raw.length < 7) continue;
+      const s = document.createElement("span");
+      s.textContent = intraday && raw.includes(" ")
+        ? raw.slice(11, 16)
+        : `${raw.slice(0, 4)}/${raw.slice(5, 7)}`;
+      if (k === 0) { s.style.left = "0"; s.style.transform = "none"; }
+      else if (k === n - 1) { s.style.left = "auto"; s.style.right = "0"; s.style.transform = "none"; }
+      else s.style.left = `${(k / (n - 1)) * 100}%`;
+      navRuler.appendChild(s);
+    }
+  };
+
+  /** 按可见区间刷新滑块位置/宽度 + 中间时长胶囊 */
   const navUpdateWin = () => {
-    const list = chart.getDataList() as { close: number; date?: string }[];
+    const list = chart.getDataList() as { date?: string }[];
     const r = chart.getVisibleRange?.() as { from: number; to: number } | undefined;
     if (!list.length || !r) return;
     const L = list.length;
     const from = Math.max(0, Math.floor(r.from)), to = Math.min(L, Math.ceil(r.to));
-    // 窗口定位相对缩略图画布区（两侧有跳转按钮占位）
-    const cvL = navCv.offsetLeft, cvW = navCv.clientWidth;
-    navWin.style.left = cvL + (from / L) * cvW + "px";
-    navWin.style.width = Math.max(2, ((to - from) / L) * cvW) + "px";
-    // 中心日期范围文字（策影同款）：跨度 ≥3 年用 YY/MM 紧凑格式，否则 YYYY-MM-DD；
-    // 全量数据范围挂 nav 条 title（悬停可见「2022-03-01 ~ 2026-10-30 · 共 4 年 8 月」）
+    const cnt = Math.max(1, to - from);
+    navWin.style.left = `${(from / L) * 100}%`;
+    navWin.style.width = `${Math.max(2, (cnt / L) * 100)}%`;
     const d = (i: number) => list[Math.max(0, Math.min(L - 1, i))]?.date || "";
     const s0 = d(from), s1 = d(to - 1);
     if (s0 && s1) {
-      const spanYears = (new Date(s1).getTime() - new Date(s0).getTime()) / 31536e6;
-      navTime.textContent = spanYears >= 3 ? `${s0.slice(2, 7)} ~ ${s1.slice(2, 7)}`
-        : s0.includes(" ") ? `${s0.slice(11, 16)} ~ ${s1.slice(11, 16)}` : `${s0} ~ ${s1}`;
-      const years = Math.floor(spanYears), months = Math.round((spanYears - years) * 12);
-      nav.title = `全量 ${list[0]?.date ?? s0} ~ ${list[L - 1]?.date ?? s1}` +
-        (years > 0 ? ` · 共 ${years} 年 ${months} 月` : "");
-    } else navTime.textContent = "";
+      navTime.textContent = navSpan(s0, s1, cnt);
+      navTime.title = `${s0} ~ ${s1} · ${cnt} 根`;
+      nav.title = `全量 ${list[0]?.date ?? s0} ~ ${list[L - 1]?.date ?? s1}`;
+    }
+  };
+  const navDraw = () => {
+    const list = chart.getDataList() as { date?: string }[];
+    nav.style.display = list.length > 1 ? "" : "none";
+    navRulerDraw(list);
+    navUpdateWin();
   };
   const onVisChange = () => { requestAnimationFrame(navUpdateWin); };
   try { chart.subscribeAction("onVisibleRangeChange", onVisChange as never); } catch { /* 忽略 */ }
 
-  // 窗口拖拽：只平移不缩放（策影同款），pointer capture 跟手
-  const navDrag = { x: 0, from: 0, count: 0 };
+  // 点轨道空白处：把可见窗口中心对到点击位置（右边界 = 中心 + 半窗）
+  navTrack.addEventListener("pointerdown", (e) => {
+    if ((e.target as HTMLElement).closest(".kl-nav-win")) return;
+    const list = chart.getDataList();
+    const r = chart.getVisibleRange?.() as { from: number; to: number } | undefined;
+    const rect = navTrack.getBoundingClientRect();
+    if (!list.length || !r || !rect.width) return;
+    const cnt = Math.max(1, Math.round(r.to - r.from));
+    const f = Math.max(0, Math.min(1, (e.clientX - rect.left) / rect.width));
+    const right = Math.round(f * list.length + cnt / 2) - 1;
+    try { chart.scrollToDataIndex(Math.max(0, Math.min(list.length - 1, right)), 0); } catch { /* 忽略 */ }
+    navUpdateWin();
+  });
+
+  // 滑块拖拽：只平移不缩放（策影同款），pointer capture 跟手
+  const navDrag = { x: 0, right: 0 };
   navWin.addEventListener("pointerdown", (e) => {
     const r = chart.getVisibleRange?.() as { from: number; to: number } | undefined;
     if (!r) return;
-    navDrag.x = e.clientX; navDrag.from = r.from; navDrag.count = r.to - r.from;
+    navDrag.x = e.clientX; navDrag.right = Math.max(0, Math.round(r.to) - 1);
     navWin.setPointerCapture(e.pointerId);
     navWin.style.cursor = "grabbing";
   });
   navWin.addEventListener("pointermove", (e) => {
     if (!navWin.hasPointerCapture?.(e.pointerId)) return;
     const L = chart.getDataList().length;
-    if (!L || !navCv.clientWidth) return;
-    const nf = Math.max(0, Math.min(L - navDrag.count,
-      navDrag.from + ((e.clientX - navDrag.x) / navCv.clientWidth) * L));
+    const w = navTrack.getBoundingClientRect().width;
+    if (!L || !w) return;
+    const nf = Math.max(0, Math.min(L - 1,
+      navDrag.right + ((e.clientX - navDrag.x) / w) * L));
     try { chart.scrollToDataIndex(Math.round(nf), 0); } catch { /* 忽略 */ }
     navUpdateWin();
   });
@@ -1227,9 +1322,6 @@ export function mountKline(el: HTMLElement): KlineChartHandle {
   };
   navWin.addEventListener("pointerup", navDragEnd);
   navWin.addEventListener("pointercancel", navDragEnd);
-  nav.querySelector(".kl-nav-latest")!.addEventListener("click", () => {
-    try { chart.scrollToRealTime(0); } catch { /* 忽略 */ }
-  });
 
   /* ── 单根选中（点击蜡烛）：图上高亮该根，行情页把右列资金卡切到该交易日 ──
    *  · 用 v10 原生 onCandleBarClick（内部已区分「点击」与「拖拽平移」，不用自己判位移）
@@ -1329,11 +1421,13 @@ export function mountKline(el: HTMLElement): KlineChartHandle {
     } catch { /* 忽略 */ }
   };
 
+  const volumeSettings = mountVolumeSettings(chart, el);
+
   let dataLen = 0;                     // 上一次灌入的 bar 数（判断「增量刷新」还是「换数据源」）
 
   const handle: KlineChartHandle = {
     chart,
-    setData: (bars: Bar[], keepView = false, floatShares: number | null = null) => {
+    setData: (bars: Bar[], keepView = false, floatShares: number | null = null, focusDate?: string) => {
       const list = bars.map((b) => ({
         timestamp: toTs(b.date), open: b.open, high: b.high, low: b.low,
         close: b.close, volume: b.volume ?? 0, amount: b.amount ?? 0,
@@ -1354,7 +1448,9 @@ export function mountKline(el: HTMLElement): KlineChartHandle {
       const recoverable = sameScale && !!vis && vis.from >= 0 && vis.to <= list.length;
       // v10 的 scrollToDataIndex 把目标索引对到视口**右端**（nav 翻页也这么用），
       // 所以恢复视图要传右边缘那根，而不是 from
-      const keepIdx = recoverable ? Math.max(0, Math.round(vis!.to) - 1) : null;
+      const focusIndex = focusDate ? list.findIndex(bar => bar.date === focusDate) : -1;
+      const keepIdx = focusIndex >= 0 ? Math.min(list.length - 1, focusIndex + 8)
+        : recoverable ? Math.max(0, Math.round(vis!.to) - 1) : null;
       dataLen = list.length;
       tip.style.display = "none";                          // 数据重载时收起旧卡片
       // v10 无 applyNewData，经 DataLoader 一次性回填（策影同款）
@@ -1372,7 +1468,8 @@ export function mountKline(el: HTMLElement): KlineChartHandle {
       // 否则恢复动作会被后续的加载回调覆盖（视图又跳回默认位置）
       if (keepIdx != null) window.setTimeout(() => {
         try { chart.scrollToDataIndex(keepIdx, 0); } catch { /* 忽略 */ }
-        drawPick();
+        if (focusIndex >= 0) pickAtIndex(focusIndex);
+        else drawPick();
       }, 160);
     },
     setMain(inds: MainKey[]) {
@@ -1416,10 +1513,11 @@ export function mountKline(el: HTMLElement): KlineChartHandle {
         const d = IND_BY_KEY[k];
         if (!d || d.where !== "sub") continue;
         if (d.key === "vol") {
-          // 自研 VOLX：MA5/MA10/MA40 三条均量线（v10 内置 VOL 忽略第三参数）；
+          // 自研 VOLX：两条可调周期均量线；
           // 禁用大数格式化，轴/图例文本走万/亿；量柱红绿走注册内的 figure styles
           chart.createIndicator({
             name: "VOLX", shouldFormatBigNumber: false,
+            calcParams: readVolumeSettings().periods, extendData: readVolumeSettings().visible,
             styles: { bars: [{ upColor: up, downColor: dn, noChangeColor: NEUTRAL }] },
           } as never, false);
         } else if (d.key === "macd") {
@@ -1433,12 +1531,17 @@ export function mountKline(el: HTMLElement): KlineChartHandle {
         } else if (d.key === "sixseg") {
           // 六分段趋势（K线下方叠加）：60 窗口分位 1..6 段台阶线
           chart.createIndicator({ name: "SIXSEG", precision: 0 } as never, false);
+        } else if (d.key === "trendhistogram") {
+          const id = chart.createIndicator({ name: d.kc } as never, false);
+          const indicator = chart.getIndicators({ id: id! })[0];
+          if (indicator) chart.overrideYAxis({ paneId: indicator.paneId, id: indicator.yAxisId, name: "trend_value" });
         } else {
           chart.createIndicator({ name: d.kc } as never, false);
         }
       }
       // 窗格高度交给智能高度统一分配（含 candle_pane）
       applyHeights();
+      requestAnimationFrame(volumeSettings.sync);
     },
     setPeriod(p: TipPeriod) {
       period = p;
@@ -1484,7 +1587,7 @@ export function mountKline(el: HTMLElement): KlineChartHandle {
     retheme() { chart.setStyles(periodStyles(period)); requestAnimationFrame(navDraw); },
     resize() {
       chart.resize();
-      requestAnimationFrame(() => { applyHeights(); navDraw(); drawPick(); });
+      requestAnimationFrame(() => { applyHeights(); volumeSettings.sync(); navDraw(); drawPick(); });
     },
     destroy() {
       try { chart.unsubscribeAction("onCrosshairChange", onCross as never); } catch { /* 忽略 */ }
@@ -1497,6 +1600,7 @@ export function mountKline(el: HTMLElement): KlineChartHandle {
       el.removeEventListener("mouseup", onSelUp, true);
       sel.remove();
       selTip.remove();
+      volumeSettings.destroy();
       tip.remove();
       legend.remove();
       pick.remove();

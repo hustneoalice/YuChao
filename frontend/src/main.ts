@@ -28,7 +28,7 @@ function goPage(p: string): void {
   if (p === "market") renderKline();
   if (p === "panorama") loadPanorama();
   if (p === "stock") ensureStockPage();                        // 菜单直达：无标的时空态引导
-  if (p === "watchlist" && !loaded.watchlist) { loaded.watchlist = true; renderWatchlist(); }
+  if (p === "watchlist") renderWatchlist();   // 每次进入重画：与其他入口（收藏浮层/卡片）的分组选择保持同步
   if (p === "targets") loadTargets();
   if (p === "sectors" && !loaded.sectors) { loaded.sectors = true; void loadSectors(); }
   if (p === "corepicks" && !loaded.corepicks) { loaded.corepicks = true; initCorepicks(); }

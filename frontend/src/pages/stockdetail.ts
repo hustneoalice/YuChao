@@ -1,6 +1,6 @@
 /* 个股详情页（众赢个股详情布局同源，yuchao 风格）：
  * 左多周期 K 线（60分/日/周/月，mountKline 独立实例）+ 右盘口关键网格。
- * 数据：/market/kline 日线（周/月前端聚合，与行情页 aggDaily 同口径）+
+ * 数据：/market/kline 日线（周/月按自然周期前端聚合，与行情页 aggDaily 同口径）+
  * /market/snapshot_one（盘口网格：买卖一/内外盘/涨跌停/量比振幅/市值，
  * market_snapshot 派生零上游）+ /market/quote（估值/资金流，失败不阻断）。
  * P2+ 预留：五档全档 / 逐笔成交 / 委比委差，待单票五档采集落地后补位。 */
@@ -11,7 +11,6 @@ import { mountKline, type KlineChartHandle } from "./kline";
 import { openWatchPanel } from "../watch";
 
 type SDPeriod = "60" | "d" | "w" | "m";
-const P_N: Record<SDPeriod, number> = { "60": 1, d: 1, w: 5, m: 20 };
 
 let cur: { symbol: string; name: string } | null = null;
 let kl: KlineChartHandle | null = null;
@@ -49,8 +48,7 @@ async function loadAll(): Promise<void> {
 
 function barsFor(p: SDPeriod): Bar[] {
   if (p === "60") return m60 ?? [];
-  const n = P_N[p];
-  return n === 1 ? daily : aggDaily(daily, n);
+  return p === "d" ? daily : aggDaily(daily, p);
 }
 
 async function switchPeriod(p: SDPeriod): Promise<void> {

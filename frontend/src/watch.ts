@@ -1,45 +1,43 @@
 /* 加入自选 + 分组管理面板（modal-watch）：
-   主流做法（同花顺/雪球）——star 一键加入默认分组；面板内单选分组 / 新建分组 / 移出自选。
+   主流做法（同花顺/雪球）——star 一键加入默认分组；面板内多选分组 / 新建分组 / 移出自选。
    供行情页工具栏 star、核心标明细弹窗等所有「加自选」入口复用。
    变更走 store（emit）→ 左侧自选页、自选股卡片自动同步。 */
 import { esc } from "./fmt";
-import { addWatch, getState, isWatched, moveWatchGroup, removeWatch } from "./store";
+import { addWatch, addWatchGroup, allWatchGroups, getState, isWatched, removeWatch, setWatchGroups } from "./store";
 import { closeModals, openModal, toast } from "./ui";
 
 let cur: { symbol: string; name: string } | null = null;
-let picked = "默认"; // 面板当前选中的分组
+let picked: string[] = ["默认"];   // 面板当前选中的分组（多选，一只股票可属于多个组）
 
 function allGroups(): string[] {
-  const gs = Array.from(new Set(getState().watchlist.map((w) => w.group || "默认")));
-  return ["默认", ...gs.filter((g) => g !== "默认")];
+  return allWatchGroups();
 }
 
 function drawPanel(): void {
   if (!cur) return;
   const watched = isWatched(cur.symbol);
-  const w = getState().watchlist.find((x) => x.symbol === cur!.symbol);
-  if (watched) picked = w?.group || "默认";
   const list = allGroups();
-  if (watched && w && !list.includes(w.group)) list.push(w.group);
   document.getElementById("wm-title")!.textContent = watched ? "自选分组" : "加入自选";
   document.getElementById("wm-stock")!.innerHTML =
-    `<b>${cur.name}</b> <span class="num">${cur.symbol}</span> · 选择分组`;
+    `<b>${cur.name}</b> <span class="num">${cur.symbol}</span> · 选择分组（可多选）`;
   document.getElementById("wm-groups")!.innerHTML = list.map((g) =>
-    `<div class="wm-g${picked === g ? " on" : ""}" data-g="${esc(g)}"><span>${esc(g)}</span>${picked === g ? "<i></i>" : ""}</div>`).join("");
+    `<div class="wm-g${picked.includes(g) ? " on" : ""}" data-g="${esc(g)}"><span>${esc(g)}</span>${picked.includes(g) ? `<span class="wm-tick">${esc("✓")}</span>` : ""}</div>`).join("");
   document.querySelectorAll<HTMLElement>("#wm-groups .wm-g").forEach((el) =>
     el.addEventListener("click", () => {
-      picked = el.dataset.g!;
+      const g = el.dataset.g!;
+      picked = picked.includes(g) ? picked.filter((x) => x !== g) : [...picked, g];
+      if (!picked.length) picked = ["默认"];    // 至少保留一个分组
       (document.getElementById("wm-new") as HTMLInputElement).value = "";
       drawPanel();
     }));
   (document.getElementById("wm-remove") as HTMLElement).hidden = !watched;
 }
 
-/** 打开「加入自选 / 分组管理」面板（已自选 → 选中其所在分组） */
+/** 打开「加入自选 / 分组管理」面板（已自选 → 勾选其所在全部分组） */
 export function openWatchPanel(symbol: string, name: string): void {
   cur = { symbol, name: name || symbol };
   const w = getState().watchlist.find((x) => x.symbol === symbol);
-  picked = w ? (w.group || "默认") : "默认";
+  picked = w?.groups.length ? [...w.groups] : ["默认"];
   (document.getElementById("wm-new") as HTMLInputElement).value = "";
   drawPanel();
   closeModals();              // 可能从其他弹窗（核心标明细）进入：先关避免叠加
@@ -51,14 +49,16 @@ export function initWatchPanel(): void {
   ok.addEventListener("click", () => {
     if (!cur) return;
     const custom = (document.getElementById("wm-new") as HTMLInputElement).value.trim();
-    const g = custom || picked || "默认";
+    if (custom) addWatchGroup(custom);   // 新建的空分组也要进注册表，避免随股票移出而消失
+    let gs = custom ? [...picked, custom] : [...picked];
+    gs = Array.from(new Set(gs));
     if (isWatched(cur.symbol)) {
-      const w = getState().watchlist.find((x) => x.symbol === cur!.symbol);
-      if (w && w.group !== g) { moveWatchGroup(cur.symbol, g); toast(`已移入「${g}」`); }
-      else closeModals();
+      setWatchGroups(cur.symbol, gs);
+      toast(`分组已更新 · ${gs.join(" / ")}`);
     } else {
-      addWatch(cur.symbol, cur.name, g);
-      toast(`已加入自选 · ${g}`);
+      addWatch(cur.symbol, cur.name, gs[0] || "默认");
+      setWatchGroups(cur.symbol, gs);
+      toast(`已加入自选 · ${gs.join(" / ")}`);
     }
     closeModals();
   });

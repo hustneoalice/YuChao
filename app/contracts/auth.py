@@ -71,7 +71,8 @@ class PrefsOut(BaseModel):
 class WatchItem(BaseModel):
     symbol: str = Field(..., max_length=16)
     name: str = ""
-    group: str = "默认"
+    group: str = "默认"                      # 兼容旧字段：取 groups 首个
+    groups: list[str] = Field(default_factory=list)   # 多分组（一只股票可属于多个组）
     ts: Optional[str] = None                 # ISO 时间（None 则服务端补）
 
 

@@ -59,7 +59,9 @@ TASKS: tuple[dict, ...] = (
      "description": "16:50 基于最新估值截面重建全市场 PE 分位与行业中位"},
     {"kind": "kline_update", "label": "K 线增量",
      "fn": "app.updater.collectors.kline:update_kline",
-     "description": "17:00 腾讯 fqkline 日线增量 → daily_ohlcv（东财备用）"},
+     "description": "17:00 腾讯 fqkline 日线增量（东财备用）→ daily_ohlcv；"
+                    "目标集 = 个股 + fund_universe 场内基金（ETF/LOF/REIT，"
+                    "新进标的 3000 根建底仓）"},
     {"kind": "financials", "label": "财务数据",
      "fn": "app.updater.collectors.financials:update_financials",
      "freshness": {"log": True},
