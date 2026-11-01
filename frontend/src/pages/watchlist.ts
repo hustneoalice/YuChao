@@ -7,12 +7,34 @@ import { toast, openModal, closeModals } from "../ui";
 import { stockSearch, type StockSearchHandle } from "../searchbox";
 import { refreshSparksIn, sparkSvg } from "../sparks";
 import { createPager, slicePage, type Pager } from "../pager";
+import { createDataTable, type DataTable, type DataTableCol } from "../table";
 
 let filter: "all" | "up" | "down" = "all";
+type WatchItem = { symbol: string; name: string; group: string; ts: number };
 let wlPager: Pager | null = null;
+let wlTbl: DataTable<WatchItem> | null = null;
 let wlReset = false;
+const priceCache = new Map<string, number>();
 const chgCache = new Map<string, number>();
 const amtCache = new Map<string, number>();
+
+const WL_COLS: DataTableCol<WatchItem>[] = [
+  { label: "#", width: 34, mono: true, render: (_w, i) => `<span style="color:var(--faint)">${i + 1}</span>` },
+  { label: "代码", mono: true, sort: "symbol", render: (w) => w.symbol },
+  { label: "名称", sort: "name", render: (w) => `<span style="font-weight:600">${esc(w.name)}</span>` },
+  { label: "现价", num: true, sort: (w) => priceCache.get(w.symbol) ?? null,
+    render: (w) => fmt(priceCache.get(w.symbol) ?? 0) },
+  { label: "涨跌幅", num: true, sort: (w) => chgCache.get(w.symbol) ?? null, render: (w) => {
+      const ch = chgCache.get(w.symbol) ?? 0;
+      return `<span class="${ch >= 0 ? "up" : "down"}">${fmtChg(ch)}%</span>`; } },
+  { label: "走势", num: true, render: (w) => sparkSvg(w.symbol, 72, 22) },
+  { label: "成交额", num: true, sort: (w) => amtCache.get(w.symbol) ?? null,
+    render: (w) => `<span style="color:var(--faint)">${fmtYi(amtCache.get(w.symbol) ?? null, 1)}</span>` },
+  { label: "信号", render: () => `<span class="tag p1">看盘</span>` },
+  { label: "分组", sort: "group", render: (w) => `<span style="font-size:11.5px;color:var(--dim)">${esc(w.group)}</span>` },
+  { label: "", width: 52, render: (w) =>
+      `<button class="icbtn" data-del="${w.symbol}" title="移除" style="width:26px;height:26px">${ic("trash", 13)}</button>` },
+];
 
 function drawChips(): void {
   const wl = getState().watchlist;
@@ -35,10 +57,10 @@ export async function fetchChg(symbols: string[]): Promise<void> {
     todo.map(async (s) => ({ s, q: await marketApi.quote(s) })));
   for (const r of results) {
     if (r.status === "fulfilled") {
+      priceCache.set(r.value.s, r.value.q.close ?? 0);
       chgCache.set(r.value.s, r.value.q.pct_chg ?? 0);
       amtCache.set(r.value.s, r.value.q.amount ?? 0);
-      document.getElementById("wl-price-" + r.value.s) &&
-        renderRows(); // 简单做法：任一到达即重绘
+      renderRows(); // 简单做法：任一到达即重绘（表格重建后直接吃缓存）
     }
   }
 }
@@ -53,47 +75,32 @@ function renderRows(reset = false): void {
   document.getElementById("wl-title")!.textContent = !g || g === "全部" ? "全部自选" : g;
   document.getElementById("wl-count")!.textContent = `共 ${rows.length} 只`;
   if (!wlPager) wlPager = createPager(document.getElementById("wl-pager")!, "watchlist", renderRows);
+  if (!wlTbl) wlTbl = createDataTable(document.getElementById("wl-wrap")!, WL_COLS, {
+    onRow: (w, ev) => {
+      const del = (ev.target as HTMLElement).closest("[data-del]") as HTMLElement | null;
+      if (del) {                                   // 行内移除按钮
+        removeWatch(del.dataset.del!);
+        toast("已移出自选");
+        return;
+      }
+      document.dispatchEvent(new CustomEvent("yc:open-stock", {
+        detail: { symbol: w.symbol, name: w.name, from: { page: "watchlist", label: "自选股" } } }));
+    },
+  });
   if (wlReset) { wlPager.reset(); wlReset = false; }
   wlPager.update(rows.length);
   const start = (wlPager.page - 1) * wlPager.size;
-  const pageRows = slicePage(wlPager, rows);
-  const body = document.getElementById("wl-body")!;
-  body.innerHTML = pageRows.map((w, i) => {
-    const ch = chgCache.get(w.symbol) ?? 0;
-    const up = ch >= 0;
-    const segI = 3; // 信号标签需核心标数据，此处展示中性
-    return `<tr data-stock="${w.symbol}"><td class="num" style="color:var(--faint)">${start + i + 1}</td><td class="num">${w.symbol}</td><td><span style="font-weight:600">${esc(w.name)}</span></td>` +
-      `<td class="n num" id="wl-price-${w.symbol}">${fmt(0)}</td>` +
-      `<td class="n num ${up ? "up" : "down"}">${fmtChg(ch)}%</td>` +
-      `<td class="n">${sparkSvg(w.symbol, 72, 22)}</td>` +
-      `<td class="n num" style="color:var(--faint)">${fmtYi(amtCache.get(w.symbol) ?? null, 1)}</td>` +
-      `<td><span class="tag ${segI >= 4 ? "acc" : segI <= 1 ? "flat" : "p1"}">${["", "超卖", "低位", "看盘", "回升", "强势", "超买"][segI]}</span></td>` +
-      `<td><span style="font-size:11.5px;color:var(--dim)">${esc(w.group)}</span></td>` +
-      `<td><button class="icbtn" data-del="${w.symbol}" title="移除" style="width:26px;height:26px">${ic("trash", 13)}</button></td></tr>`;
-  }).join("");
-  body.querySelectorAll<HTMLElement>("tr[data-stock]").forEach((tr) =>
-    tr.addEventListener("click", (e) => {
-      if ((e.target as HTMLElement).closest("[data-del]")) return;
-      const sym = tr.dataset.stock!;
-      const w = wl.find((x) => x.symbol === sym)!;
-      document.dispatchEvent(new CustomEvent("yc:open-stock", { detail: { symbol: sym, name: w.name, from: { page: "watchlist", label: "自选股" } } }));
-    }));
-  body.querySelectorAll<HTMLElement>("[data-del]").forEach((b) =>
-    b.addEventListener("click", (e) => {
-      e.stopPropagation();
-      removeWatch(b.dataset.del!);
-      toast("已移出自选");
-    }));
+  const pageRows = slicePage(wlPager, wlTbl.sort(rows));
+  wlTbl.render(pageRows, start);
   document.getElementById("wl-empty")!.style.display = rows.length ? "none" : "grid";
   void loadPrices(pageRows.map((r) => r.symbol));
-  void refreshSparksIn(document.getElementById("wl-body")!);
+  void refreshSparksIn(document.getElementById("wl-wrap")!);
 }
 
 async function loadPrices(symbols: string[]): Promise<void> {
   await Promise.allSettled(symbols.map(async (sym) => {
     const q = await marketApi.quote(sym);
-    const td = document.getElementById("wl-price-" + sym);
-    if (td) td.textContent = fmt(q.close ?? 0);
+    priceCache.set(sym, q.close ?? 0);
     chgCache.set(sym, q.pct_chg ?? 0);
     amtCache.set(sym, q.amount ?? 0);
   }));

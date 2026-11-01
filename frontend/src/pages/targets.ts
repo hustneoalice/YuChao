@@ -5,6 +5,7 @@
 import { marketApi, type TargetItem } from "../api";
 import { esc, fmt, fmtChg } from "../fmt";
 import { createPager, slicePage, type Pager } from "../pager";
+import { createDataTable, type DataTable, type DataTableCol } from "../table";
 import { trendPalette } from "./kline";
 
 type Cond = "vol" | "short" | "mid" | "up20";
@@ -24,6 +25,7 @@ let busy = false;
 
 /* 分页（通用组件）：指标层一次算完返回全量，前端切片渲染 */
 let pager: Pager | null = null;
+let tbl: DataTable<TargetItem> | null = null;
 let items: TargetItem[] = [];
 let scanned = 0;
 
@@ -50,41 +52,49 @@ async function load(resetPage = false): Promise<void> {
   }
 }
 
+/* 主题色（retheme 后由 drawPage 刷新，列渲染取用） */
+const PAL = { o: "", b: "" };
+
+const TGT_COLS: DataTableCol<TargetItem>[] = [
+  { label: "#", width: 34, mono: true, render: (_t, i) => `<span style="color:var(--faint)">${i + 1}</span>` },
+  { label: "代码", mono: true, sort: "symbol", render: (t) => t.symbol },
+  { label: "名称", sort: "name", render: (t) => `<span style="font-weight:600">${esc(t.name || t.symbol)}</span>` },
+  { label: "现价", num: true, sort: "close", render: (t) => fmt(t.close ?? 0) },
+  { label: "涨跌幅", num: true, sort: (t) => t.pct_chg ?? null, render: (t) => {
+      const ch = t.pct_chg ?? 0;
+      return `<span class="${ch >= 0 ? "up" : "down"}">${fmtChg(ch)}%</span>`; } },
+  { label: "40日均量", num: true, title: "当日成交量 / 40日均量", sort: (t) => t.vol_ratio,
+    render: (t) => `<span style="color:${t.vol_hit ? PAL.o : "var(--dim)"}">${t.vol_ratio == null ? "—" : `${t.vol_ratio.toFixed(2)}x`}</span>` },
+  { label: "短线趋势", sort: (t) => (t.short_orange ? 1 : 0), render: (t) =>
+      `<span style="color:${t.short_orange ? PAL.o : PAL.b}">●</span> ${t.short_orange ? "橙" : "蓝"}` },
+  { label: "中线趋势", sort: (t) => (t.mid_orange ? 1 : 0), render: (t) =>
+      `<span style="color:${t.mid_orange ? PAL.o : PAL.b}">●</span> ${t.mid_orange ? "橙" : "蓝"}` },
+  { label: "20日涨停", num: true, title: "近 20 个交易日涨停次数", sort: (t) => t.limit_up_cnt,
+    render: (t) => t.limit_up_20d ? `<span class="tag acc">${t.limit_up_cnt}次</span>` : `<span style="color:var(--faint)">—</span>` },
+  { label: "六分段", sort: "seg", render: (t) =>
+      `<span class="tag ${t.seg >= 4 ? "acc" : t.seg <= 1 ? "flat" : "p1"}">第${t.seg}段·${esc(t.seg_name)}</span>` },
+  { label: "短线状态", sort: (t) => (t.pullback ? 0 : 1), render: (t) =>
+      `<span style="font-size:11.5px;color:${t.short_orange ? PAL.o : PAL.b}">${t.pullback ? "回调中" : "上行"} · ${t.short_orange ? "橙" : "蓝"}</span>` },
+];
+
 function drawPage(): void {
-  const body = document.getElementById("tgt-body")!;
   const empty = document.getElementById("tgt-empty")!;
   if (!pager) pager = createPager(document.getElementById("tgt-pager")!, "targets", drawPage);
+  if (!tbl) tbl = createDataTable(document.getElementById("tgt-wrap")!, TGT_COLS, {
+    onRow: (t) => document.dispatchEvent(new CustomEvent("yc:open-stock", {
+      detail: { symbol: t.symbol, name: t.name || t.symbol,
+        from: { page: "targets", label: "目标监控" } } })),
+  });
   pager.update(items.length);
   const start = (pager.page - 1) * pager.size;
-  const slice = slicePage(pager, items);
-
+  const pageRows = slicePage(pager, tbl.sort(items));
+  const pal = trendPalette();
+  PAL.o = `rgb(${pal.fr.join(",")})`;
+  PAL.b = `rgb(${pal.sr.join(",")})`;
+  tbl.render(pageRows, start);
   document.getElementById("tgt-hits")!.textContent =
     `命中 ${items.length} / 扫描 ${scanned} 只`;
   empty.style.display = items.length ? "none" : "grid";
-
-  const pal = trendPalette();
-  const ORANGE = `rgb(${pal.fr.join(",")})`, BLUE = `rgb(${pal.sr.join(",")})`;
-  body.innerHTML = slice.map((t, i) => {
-    const ch = t.pct_chg ?? 0;
-    const dot = (on: boolean) => `<span style="color:${on ? ORANGE : BLUE}">●</span> ${on ? "橙" : "蓝"}`;
-    const state = `${t.pullback ? "回调中" : "上行"} · ${t.short_orange ? "橙" : "蓝"}`;
-    return `<tr data-stock="${t.symbol}" data-name="${esc(t.name || t.symbol)}">` +
-      `<td class="num" style="color:var(--faint)">${start + i + 1}</td>` +
-      `<td class="num">${t.symbol}</td>` +
-      `<td><span style="font-weight:600">${esc(t.name || t.symbol)}</span></td>` +
-      `<td class="n num">${fmt(t.close ?? 0)}</td>` +
-      `<td class="n num ${ch >= 0 ? "up" : "down"}">${fmtChg(ch)}%</td>` +
-      `<td class="n num" style="color:${t.vol_hit ? ORANGE : "var(--dim)"}">${t.vol_ratio == null ? "—" : `${t.vol_ratio.toFixed(2)}x`}</td>` +
-      `<td>${dot(t.short_orange)}</td><td>${dot(t.mid_orange)}</td>` +
-      `<td class="n">${t.limit_up_20d ? `<span class="tag acc">${t.limit_up_cnt}次</span>` : `<span style="color:var(--faint)">—</span>`}</td>` +
-      `<td><span class="tag ${t.seg >= 4 ? "acc" : t.seg <= 1 ? "flat" : "p1"}">第${t.seg}段·${esc(t.seg_name)}</span></td>` +
-      `<td><span style="font-size:11.5px;color:${t.short_orange ? ORANGE : BLUE}">${state}</span></td></tr>`;
-  }).join("");
-  body.querySelectorAll<HTMLElement>("tr[data-stock]").forEach((tr) =>
-    tr.addEventListener("click", () =>
-      document.dispatchEvent(new CustomEvent("yc:open-stock", {
-        detail: { symbol: tr.dataset.stock, name: tr.dataset.name,
-          from: { page: "targets", label: "目标监控" } } }))));
 }
 
 function renderConds(): void {

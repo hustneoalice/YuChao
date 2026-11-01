@@ -2,6 +2,7 @@
 import { corepicksApi, type Corepick } from "../api";
 import { esc, fmt, fmtChg } from "../fmt";
 import { createPager, slicePage, type Pager } from "../pager";
+import { createDataTable, type DataTable, type DataTableCol } from "../table";
 import { ic } from "../icons";
 import { getState, isVip } from "../store";
 import { openModal, closeModals } from "../ui";
@@ -11,6 +12,7 @@ let tab: "chase" | "dip" | "all" = "chase";
 let picks: Corepick[] = [];
 let date = "";
 let cpPager: Pager | null = null;
+let cpTbl: DataTable<Corepick> | null = null;
 let cpReset = false;
 
 function showCore(name: string): void {
@@ -39,37 +41,36 @@ function scoreCell(v: number | null | undefined, color: string): string {
 }
 
 function renderRows(): void {
-  const body = document.getElementById("cp-body")!;
   if (!cpPager) cpPager = createPager(document.getElementById("cp-pager")!, "corepicks", renderRows);
+  if (!cpTbl) cpTbl = createDataTable(document.getElementById("cp-wrap")!, CP_COLS, {
+    onRow: (r, ev) => {
+      const b = (ev.target as HTMLElement).closest("[data-cp-open]") as HTMLElement | null;
+      if (b) { void openDetail(b.dataset.cpOpen!, b.dataset.pool || "chase"); return; }
+      void openDetail(r.symbol, r.pool);
+    },
+    empty: "暂无核心标数据",
+  });
   if (cpReset) { cpPager.reset(); cpReset = false; }
-  cpPager.update(picks.length);
+  const rows = cpTbl.sort(picks);
+  cpPager.update(rows.length);
   const start = (cpPager.page - 1) * cpPager.size;
-  const pageRows = slicePage(cpPager, picks);
-  body.innerHTML = pageRows.map((r, i) => {
-    const poolTag = `<span class="tag ${r.pool === "chase" ? "acc" : "p1"}">${r.pool === "chase" ? "追涨" : "低吸"}</span>`;
-    return `<tr data-cp="${r.symbol}"><td class="num" style="color:var(--faint)">${start + i + 1}</td><td class="num">${r.symbol}</td>` +
-      `<td><span style="font-weight:600">${esc(r.name)}</span></td>` +
-      `<td>${poolTag}</td>` +
-      `<td>${esc(r.sector || "—")}</td>` +
-      `<td>${scoreCell(r.fund_score, "var(--accent)")}</td>` +
-      `<td>${isVip()
-        ? `<button class="hbtn" data-cp-open="${r.symbol}" data-pool="${r.pool}" style="height:26px;padding:0 10px;font-size:11.5px">三因子</button>`
-        : `<span class="tag lock">${ic("lock", 10)}VIP</span>`}</td>` +
-      `<td><span class="tag ${segCls(r.seg)}">${esc(segName(r.seg))}</span></td>` +
-      `<td><button class="hbtn" data-cp-open="${r.symbol}" data-pool="${r.pool}" style="height:26px;padding:0 10px;font-size:11.5px">明细</button></td></tr>`;
-  }).join("");
-  body.querySelectorAll<HTMLElement>("[data-cp-open]").forEach((b) =>
-    b.addEventListener("click", (e) => {
-      e.stopPropagation();
-      void openDetail(b.dataset.cpOpen!, b.dataset.pool || "chase");
-    }));
-  body.querySelectorAll<HTMLElement>("tr[data-cp]").forEach((tr) =>
-    tr.addEventListener("click", (e) => {
-      if ((e.target as HTMLElement).closest("[data-cp-open]")) return;
-      const r = picks.find((x) => x.symbol === tr.dataset.cp);
-      if (r) void openDetail(r.symbol, r.pool);
-    }));
+  cpTbl.render(slicePage(cpPager, rows), start);
 }
+
+const CP_COLS: DataTableCol<Corepick>[] = [
+  { label: "#", width: 34, mono: true, render: (_r, i) => `<span style="color:var(--faint)">${i + 1}</span>` },
+  { label: "代码", mono: true, sort: "symbol", render: (r) => r.symbol },
+  { label: "名称", sort: "name", render: (r) => `<span style="font-weight:600">${esc(r.name)}</span>` },
+  { label: "池", sort: "pool", render: (r) =>
+      `<span class="tag ${r.pool === "chase" ? "acc" : "p1"}">${r.pool === "chase" ? "追涨" : "低吸"}</span>` },
+  { label: "板块", sort: "sector", render: (r) => esc(r.sector || "—") },
+  { label: "资金分", sort: (r) => r.fund_score ?? null, render: (r) => scoreCell(r.fund_score, "var(--accent)") },
+  { label: "三因子明细", render: (r) => isVip()
+      ? `<button class="hbtn" data-cp-open="${r.symbol}" data-pool="${r.pool}" style="height:26px;padding:0 10px;font-size:11.5px">三因子</button>`
+      : `<span class="tag lock">${ic("lock", 10)}VIP</span>` },
+  { label: "六分段", render: (r) => `<span class="tag ${segCls(r.seg)}">${esc(segName(r.seg))}</span>` },
+  { label: "操作", width: 74, render: (r) => `<button class="hbtn" data-cp-open="${r.symbol}" data-pool="${r.pool}" style="height:26px;padding:0 10px;font-size:11.5px">明细</button>` },
+];
 
 function segName(seg: string | null | undefined): string {
   return seg || "—";

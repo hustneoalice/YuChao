@@ -148,17 +148,7 @@
           <span class="sub" id="tgt-status"></span>
         </div>
         <div style="display:flex;gap:8px;align-items:center;flex-wrap:wrap;padding-bottom:12px" id="tgt-conds"></div>
-        <div class="tblwrap" style="flex:1">
-          <table>
-            <thead><tr><th style="width:30px"></th><th>代码</th><th>名称</th>
-              <th class="n">现价</th><th class="n">涨跌幅</th>
-              <th class="n" title="当日成交量 / 40日均量">40日均量</th>
-              <th>短线趋势</th><th>中线趋势</th>
-              <th class="n" title="近 20 个交易日涨停次数">20日涨停</th>
-              <th>六分段</th><th>短线状态</th></tr></thead>
-            <tbody id="tgt-body"></tbody>
-          </table>
-        </div>
+        <div class="tblwrap" style="flex:1" id="tgt-wrap"></div>
         <div id="tgt-pager" class="pager"></div>
         <div class="empty" id="tgt-empty" style="display:none;padding:44px 20px">
           <b>没有满足当前勾选条件的标的</b>
@@ -184,14 +174,7 @@
             <button class="on" data-f="all">全部</button><button data-f="up">上涨</button><button data-f="down">下跌</button>
           </span>
         </div>
-        <div class="tblwrap" style="flex:1">
-          <table>
-            <thead><tr><th style="width:30px"></th><th>代码</th><th>名称</th>
-              <th class="n">现价</th><th class="n">涨跌幅</th><th class="n">走势</th><th class="n">成交额</th>
-              <th>信号</th><th>分组</th><th style="width:52px"></th></tr></thead>
-            <tbody id="wl-body"></tbody>
-          </table>
-        </div>
+        <div class="tblwrap" style="flex:1" id="wl-wrap"></div>
         <div class="pager" id="wl-pager"></div>
         <div class="empty" id="wl-empty" style="display:none;padding:44px 20px">
           <span data-ic="star" data-sz="30" style="color:var(--faint)"></span>
@@ -222,12 +205,7 @@
         <div class="panel" style="flex:1.4;min-height:0;display:flex;flex-direction:column">
           <div class="phead2"><h3 id="sec-title">行业热力</h3><span class="sub" id="sec-sub">色深 = 涨跌幅强度 · 点击查看成分股</span></div>
           <div class="tblwrap" style="flex:1;padding:14px" id="sec-heatwrap"><div class="heat" id="heat"></div></div>
-          <div class="tblwrap" style="flex:1;display:none" id="sec-rankwrap">
-            <table>
-              <thead><tr id="sec-rank-head"></tr></thead>
-              <tbody id="sec-rank"></tbody>
-            </table>
-          </div>
+          <div class="tblwrap" style="flex:1;display:none" id="sec-rankwrap"></div>
           <div class="pager" id="sec-rank-pager" style="display:none"></div>
         </div>
         <div class="panel" style="flex:1;min-width:0;display:flex;flex-direction:column" id="sec-members">
@@ -235,13 +213,7 @@
             <h3 id="mem-title">成分股</h3>
             <span class="sub" id="mem-date"></span>
           </div>
-          <div class="tblwrap" style="flex:1">
-            <table>
-              <thead><tr><th style="width:30px"></th><th>代码</th><th>名称</th>
-                <th class="n">现价</th><th class="n">窗口涨幅</th><th class="n">主力净流入</th></tr></thead>
-              <tbody id="mem-body"></tbody>
-            </table>
-          </div>
+          <div class="tblwrap" style="flex:1" id="mem-wrap"></div>
           <div class="pager" id="mem-pager"></div>
         </div>
       </div>
@@ -263,14 +235,7 @@
       </div>
       <div class="panel" style="flex:1;min-height:0;display:flex;flex-direction:column">
         <section data-core-state="data" class="on">
-          <div class="tblwrap" style="flex:1">
-            <table>
-              <thead><tr><th style="width:34px"></th><th>代码</th><th>名称</th>
-                <th class="n">现价</th><th class="n">涨跌幅</th><th>板块</th>
-                <th>资金分</th><th>三因子明细</th><th style="width:74px">操作</th></tr></thead>
-              <tbody id="cp-body"></tbody>
-            </table>
-          </div>
+          <div class="tblwrap" style="flex:1" id="cp-wrap"></div>
           <div class="pager" id="cp-pager"></div>
           <div style="padding:10px 14px;border-top:1px solid var(--border);display:flex;gap:16px;align-items:center;font-size:11px;color:var(--faint)">
             <span>资金分公开展示 · 趋势 / 位置 / 六分段属 VIP 三因子明细（服务端计算）</span>

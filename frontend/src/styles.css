@@ -111,7 +111,7 @@ svg{display:block}
   background:color-mix(in srgb,var(--accent) 12%,transparent)}
 
 /* 自选列表行内走势 sparkline */
-#wl-body svg.spark{display:block;margin:0 auto;opacity:.9}
+#wl-wrap svg.spark{display:block;margin:0 auto;opacity:.9}
 .up{color:var(--up)} .down{color:var(--down)}
 .datachip{display:flex;align-items:center;gap:7px;height:30px;padding:0 11px;
   border:1px solid var(--border);border-radius:999px;font-size:11.5px;color:var(--dim);

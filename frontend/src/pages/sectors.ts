@@ -2,6 +2,7 @@
 import { sectorsApi, type SectorSummary, type SectorMember } from "../api";
 import { esc, fmt, fmtChg, fmtYi } from "../fmt";
 import { createPager, slicePage, type Pager } from "../pager";
+import { createDataTable, type DataTable, type DataTableCol } from "../table";
 import { getState } from "../store";
 import { toast } from "../ui";
 
@@ -9,26 +10,42 @@ type View = "heat" | "rank";
 let type: "industry" | "concept" = "industry";
 let view: View = (localStorage.getItem("yc_secview") as View) || "heat";
 let q = "";
-let sortKey: SortKey = "pct_change";
 let lookback: 5 | 10 | 20 = 20;
 let sectors: SectorSummary[] = [];
 let curSector = "";
 let members: SectorMember[] = [];
 let rankPager: Pager | null = null;
+let rankTbl: DataTable<SectorSummary> | null = null;
 let memPager: Pager | null = null;
+let memTbl: DataTable<SectorMember> | null = null;
 let rankReset = false;
 let memReset = false;
 
-type SortKey = "pct_change" | "main_net_today" | "main_net_5d" | "up_count";
+/* 排行列（对齐策影板块强度表核心列：涨幅/资金/涨跌家数/成分/领涨股），全列可排序 */
+const RANK_COLS: DataTableCol<SectorSummary>[] = [
+  { label: "#", width: 30, mono: true, render: (_s, i) => `<span style="color:var(--faint)">${i + 1}</span>` },
+  { label: "板块", sort: "name", render: (s) => `<span style="font-weight:600">${esc(s.name)}</span>` },
+  { label: "涨幅", num: true, sort: (s) => s.pct_change ?? null, render: (s) =>
+      `<span class="${(s.pct_change ?? 0) >= 0 ? "up" : "down"}">${fmtChg(s.pct_change)}%</span>` },
+  { label: "当日主力", num: true, sort: (s) => s.main_net_today ?? null, render: (s) => flowCell(s.main_net_today) },
+  { label: "5日主力", num: true, sort: (s) => s.main_net_5d ?? null, render: (s) => flowCell(s.main_net_5d) },
+  { label: "涨/跌", num: true, sort: (s) => s.up_count ?? null, render: (s) =>
+      `<span style="color:var(--faint)">${s.up_count ?? 0}/${s.down_count ?? 0}</span>` },
+  { label: "成分", num: true, sort: (s) => s.member_count ?? null, render: (s) =>
+      `<span style="color:var(--faint)">${s.member_count ?? "—"}</span>` },
+  { label: "领涨股", num: true, sort: (s) => s.leader_change ?? null, render: (s) =>
+      s.leader ? `${esc(s.leader)} <span class="${(s.leader_change ?? 0) >= 0 ? "up" : "down"}">${fmtChg(s.leader_change)}%</span>` : "—" },
+];
 
-/* 排行列（对齐策影板块强度表核心列：涨幅/资金/涨跌家数/成分/领涨股） */
-const RANK_COLS: { k?: SortKey; label: string; num?: boolean }[] = [
-  { k: "pct_change", label: "涨幅", num: true },
-  { k: "main_net_today", label: "当日主力", num: true },
-  { k: "main_net_5d", label: "5日主力", num: true },
-  { label: "涨/跌", num: true },
-  { label: "成分", num: true },
-  { label: "领涨股", num: true },
+const MEM_COLS: DataTableCol<SectorMember>[] = [
+  { label: "#", width: 30, mono: true, render: (_m, i) => `<span style="color:var(--faint)">${i + 1}</span>` },
+  { label: "代码", mono: true, sort: "symbol", render: (m) => m.symbol },
+  { label: "名称", sort: "name", render: (m) => `<span style="font-weight:600">${esc(m.name)}</span>` },
+  { label: "现价", num: true, sort: (m) => m.last_close, render: (m) => fmt(m.last_close) },
+  { label: "窗口涨幅", num: true, sort: (m) => m.lookback_pct ?? null, render: (m) =>
+      `<span class="${(m.lookback_pct ?? 0) >= 0 ? "up" : "down"}">${fmtChg(m.lookback_pct)}%</span>` },
+  { label: "主力净流入", num: true, sort: (m) => m.main_net ?? null, render: (m) =>
+      `<span style="color:var(--faint)">${m.main_net != null ? fmtYi(m.main_net, 1) : "—"}</span>` },
 ];
 
 function sparkline(vals: number[]): string {
@@ -94,38 +111,18 @@ function flowCell(v?: number | null): string {
 }
 
 function renderRank(): void {
-  document.getElementById("sec-rank-head")!.innerHTML =
-    `<th style="width:30px"></th>` +
-    RANK_COLS.map((c) =>
-      `<th${c.num ? ' class="n"' : ""}${c.k ? ` data-k="${c.k}" style="cursor:pointer"` : ""}>` +
-      `${c.label}${sortKey === c.k ? " ▾" : ""}</th>`).join("");
-  const rows = filtered().slice().sort((a, b) =>
-    (b[sortKey] ?? -Infinity) - (a[sortKey] ?? -Infinity));
   if (!rankPager) rankPager = createPager(document.getElementById("sec-rank-pager")!, "secrank", renderRank);
+  if (!rankTbl) rankTbl = createDataTable(document.getElementById("sec-rankwrap")!, RANK_COLS, {
+    defaultSort: { label: "涨幅", dir: -1 },
+    onChange: renderRank,
+    onRow: (s) => void openSector(s.id),
+    empty: q ? "无匹配板块" : "暂无板块数据（sector_index 未落库）",
+  });
   if (rankReset) { rankPager.reset(); rankReset = false; }
+  const rows = rankTbl.sort(filtered());
   rankPager.update(rows.length);
   const start = (rankPager.page - 1) * rankPager.size;
-  const pageRows = slicePage(rankPager, rows);
-  document.getElementById("sec-rank")!.innerHTML = pageRows.map((s, i) => {
-    const up = (s.pct_change ?? 0) >= 0;
-    const lu = (s.leader_change ?? 0) >= 0;
-    return `<tr data-sec="${esc(s.id)}"><td class="num" style="color:var(--faint)">${start + i + 1}</td>` +
-      `<td><span style="font-weight:600">${esc(s.name)}</span></td>` +
-      `<td class="n num ${up ? "up" : "down"}">${fmtChg(s.pct_change)}%</td>` +
-      `<td class="n num">${flowCell(s.main_net_today)}</td>` +
-      `<td class="n num">${flowCell(s.main_net_5d)}</td>` +
-      `<td class="n num" style="color:var(--faint)">${s.up_count ?? 0}/${s.down_count ?? 0}</td>` +
-      `<td class="n num" style="color:var(--faint)">${s.member_count ?? "—"}</td>` +
-      `<td class="n num">${s.leader ? `${esc(s.leader)} <span class="${lu ? "up" : "down"}">${fmtChg(s.leader_change)}%</span>` : "—"}</td></tr>`;
-  }).join("") ||
-    `<tr><td colspan="8" style="text-align:center;color:var(--faint)">${q ? "无匹配板块" : "暂无板块数据（sector_index 未落库）"}</td></tr>`;
-  document.querySelectorAll<HTMLElement>("#sec-rank tr[data-sec]").forEach((tr) =>
-    tr.addEventListener("click", () => void openSector(tr.dataset.sec!)));
-  document.querySelectorAll<HTMLElement>("#sec-rank-head th[data-k]").forEach((th) =>
-    th.addEventListener("click", () => {
-      sortKey = th.dataset.k as SortKey;
-      renderRank();
-    }));
+  rankTbl.render(slicePage(rankPager, rows), start);
 }
 
 export async function openSector(id: string): Promise<void> {
@@ -133,8 +130,14 @@ export async function openSector(id: string): Promise<void> {
   const meta = sectors.find((s) => s.id === id);
   document.getElementById("mem-title")!.textContent = "成分股 · " + (meta?.name || id);
   document.getElementById("mem-date")!.textContent = meta ? `指数日 ${meta.trade_date} · 加权窗口 ${lookback} 日` : "";
-  const body = document.getElementById("mem-body")!;
-  body.innerHTML = `<tr><td colspan="6" style="text-align:center;color:var(--faint)">加载中…</td></tr>`;
+  if (!memTbl) memTbl = createDataTable(document.getElementById("mem-wrap")!, MEM_COLS, {
+    onChange: renderMembers,
+    onRow: (m) => document.dispatchEvent(new CustomEvent("yc:open-stock", {
+      detail: { symbol: m.symbol, name: m.name, from: { page: "sectors", label: "板块" } } })),
+    empty: "暂无成分股数据",
+  });
+  document.getElementById("mem-wrap")!.innerHTML =
+    `<div style="text-align:center;color:var(--faint);font-size:12px;padding:40px 0">加载中…</div>`;
   try {
     members = await sectorsApi.members(id, lookback);
   } catch (e) {
@@ -146,26 +149,12 @@ export async function openSector(id: string): Promise<void> {
 }
 
 function renderMembers(): void {
-  const body = document.getElementById("mem-body")!;
   if (!memPager) memPager = createPager(document.getElementById("mem-pager")!, "secmem", renderMembers);
   if (memReset) { memPager.reset(); memReset = false; }
-  memPager.update(members.length);
+  const rows = memTbl!.sort(members);
+  memPager.update(rows.length);
   const start = (memPager.page - 1) * memPager.size;
-  const pageRows = slicePage(memPager, members);
-  body.innerHTML = pageRows.map((m, i) => {
-    const up = (m.lookback_pct ?? 0) >= 0;
-    return `<tr data-stock="${m.symbol}"><td class="num" style="color:var(--faint)">${start + i + 1}</td><td class="num">${m.symbol}</td><td><span style="font-weight:600">${esc(m.name)}</span></td>` +
-      `<td class="n num">${fmt(m.last_close)}</td>` +
-      `<td class="n num ${up ? "up" : "down"}">${fmtChg(m.lookback_pct)}%</td>` +
-      `<td class="n num" style="color:var(--faint)">${m.main_net != null ? fmtYi(m.main_net, 1) : "—"}</td></tr>`;
-  }).join("") || `<tr><td colspan="6" style="text-align:center;color:var(--faint)">暂无成分股数据</td></tr>`;
-  body.querySelectorAll<HTMLElement>("tr[data-stock]").forEach((tr) =>
-    tr.addEventListener("click", () => {
-      const m = members.find((x) => x.symbol === tr.dataset.stock);
-      document.dispatchEvent(new CustomEvent("yc:open-stock", {
-        detail: { symbol: tr.dataset.stock, name: m?.name || tr.dataset.stock, from: { page: "sectors", label: "板块" } },
-      }));
-    }));
+  memTbl!.render(slicePage(memPager, rows), start);
 }
 
 export function initSectors(): void {
