@@ -33,9 +33,16 @@ start_one() { # name port start_cmd
   fi
 }
 
-start_one backend 8031 "cd '$ROOT' && .venv/bin/python -m uvicorn app.main:app --host 127.0.0.1 --port 8031"
+start_one backend 8031 "cd '$ROOT' && PYTHONUNBUFFERED=1 .venv/bin/python -m uvicorn app.main:app --host 127.0.0.1 --port 8031 --log-level info"
 start_one frontend 5178 "cd '$ROOT/frontend' && npm run dev"
 
 echo
 echo "驭潮已就绪：前端 http://localhost:5178 · 后端 http://127.0.0.1:8031"
 echo "停止：./scripts/stop.sh · 日志：.logs/backend.log / .logs/frontend.log"
+
+# 默认实时显示两端打印（Ctrl+C 退出查看，服务继续后台运行）；-n 跳过
+if [ "${1:-}" != "-n" ]; then
+  echo
+  echo "──── 实时日志（Ctrl+C 退出，服务继续运行）────"
+  tail -n 15 -f "$LOG_DIR/backend.log" "$LOG_DIR/frontend.log"
+fi
