@@ -241,6 +241,15 @@ tbody tr:hover td{background:var(--panel-2)}
 th.n,td.n{text-align:right;font-variant-numeric:tabular-nums}
 th.n{color:var(--dim)}
 .hbtn:disabled{opacity:.35;cursor:default}
+/* 目标表：满宽铺开 + 各列最小宽，间距均匀不留大片空白 */
+#page-targets table{width:100%}
+#page-targets td:nth-child(2){min-width:78px}
+#page-targets td:nth-child(3){min-width:96px}
+#page-targets td:nth-child(4),#page-targets td:nth-child(5),#page-targets td:nth-child(6){min-width:74px}
+#page-targets td:nth-child(7),#page-targets td:nth-child(8){min-width:58px}
+#page-targets td:nth-child(9){min-width:66px}
+#page-targets td:nth-child(10){min-width:112px}
+#page-targets td:nth-child(11){min-width:96px}
 td .lnk{color:var(--accent);display:inline-flex;align-items:center;height:28px;cursor:pointer}
 td .lnk:hover{text-decoration:underline}
 .tag{display:inline-flex;align-items:center;gap:4px;padding:1px 9px;border-radius:999px;font-size:11px;font-weight:550;
