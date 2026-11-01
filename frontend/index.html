@@ -36,6 +36,7 @@
   <nav class="rail" id="rail">
     <a class="on" data-page="market" data-ic="chart-line-up" data-t="行情" data-sz="21"></a>
     <a data-page="watchlist" data-ic="star" data-t="自选" data-sz="21"></a>
+    <a data-page="targets" data-ic="funnel-simple" data-t="目标" data-sz="21"></a>
     <a data-page="sectors" data-ic="squares-four" data-t="板块" data-sz="21"></a>
     <a data-page="corepicks" data-ic="target" data-t="核心标" data-sz="21"></a>
     <a data-page="cards" data-ic="cards" data-t="功能卡片" data-sz="21"></a>
@@ -132,6 +133,39 @@
       </div>
     </section>
 
+    <!-- ═══════════ 目标 ═══════════ -->
+    <section class="page" id="page-targets">
+      <div class="phead">
+        <span class="crumb">目标 /</span><h1>目标监控</h1>
+        <span class="sp"></span>
+        <button class="hbtn" id="tgt-refresh" data-ic="arrows-clockwise" data-sz="13">刷新</button>
+      </div>
+      <div class="panel" style="flex:1;min-height:0;display:flex;flex-direction:column">
+        <div class="phead2">
+          <h3>全市场扫描</h3>
+          <span class="sub" id="tgt-hits">—</span>
+          <span class="sp"></span>
+          <span class="sub" id="tgt-status"></span>
+        </div>
+        <div style="display:flex;gap:8px;align-items:center;flex-wrap:wrap;padding-bottom:12px" id="tgt-conds"></div>
+        <div class="tblwrap" style="flex:1">
+          <table>
+            <thead><tr><th style="width:30px"></th><th>代码</th><th>名称</th>
+              <th class="n">现价</th><th class="n">涨跌幅</th>
+              <th class="n" title="当日成交量 / 40日均量">40日均量</th>
+              <th>短线趋势</th><th>中线趋势</th>
+              <th title="近 20 个交易日涨停次数">20日涨停</th>
+              <th>六分段</th><th>短线状态</th></tr></thead>
+            <tbody id="tgt-body"></tbody>
+          </table>
+        </div>
+        <div class="empty" id="tgt-empty" style="display:none;padding:44px 20px">
+          <b>没有满足当前勾选条件的标的</b>
+          <span>放宽条件勾选后即时重筛。</span>
+        </div>
+      </div>
+    </section>
+
     <!-- ═══════════ 自选 ═══════════ -->
     <section class="page" id="page-watchlist">
       <div class="phead">
@@ -145,14 +179,11 @@
           <h3 id="wl-title">全部自选</h3>
           <span class="sub" id="wl-count">共 0 只</span>
           <span class="sp"></span>
-          <span class="seg" id="wl-view">
-            <button class="on" data-v="list">列表</button><button data-v="target">目标</button>
-          </span>
           <span class="seg" id="wl-filter">
             <button class="on" data-f="all">全部</button><button data-f="up">上涨</button><button data-f="down">下跌</button>
           </span>
         </div>
-        <div class="tblwrap" style="flex:1" id="wl-listwrap">
+        <div class="tblwrap" style="flex:1">
           <table>
             <thead><tr><th style="width:30px"></th><th>代码</th><th>名称</th>
               <th class="n">现价</th><th class="n">涨跌幅</th><th class="n">走势</th><th class="n">成交额</th>
@@ -165,24 +196,6 @@
           <b>这个分组还没有自选股</b>
           <span>搜索添加你关注的标的，或从行情页直接加入。</span>
           <button class="hbtn primary" id="wl-empty-add" data-ic="plus" data-sz="13">添加自选</button>
-        </div>
-        <div id="wl-target" style="display:none;flex:1;min-height:0;flex-direction:column">
-          <div style="display:flex;gap:8px;align-items:center;flex-wrap:wrap;padding-bottom:10px" id="tgt-conds"></div>
-          <div class="tblwrap" style="flex:1">
-            <table>
-              <thead><tr><th style="width:30px"></th><th>代码</th><th>名称</th>
-                <th class="n">现价</th><th class="n">涨跌幅</th>
-                <th class="n" title="当日成交量 / 40日均量">40日均量</th>
-                <th>短线趋势</th><th>中线趋势</th>
-                <th title="近 20 个交易日涨停次数">20日涨停</th>
-                <th>六分段</th><th>短线状态</th></tr></thead>
-              <tbody id="tgt-body"></tbody>
-            </table>
-          </div>
-          <div class="empty" id="tgt-empty" style="display:none;padding:44px 20px">
-            <b>没有满足当前勾选条件的自选股</b>
-            <span>放宽勾选条件，或从行情页把目标标的加入自选。</span>
-          </div>
         </div>
       </div>
     </section>
@@ -311,6 +324,7 @@
 <nav class="mtabs" id="mtabs">
   <a class="on" data-page="market"><span data-ic="chart-line-up" data-sz="19"></span><span>行情</span></a>
   <a data-page="watchlist"><span data-ic="star" data-sz="19"></span><span>自选</span></a>
+  <a data-page="targets"><span data-ic="funnel-simple" data-sz="19"></span><span>目标</span></a>
   <a data-page="sectors"><span data-ic="squares-four" data-sz="19"></span><span>板块</span></a>
   <a data-page="corepicks"><span data-ic="target" data-sz="19"></span><span>核心标</span></a>
   <a data-page="cards"><span data-ic="cards" data-sz="19"></span><span>卡片</span></a>

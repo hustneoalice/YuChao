@@ -17,6 +17,7 @@
 |---|---|---|
 | 行情 | `GET /api/v1/market/kline?symbol=&period=&adjust=qfq\|hfq\|raw&with=indicator\|vip` | 复权在查询层 ASOF 派生；`with=indicator` 返回 MA5/7/10/20/35/45 + std20 + BOLL；VIP 通道未授权 **403 不返回数据** |
 | 行情 | `GET /api/v1/market/quote?symbol=` | 最新日线 + 估值（PE/PB/市值）+ 当日资金流 |
+| 行情 | `GET /api/v1/market/fundflow?symbol=&start=&end=` | 区间资金流明细 + 合计（K 线框选统计 → 右列资金卡；指数 `available=false`） |
 | 行情 | `GET /api/v1/market/search?q=` | 代码 / 名称检索（`{items,total,cursor}` 分页信封） |
 | 板块 | `GET /api/v1/sectors?type=industry\|concept` | 板块指数按当日涨跌排序（concept 为 2.0 增补，M1 空集） |
 | 板块 | `GET /api/v1/sectors/{id}/members?lookback=5\|10\|20` | 成分股按窗口成交额加权涨幅排序，附窗口主力净流入 |

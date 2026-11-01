@@ -8,6 +8,7 @@ import { stockSearch } from "./searchbox";
 import { initAuth, refreshVipUI } from "./auth";
 import { initMarket, klResize, openStock, renderKline, renderRight } from "./pages/market";
 import { initWatchlist, renderWatchlist } from "./pages/watchlist";
+import { initTargets, loadTargets } from "./pages/targets";
 import { initSectors, loadSectors } from "./pages/sectors";
 import { initCorepicks, renderCorepicks } from "./pages/corepicks";
 import { initCards, renderCards } from "./pages/cards";
@@ -24,6 +25,7 @@ function goPage(p: string): void {
   document.querySelectorAll("#mtabs a").forEach((a) => a.classList.toggle("on", (a as HTMLElement).dataset.page === p));
   if (p === "market") renderKline();
   if (p === "watchlist" && !loaded.watchlist) { loaded.watchlist = true; renderWatchlist(); }
+  if (p === "targets") loadTargets();
   if (p === "sectors" && !loaded.sectors) { loaded.sectors = true; void loadSectors(); }
   if (p === "corepicks" && !loaded.corepicks) { loaded.corepicks = true; initCorepicks(); }
   if (p === "cards") renderCards();
@@ -138,6 +140,7 @@ function boot(): void {
   initAuth();
   initMarket();
   initWatchlist();
+  initTargets();
   initSectors();
   initCards();
   initSettings();
@@ -199,14 +202,10 @@ function boot(): void {
   });
   sse.start();
 
-  // 启动默认视图：有上次标的则恢复，否则默认上证指数（大盘即首页）
-  const last = localStorage.getItem("yc_last_symbol");
-  if (last) {
-    const [symbol, name] = last.split("|");
-    void openStock({ symbol, name: name || symbol });
-  } else {
-    void openStock({ symbol: "000001.SH", name: "上证指数" });
-  }
+  // 启动默认视图：行情页恒以「上证指数」开场（大盘即首页）。
+  // 不再回放上次标的 —— 首页定位要稳定，个股从搜索/自选/板块进，
+  // 否则上次随手看的票会把首页顶掉。
+  void openStock({ symbol: "000001.SH", name: "上证指数" });
 
   // 带令牌启动：恢复会话 + 云设置拉取（静默，失败保持本地态）
   if (getToken()) {

@@ -344,63 +344,62 @@ def _bj_scoped(rows: list[dict]) -> list[dict]:
 
 
 _TGT_SEGNAME = ("", "超卖", "低位", "弱势", "回升", "强势", "超买")
+_TGT_CACHE: dict = {"key": None, "rows": []}
+
+# 全市场目标指标：一次窗口 SQL 算完（条件无关层），按 (最新K线日期, 标的数, 北交开关) 缓存
+_TGT_SQL = (
+    "WITH t AS ("
+    "  SELECT symbol, date, close, volume, pct_chg,"
+    "         ROW_NUMBER() OVER (PARTITION BY symbol ORDER BY date DESC) AS rn"
+    "  FROM daily_ohlcv),"
+    "u AS ("
+    "  SELECT *, MAX(CASE WHEN rn = 1 THEN close END) OVER (PARTITION BY symbol) AS lc"
+    "  FROM t WHERE rn <= 60)"
+    "SELECT symbol,"
+    "       MAX(CASE WHEN rn = 1 THEN close END) AS close,"
+    "       MAX(CASE WHEN rn = 1 THEN pct_chg END) AS pct_chg,"
+    "       MAX(CASE WHEN rn = 1 THEN volume END) AS vol,"
+    "       AVG(CASE WHEN rn <= 7 THEN close END) AS ma7,"
+    "       AVG(CASE WHEN rn <= 10 THEN close END) AS ma10,"
+    "       AVG(CASE WHEN rn <= 45 THEN close END) AS ma45,"
+    "       AVG(CASE WHEN rn <= 40 THEN volume END) AS vol_ma40,"
+    "       SUM(CASE WHEN rn <= 20 AND pct_chg >= (CASE"
+    "             WHEN symbol LIKE '30%' OR symbol LIKE '68%' THEN 19.9"
+    "             ELSE 9.9 END) THEN 1 ELSE 0 END) AS up20,"
+    "       SUM(CASE WHEN close < lc THEN 1 ELSE 0 END) AS below,"
+    "       COUNT(*) AS n"
+    " FROM u GROUP BY symbol")
 
 
-def _limit_threshold(symbol: str) -> float:
-    """涨停判定阈值（pct_chg 口径）：创业板/科创板 20%，北交所 30%，其余主板 10%。"""
-    if symbol.startswith(("300", "301", "688")):
-        return 19.9
-    if symbol.startswith(("43", "83", "87", "92")):
-        return 29.9
-    return 9.9
+def stock_targets_universe(conn) -> tuple[list[dict], dict]:
+    """目标页全市场扫描（策影目标页同源口径，指标层与条件无关、按数据日缓存）。
 
+    六分段/均线/量比/涨停次数一次算好；条件过滤与排序由端点即时完成——
+    用户改条件即刻重筛；数据更新（日期/行数/涨跌幅指纹变化）自动触发重算。"""
+    fp = conn.execute(
+        "SELECT MAX(date), COUNT(*), COUNT(DISTINCT symbol), SUM(pct_chg)"
+        " FROM daily_ohlcv").fetchone()
+    bj = settings.bj_enabled
+    key = (str(fp[0]), int(fp[1] or 0), int(fp[2] or 0), round(float(fp[3] or 0), 4), bj)
+    if _TGT_CACHE["key"] == key:
+        return _TGT_CACHE["rows"], {"as_of": str(fp[0]), "scanned": len(_TGT_CACHE["rows"])}
 
-def _tail_sma(series: list, period: int) -> Optional[float]:
-    """末位 SMA；样本不足返回 None（与前端 indicators 同口径）。"""
-    if len(series) < period:
-        return None
-    return sum(series[-period:]) / period
-
-
-def stock_targets(conn, symbols: list[str]) -> list[dict]:
-    """自选目标视图批量计算（与 K 线图表指标同源：策影 indicatorRegistry 口径）。
-
-    逐标的取近 60 根日线 → MA7/10/35/45、40日均量、六分段（60 窗口收盘分位
-    → 1..6）、近 20 日涨停次数；ST 直接剔除，北交所按开关过滤。"""
+    names = dict(conn.execute("SELECT symbol, name FROM stock_universe").fetchall())
     out: list[dict] = []
-    for sym in symbols:
-        row = conn.execute(
-            "SELECT name FROM stock_universe WHERE symbol = ?", [sym]).fetchone()
-        name = row[0] if row else None
-        if name and "ST" in str(name).upper():      # ST 直接剔除
+    for r in conn.execute(_TGT_SQL).fetchall():
+        sym, name = r[0], names.get(r[0])
+        if name and "ST" in str(name).upper():          # ST 直接剔除
             continue
-        if not settings.bj_enabled and is_bj(sym):  # 北交所开关关闭
+        if not bj and is_bj(sym):                       # 北交所开关（默认关）
             continue
-        bars = conn.execute(
-            "SELECT close, volume, pct_chg FROM ("
-            "  SELECT close, volume, pct_chg, date,"
-            "         ROW_NUMBER() OVER (ORDER BY date DESC) AS rn"
-            "  FROM daily_ohlcv WHERE symbol = ?) t"
-            " WHERE rn <= 60 ORDER BY date", [sym]).fetchall()
-        if not bars:
-            continue
-        closes = [b[0] for b in bars]
-        vols = [b[1] for b in bars]
-        chgs = [b[2] for b in bars]
-        close, vol = closes[-1], vols[-1]
-        ma7 = _tail_sma(closes, 7)
-        ma10 = _tail_sma(closes, 10)
-        ma45 = _tail_sma(closes, 45)
-        vol_ma40 = _tail_sma(vols, 40)
-        vol_ratio = (vol / vol_ma40) if (vol is not None and vol_ma40) else None
-        # 六分段：60 日窗口内收盘分位 0–1 → 1..6（indicators.sixSegment 同式）
-        below = sum(1 for c in closes if c < close)
-        seg = min(6, int(below / len(closes) * 6) + 1)
-        thr = _limit_threshold(sym)
-        cnt = sum(1 for c in chgs[-20:] if c is not None and c >= thr)
+        close, ma7, ma10, ma45 = r[1], r[4], r[5], r[6]
+        vol, vol_ma40 = r[3], r[7]
+        seg = min(6, int((r[9] / r[10]) * 6) + 1)       # 60 窗口收盘分位 → 1..6
+        cnt = int(r[8] or 0)
         out.append({
-            "symbol": sym, "name": name, "close": close, "vol": vol,
-            "vol_ma40": vol_ma40, "vol_ratio": vol_ratio,
+            "symbol": sym, "name": name, "close": close, "pct_chg": r[2],
+            "vol_ma40": vol_ma40,
+            "vol_ratio": (vol / vol_ma40) if (vol is not None and vol_ma40) else None,
             "vol_hit": bool(vol_ma40 and vol is not None and vol >= vol_ma40),
             "short_orange": bool(ma10 and close > ma10),
             "mid_orange": bool(ma45 and close > ma45),
@@ -408,7 +407,8 @@ def stock_targets(conn, symbols: list[str]) -> list[dict]:
             "seg": seg, "seg_name": _TGT_SEGNAME[seg],
             "pullback": bool(ma7 and close < ma7),
         })
-    return out
+    _TGT_CACHE["key"], _TGT_CACHE["rows"] = key, out
+    return out, {"as_of": str(fp[0]), "scanned": len(out)}
 
 
 _PY_CACHE: dict[str, dict[str, str]] = {}

@@ -187,6 +187,9 @@ svg{display:block}
 .chartbar .sp{flex:1}
 .barsep{width:1px;height:14px;background:var(--border);margin:0 2px}
 .chartbar .seg button{padding:3px 10px;font-size:11.5px}
+/* 工具栏按钮统一不换行：文字按钮（框选）在窄屏也不会被挤成竖排 */
+.chartbar .cbtn{white-space:nowrap;flex:none;width:auto;min-width:24px;padding:0 7px}
+.chartbar .cbtn.text{font-size:11.5px}
 /* K线顶部信息条（东财/同花顺网页头部同款）：
    名称 代码 | 现价 涨跌 | 最高 最低 开盘 昨收 | 成交额 换手 …… 总市值 PE */
 .kl-info{display:flex;align-items:center;gap:10px;flex-wrap:wrap;min-height:40px;
@@ -316,7 +319,6 @@ body.mobile .rcard .cbar{opacity:1}
 .csimple .minifig{flex:none}
 .tr2{display:flex;gap:8px;margin-top:8px}
 .tr2 svg{flex:1;min-width:0}
-.mbar{display:grid;gap:4px;margin-top:7px}
 .mbl{display:flex;align-items:center;gap:8px;font-size:10px;color:var(--dim)}
 .mbl .mbt{flex:1;height:6px;border-radius:3px;background:var(--panel-2);overflow:hidden}
 .mbl .mbt i{display:block;height:100%;border-radius:3px;opacity:.85}
@@ -449,12 +451,6 @@ body.mobile .rcard .cbar{opacity:1}
 .sixseg i.on{background:linear-gradient(90deg,var(--down),var(--warn),var(--accent),var(--up))}
 .sixseg i.cur::after{content:"";position:absolute;top:-3px;bottom:-3px;left:50%;width:2px;background:var(--text)}
 .sixlab{display:flex;justify-content:space-between;font-size:10px;color:var(--faint);margin-top:4px}
-.flowbars{display:flex;gap:8px;margin-top:5px}
-.flowbars .f{flex:1;text-align:center}
-.flowbars .f .bar{height:32px;border-radius:5px;background:var(--panel-2);position:relative;overflow:hidden}
-.flowbars .f .bar i{position:absolute;left:0;right:0;bottom:0;border-radius:5px}
-.flowbars .f .t{font-size:9.5px;color:var(--faint);margin-top:2px}
-.flowbars .f .v{font-size:11px;font-weight:600;margin-top:1px}
 .minirow{display:flex;align-items:center;gap:8px;padding:4px 0;border-bottom:1px solid var(--border-soft);font-size:12px;cursor:pointer}
 .minirow:last-child{border-bottom:0}
 .minirow .nm{flex:1;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
@@ -596,22 +592,90 @@ body.mobile .rcard .cbar{opacity:1}
   backdrop-filter:blur(7px);-webkit-backdrop-filter:blur(7px);
   border:1px solid var(--border);border-radius:9px;
   box-shadow:var(--shadow);pointer-events:none;font-size:11px;color:var(--dim)}
+/* 单根选中带（点击蜡烛）：竖向高亮 + 顶部日期徽标，撤选中即隐藏 */
+.kl-pick{position:absolute;z-index:13;top:0;display:none;pointer-events:none;
+  background:color-mix(in srgb,var(--accent) 11%,transparent);
+  border-left:1px solid color-mix(in srgb,var(--accent) 62%,transparent);
+  border-right:1px solid color-mix(in srgb,var(--accent) 62%,transparent)}
+.kl-pick>b{position:absolute;left:50%;top:2px;transform:translateX(-50%);white-space:nowrap;
+  padding:0 4px;border-radius:4px;line-height:13px;font-size:9.5px;font-weight:600;
+  color:var(--accent);font-variant-numeric:tabular-nums;
+  background:color-mix(in srgb,var(--panel) 86%,transparent)}
 /* 框选区间统计（策影同款）：Shift+拖拽选区与统计浮窗 */
 .kl-selbox{position:absolute;z-index:12;top:0;display:none;pointer-events:none;
   background:color-mix(in srgb,var(--accent) 12%,transparent);
   border-left:1px solid color-mix(in srgb,var(--accent) 55%,transparent);
   border-right:1px solid color-mix(in srgb,var(--accent) 55%,transparent)}
-.kl-seltip{position:absolute;z-index:21;display:none;width:196px;padding:8px 11px;border-radius:10px;
-  background:color-mix(in srgb,var(--panel) 92%,transparent);border:1px solid var(--border);
-  box-shadow:var(--shadow);pointer-events:none;font-size:11px}
-.kl-seltip .st-h{font-size:11px;font-weight:650;color:var(--text);margin-bottom:3px}
-.kl-seltip .st-r{display:flex;justify-content:space-between;gap:10px;line-height:1.75;color:var(--faint)}
-.kl-seltip .st-r.full{color:var(--dim);font-size:10.5px}
-.kl-seltip .st-r b{font-weight:550;color:var(--text)}
-.kl-seltip .st-r b.up{color:var(--up)}
-.kl-seltip .st-r b.down{color:var(--down)}
+/* 框选区间统计卡：与 .kl-tip 同语言（毛玻璃 + 紧凑分组行），只是可容纳资金行 */
+.kl-seltip{position:absolute;z-index:21;display:none;width:max-content;max-width:320px;
+  padding:6px 11px 7px;border-radius:9px;pointer-events:none;font-size:11px;color:var(--dim);
+  background:color-mix(in srgb,var(--panel) 82%,transparent);
+  backdrop-filter:blur(7px);-webkit-backdrop-filter:blur(7px);
+  border:1px solid var(--border);box-shadow:var(--shadow)}
+.kl-seltip .t{text-align:center;font-weight:600;font-size:11px;color:var(--text);
+  padding-bottom:4px;margin-bottom:4px;border-bottom:1px solid var(--border-soft);white-space:nowrap}
+.kl-seltip .grp,.kl-seltip .st-g{display:flex;align-items:baseline;gap:10px;line-height:1.7;white-space:nowrap}
+.kl-seltip .grp span,.kl-seltip .st-g span{display:inline-flex;align-items:baseline;gap:3px}
+.kl-seltip b{font-weight:500;color:var(--text);font-size:11px}
+.kl-seltip b.up{color:var(--up)} .kl-seltip b.down{color:var(--down)}
+.kl-seltip .st-g.fund b{color:var(--accent)}
+.kl-seltip .st-sep{height:1px;margin:4px 0;background:var(--border-soft)}
 .kl-seltip .st-f{margin-top:4px;padding-top:4px;border-top:1px solid var(--border-soft);
-  font-size:9.5px;color:var(--faint);text-align:center}
+  font-size:9.5px;color:var(--faint);text-align:center;white-space:nowrap}
+
+/* 资金卡「区间态」：标签 + 日期 + 清除 */
+.rg-head{display:flex;align-items:center;gap:6px;margin-bottom:8px;font-size:10.5px;color:var(--faint)}
+.rg-head b{font-weight:500;color:var(--dim);font-size:10.5px;
+  overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.rg-tag{padding:1px 6px;border-radius:5px;background:color-mix(in srgb,var(--accent) 16%,transparent);
+  color:var(--accent);font-weight:600;white-space:nowrap}
+.rg-x{margin-left:auto;width:20px;height:20px;display:inline-flex;align-items:center;justify-content:center}
+.rg-note{margin-top:6px;font-size:10.5px;color:var(--faint);line-height:1.5}
+.rg-kv2{display:grid;grid-template-columns:1fr 1fr;gap:3px 18px;margin-top:9px}
+.rg-kv{display:flex;align-items:baseline;justify-content:space-between;gap:6px;min-width:0}
+.rg-kv span{font-size:10.5px;color:var(--faint);flex:none}
+.rg-kv b{font-size:11px;font-weight:600;font-variant-numeric:tabular-nums;
+  white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.rg-split{height:1px;background:var(--border-soft);margin:10px 0}
+
+/* ── 资金流卡：一套「大字 + 零轴双向条」语言 ──
+   正=流入(红) 负=流出(绿)；零轴居中，左负右正；数值恒带符号、恒以亿为单位。
+   替换掉原先四根等比高柱（红色永远给超大/大单，绿色永远给中/小单，方向被写死） */
+.mf-hd{display:flex;align-items:flex-end;justify-content:space-between;gap:12px}
+.mf-lead{min-width:0}
+.mf-k{font-size:10.5px;color:var(--faint);line-height:1.5;white-space:nowrap}
+/* 简版两行：上行「口径 + 日期」，下行「数值 + 占比」，右侧迷你堆叠条 */
+.mf-line{display:flex;align-items:baseline;gap:8px;min-width:0}
+.mf-line>b{font-size:16.5px;font-weight:700;line-height:1.2;font-family:var(--mono);
+  font-variant-numeric:tabular-nums;white-space:nowrap}
+.mf-line>span{font-size:10.5px;color:var(--dim);white-space:nowrap;
+  overflow:hidden;text-overflow:ellipsis}
+.csimple .mf-line b.up{color:var(--up)} .csimple .mf-line b.down{color:var(--down)}
+.mf-v{font-size:22px;font-weight:700;line-height:1.12;font-family:var(--mono);
+  font-variant-numeric:tabular-nums;letter-spacing:-.02em;white-space:nowrap}
+.mf-v i{font-style:normal;font-size:12px;font-weight:600;margin-left:1px;opacity:.7}
+.mf-v.up{color:var(--up)} .mf-v.down{color:var(--down)}
+.mf-meta{flex:none;text-align:right;font-size:10.5px;color:var(--faint);line-height:1.7}
+.mf-meta b{font-weight:600;color:var(--dim);font-variant-numeric:tabular-nums}
+/* 行共享一套网格（.mf-row 用 display:contents 摊平）：三列的宽度与零轴位置
+   跨行严格对齐，数值列按最宽一条自动定宽 —— 不会出现「每行轨道长度不一样」 */
+.mf-rows{display:grid;grid-template-columns:40px 1fr max-content;
+  align-items:center;gap:6px 10px;margin-top:10px}
+.mf-row{display:contents}
+.mf-row>span{font-size:11px;color:var(--dim);white-space:nowrap}
+.mf-row>b{font-size:11px;font-weight:600;text-align:right;font-variant-numeric:tabular-nums;
+  white-space:nowrap;color:var(--dim)}
+.mf-row>b.up{color:var(--up)} .mf-row>b.down{color:var(--down)}
+.mf-track{position:relative;height:6px;border-radius:3px;background:var(--panel-2);
+  box-shadow:inset 0 0 0 1px var(--border-soft);overflow:hidden}
+.mf-track::after{content:"";position:absolute;left:50%;top:0;bottom:0;width:1px;
+  background:var(--faint);opacity:.45;transform:translateX(-.5px)}
+.mf-track i{position:absolute;top:0;bottom:0;border-radius:3px;opacity:.92}
+.mf-track i.up{background:var(--up)} .mf-track i.down{background:var(--down)}
+.mf-stack{display:flex;gap:1px;border-radius:3px;overflow:hidden;background:var(--panel-2)}
+.mf-stack i{display:block;height:100%}
+#kl-range.on{color:var(--accent);border-color:color-mix(in srgb,var(--accent) 55%,transparent);
+  background:color-mix(in srgb,var(--accent) 12%,transparent)}
 .kl-tip .t{text-align:center;font-weight:600;font-size:11px;color:var(--text);
   padding-bottom:4px;margin-bottom:5px;border-bottom:1px solid var(--border-soft)}
 .kl-tip .grp{display:flex;align-items:baseline;gap:9px;line-height:1.7}

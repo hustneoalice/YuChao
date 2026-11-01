@@ -312,7 +312,7 @@ def test_data_not_ready_503(tmp_path, monkeypatch):
 
 
 def test_market_targets(client: TestClient, duckdb_file):
-    """目标视图（策影目标页同源口径）：四条件 + 六分段 + 回调；ST/北交所剔除。"""
+    """目标页全市场扫描：四条件 + 六分段 + 回调；ST/北交所剔除；条件即时重筛。"""
     import duckdb
 
     con = duckdb.connect(str(duckdb_file))
@@ -322,12 +322,17 @@ def test_market_targets(client: TestClient, duckdb_file):
          ("832000", "北交样本", "BJ", "综合", "traded", "2015-01-01")])
     con.close()
 
-    r = client.get("/api/v1/market/targets",
-                   params={"symbols": "600519,000858,600555,832000"})
+    r = client.get("/api/v1/market/targets", params={"conds": "vol,short,mid"})
     assert r.status_code == 200
-    items = {x["symbol"]: x for x in r.json()}
-    assert set(items) == {"600519", "000858"}       # ST 剔除；北交所开关默认关
-    t = items["600519"]                             # 种子 60 根单边上升
+    body = r.json()
+    syms = {x["symbol"] for x in body["items"]}
+    # ST 直接剔除；北交所开关默认关；无 K 线的档案不参与
+    assert "600555" not in syms and "832000" not in syms
+    assert {"600519", "000858"} <= syms
+    assert body["scanned"] >= 2 and body["as_of"]
+
+    t = next(x for x in body["items"] if x["symbol"] == "600519")
+    # 种子 60 根单边上升：站上全部均线、量达标、第 6 段、非回调、近 20 日无涨停
     assert t["name"] == "贵州茅台"
     assert t["short_orange"] and t["mid_orange"] and t["vol_hit"]
     assert t["seg"] == 6 and t["seg_name"] == "超买"
@@ -335,15 +340,20 @@ def test_market_targets(client: TestClient, duckdb_file):
     assert t["limit_up_20d"] is False and t["limit_up_cnt"] == 0
     assert t["vol_ratio"] is not None and t["vol_ratio"] > 0.99
 
-    # 近 20 日涨停：000858 最近一根日线抬到主板涨停幅度（10.5% ≥ 9.9 阈值）
+    # 条件即时重筛：只勾 20日涨停 → 种子无涨停，无命中
+    r = client.get("/api/v1/market/targets", params={"conds": "up20"})
+    assert r.json()["items"] == []
+
+    # 000858 最近一根日线抬到主板涨停幅度（10.5% ≥ 9.9 阈值）→ 数据更新触发重算
     con = duckdb.connect(str(duckdb_file))
     con.execute(
         "UPDATE daily_ohlcv SET pct_chg = 10.5 WHERE symbol = '000858'"
         " AND date = (SELECT MAX(date) FROM daily_ohlcv WHERE symbol = '000858')")
     con.close()
-    r = client.get("/api/v1/market/targets", params={"symbols": "000858"})
-    t = r.json()[0]
-    assert t["limit_up_20d"] is True and t["limit_up_cnt"] == 1
+    r = client.get("/api/v1/market/targets", params={"conds": "up20"})
+    items = r.json()["items"]
+    assert [x["symbol"] for x in items] == ["000858"]
+    assert items[0]["limit_up_20d"] is True and items[0]["limit_up_cnt"] == 1
 
 
 def test_search_bj_switch(client: TestClient, duckdb_file, monkeypatch):

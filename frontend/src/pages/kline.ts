@@ -486,9 +486,43 @@ export const IND_BY_KEY: Record<string, IndDef> = Object.fromEntries(IND_DEFS.ma
 export type MainKey = string;
 export type SubKey = string;
 
+/** 框选区间统计（图表侧算完抛给行情页：价格/量额口径全在这，资金由接口补） */
+export interface RangeStats {
+  startDate: string; endDate: string; days: number;
+  changePct: number; amp: number;
+  high: number; low: number; close: number;
+  amount: number; avgAmount: number; volume: number;
+  upN: number; downN: number;
+  /* 选区像素位置（卡片定位用，跨模块无用） */
+  x0: number; x1: number;
+}
+
+/** 单根 K 线选中（点击蜡烛）：行情页据此把右列资金卡切到「该交易日」口径 */
+export interface PickBar {
+  date: string;
+  index: number;
+  open: number; high: number; low: number; close: number;
+  prevClose: number | null;
+  changePct: number;
+  amp: number;
+  amount: number;
+  volume: number;
+}
+
+/** 区间资金（/market/fundflow 的回填口径；指数 available=false，只报原因） */
+export interface RangeFund {
+  available: boolean;
+  covered: number;
+  net_main: number | null;
+  net_super: number | null;
+  net_large: number | null;
+  net_medium: number | null;
+  net_small: number | null;
+}
+
 export interface KlineChartHandle {
   chart: Chart;
-  setData: (bars: Bar[]) => void;
+  setData: (bars: Bar[], keepView?: boolean) => void;
   /** 主图多选叠加：增量增删，不动已叠加的同名指标 */
   setMain: (inds: MainKey[]) => void;
   /** 图内右上角指标图例（MA/BOLL/操盘趋势，色块+名称；多面板时每实例一份） */
@@ -507,6 +541,16 @@ export interface KlineChartHandle {
   resetView: () => void;
   /** 数据/主题变化后重画底部导航条缩略图 */
   navRefresh: () => void;
+  /** 框选模式开关：开=左键直接拖拽框选（禁用平移），关=恢复平移并清空选区 */
+  setRangeMode: (on: boolean) => void;
+  /** 框选模式是否开启（工具栏按钮态与图表实例对账用） */
+  isRangeMode: () => boolean;
+  /** 区间资金回填（行情页拉到 /market/fundflow 后写回卡片） */
+  setRangeFund: (f: RangeFund | null) => void;
+  /** 清空选区（切标的 / 切周期 / 关闭模式时调用，notify=true 会同步清右列） */
+  clearRange: (notify?: boolean) => void;
+  /** 清空单根选中（notify=true 同步通知行情页把资金卡退回当日口径） */
+  clearPick: (notify?: boolean) => void;
   retheme: () => void;
   resize: () => void;
   destroy: () => void;
@@ -628,6 +672,10 @@ export function mountKline(el: HTMLElement): KlineChartHandle {
   chart.setSymbol({ ticker: "YUCHAO", pricePrecision: 2, volumePrecision: 0 });
   chart.setPeriod({ type: "day", span: 1 });
 
+  /* 框选状态（声明提前：onCross 里要判断"是否已有区间卡"，避免与十字光标卡同屏叠两张） */
+  let rangeMode = false;
+  let lastSel: RangeStats | null = null;
+
   /* ── 浮动信息卡：跟随十字光标，边缘翻转避让 ── */
   const tip = document.createElement("div");
   tip.className = "kl-tip";
@@ -671,6 +719,8 @@ export function mountKline(el: HTMLElement): KlineChartHandle {
   };
 
   const onCross = (...args: unknown[]) => {
+    // 框选模式下已有区间卡：不再叠一张十字光标卡（两张同风格浮卡会互相打架）
+    if (rangeMode && lastSel) { tip.style.display = "none"; return; }
     const ch = args[0] as { x?: number; y?: number } | null;
     if (!ch || ch.x == null || ch.y == null) { tip.style.display = "none"; return; }
     const list = chart.getDataList() as { timestamp: number; open: number; high: number; low: number; close: number; volume?: number; amount?: number; date?: string }[];
@@ -704,7 +754,12 @@ export function mountKline(el: HTMLElement): KlineChartHandle {
   };
   try { chart.subscribeAction("onCrosshairChange", onCross as never); } catch { /* 忽略 */ }
 
-  /* ── 框选区间统计（策影同款移植）：Shift+拖拽框选 → 区间涨跌幅/高低/成交额资金 ── */
+  /* ── 框选区间统计（策影鼠标框选移植）：拖拽一段 → 涨跌幅 / 振幅 / 量额 / 资金 ──
+   *  · 框选模式（工具栏「框选」）：左键直接拖，无需修饰键；期间禁用图表平移
+   *  · 非框选模式：保留 Shift + 拖拽的快捷手势（老路子，不破坏习惯）
+   *  · 卡片刻意与十字光标卡（.kl-tip）同语言：紧凑分组行 + 半透明毛玻璃，少遮挡
+   *  · 结果通过 yc:kl-range 事件抛给行情页 → 右列资金卡同步（kline.ts 不认标的）
+   */
   const sel = document.createElement("div");
   sel.className = "kl-selbox";
   sel.style.display = "none";
@@ -714,15 +769,79 @@ export function mountKline(el: HTMLElement): KlineChartHandle {
   selTip.style.display = "none";
   el.appendChild(selTip);
   let selX0: number | null = null;
+  let downX = 0;                        // 按下点（判定「点击」还是「拖拽」，用于点空白撤选中）
+  let selFund: RangeFund | null = null;
   const ymd = (t: number): string => {
     const d = new Date(t);
     return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-${String(d.getDate()).padStart(2, "0")}`;
   };
-  const onSelDown = (e: MouseEvent) => {
-    if (!e.shiftKey) { selTip.style.display = "none"; return; }  // 无 Shift 点击 → 关闭统计浮窗
-    e.preventDefault(); e.stopPropagation();                     // 拦截 v10 平移，进入框选
-    selX0 = e.clientX;
+  /** 像素 x → 数据索引（越界返回 undefined） */
+  const diOfX = (x: number): number | undefined => {
+    const hit = chart.convertFromPixel([{ x }]) as unknown;
+    return (Array.isArray(hit) ? hit[0] : hit)?.dataIndex as number | undefined;
+  };
+  const kv = (k: string, v: string, c = "") => `<span>${k}<b class="num ${c}">${v}</b></span>`;
+
+  /** 资金行（右列接口回填后追加；指数无个股资金流 → 只报覆盖天数与原因） */
+  const fundHtml = (): string => {
+    if (!lastSel) return "";
+    if (!selFund) return `<div class="st-g fund"><span>资金<b class="num">统计中…</b></span></div>`;
+    if (!selFund.available)
+      return `<div class="st-g fund"><span>主力净流入<b class="num" style="color:var(--faint)">—</b></span>` +
+        `<span style="color:var(--faint);font-size:10px">指数无资金流</span></div>`;
+    const yi = (v: number | null | undefined) => v == null ? "—" : fmtYi(v, 2);
+    const m = selFund.net_main, cls = (m ?? 0) >= 0 ? "up" : "down";
+    return `<div class="st-g fund"><span>主力净流入<b class="num ${cls}">${m == null ? "—" : (m > 0 ? "+" : "") + yi(m)}</b></span>` +
+      `<span>覆盖<b class="num">${selFund.covered}天</b></span></div>` +
+      `<div class="st-g fund"><span>超大<b class="num">${yi(selFund.net_super)}</b></span>` +
+      `<span>大单<b class="num">${yi(selFund.net_large)}</b></span></div>` +
+      `<div class="st-g fund"><span>中单<b class="num">${yi(selFund.net_medium)}</b></span>` +
+      `<span>小单<b class="num">${yi(selFund.net_small)}</b></span></div>`;
+  };
+
+  const drawSelTip = (): void => {
+    const s = lastSel;
+    if (!s) { selTip.style.display = "none"; return; }
+    const cls = s.changePct >= 0 ? "up" : "down";
+    selTip.innerHTML =
+      `<div class="t">区间 ${s.days} 根 · ${s.startDate} → ${s.endDate}</div>` +
+      `<div class="grp">${kv("涨跌", `${s.changePct >= 0 ? "+" : ""}${s.changePct.toFixed(2)}%`, cls)}` +
+      `${kv("振幅", s.amp.toFixed(2) + "%")}${kv("阳/阴", `${s.upN}/${s.downN}`)}</div>` +
+      `<div class="grp">${kv("高", fmt(s.high))}${kv("低", fmt(s.low))}${kv("收盘", fmt(s.close), cls)}</div>` +
+      `<div class="grp">${kv("成交额", fmtYi(s.amount, 2))}${kv("日均", fmtYi(s.avgAmount, 2))}${kv("量", fmtVol(s.volume / 100) + "手")}</div>` +
+      `<div class="st-sep"></div>` + fundHtml() +
+      `<div class="st-f">${rangeMode ? "继续拖拽调整区间 · 点击空白关闭" : "Shift + 拖拽框选 · 点击空白关闭"}</div>`;
+    selTip.style.display = "block";
+    tip.style.display = "none";          // 区间卡优先：收起停留在图表上的十字光标卡
+    placeSelTip();
+  };
+
+  /** 卡片定位：贴选区右缘（越界翻左），纵向钉在图表上部，避让顶部图例 */
+  const placeSelTip = (): void => {
+    if (!lastSel || selTip.style.display === "none") return;
     const r = el.getBoundingClientRect();
+    const x1 = Math.max(lastSel.x0, lastSel.x1), x0 = Math.min(lastSel.x0, lastSel.x1);
+    const tw = selTip.offsetWidth, th = selTip.offsetHeight;
+    const flip = x1 + tw + 12 > r.width;
+    selTip.style.left = `${Math.max(4, flip ? x0 - tw - 12 : x1 + 12)}px`;
+    selTip.style.top = `${Math.max(8, Math.min(r.height - th - 8, 46))}px`;
+  };
+
+  const clearSel = (notify: boolean): void => {
+    lastSel = null; selFund = null;
+    selTip.style.display = "none";
+    sel.style.display = "none";
+    if (notify) document.dispatchEvent(new CustomEvent("yc:kl-range", { detail: null }));
+  };
+
+  const onSelDown = (e: MouseEvent) => {
+    // 只认左键；框选模式或 Shift 手势才进入拖拽，否则视为"点空白关卡片"
+    if (e.button !== 0) return;
+    downX = e.clientX;
+    if (!rangeMode && !e.shiftKey) { if (lastSel) clearSel(true); return; }
+    e.preventDefault(); e.stopPropagation();                     // 拦截 v10 平移，进入框选
+    const r = el.getBoundingClientRect();
+    selX0 = e.clientX;
     sel.style.left = `${e.clientX - r.left}px`; sel.style.top = "0px";
     sel.style.width = "0px"; sel.style.height = `${r.height}px`;
     sel.style.display = "block";
@@ -735,16 +854,24 @@ export function mountKline(el: HTMLElement): KlineChartHandle {
     sel.style.left = `${a}px`; sel.style.width = `${b - a}px`;
   };
   const onSelUp = (e: MouseEvent) => {
-    if (selX0 == null) return;
+    if (selX0 == null) {
+      // 点击（非拖拽）→ 按 x 列命中单根：点在这根 K 线所在的列上就算选中，
+      // 不像原生 onCandleBarClick 那样要求精确落在实体矩形里（间隙/空白高度点不中）
+      // 落在未来空白区（无对应 bar）则撤掉选中
+      if (e.button === 0 && Math.abs(e.clientX - downX) < 5) {
+        const r = el.getBoundingClientRect();
+        pickAtIndex(diOfX(e.clientX - r.left));
+      }
+      return;
+    }
     e.preventDefault(); e.stopPropagation();
     const r = el.getBoundingClientRect();
     const x0 = Math.min(selX0, e.clientX) - r.left, x1 = Math.max(selX0, e.clientX) - r.left;
     selX0 = null; sel.style.display = "none";
-    if (x1 - x0 < 6) return;                                     // 太窄视为误触
-    const diOf = (x: number): number | undefined => {
-      const hit = chart.convertFromPixel([{ x }]) as unknown;
-      return (Array.isArray(hit) ? hit[0] : hit)?.dataIndex as number | undefined;
-    };
+    // 框选模式下 mousedown 被拦截（stopPropagation），原生点击事件收不到：
+    // 位移过小视为「点了一根 K 线」，手动补一次单根选中，两种模式手感一致
+    if (x1 - x0 < 6) { pickAtIndex(diOfX(x1)); return; }
+    const diOf = diOfX;
     const i0 = diOf(x0), i1 = diOf(x1);
     const list = chart.getDataList() as { timestamp: number; open: number; high: number; low: number; close: number; volume?: number; amount?: number }[];
     if (i0 == null || i1 == null || !list.length) return;
@@ -752,29 +879,24 @@ export function mountKline(el: HTMLElement): KlineChartHandle {
     const seg = list.slice(a, b + 1);
     if (seg.length < 2) return;
     const s = seg[0], t = seg[seg.length - 1];
+    // 区间涨跌基准 = 首根前一日收盘（与资金流区间同口径，策影同款），首根无前行时退回开盘
+    const base = a > 0 ? list[a - 1].close : s.open;
     const hi = Math.max(...seg.map((x) => x.high)), lo = Math.min(...seg.map((x) => x.low));
-    const pct = (t.close - s.close) / s.close * 100;
-    const amp = (hi - lo) / s.close * 100;
     const amt = seg.reduce((q, x) => q + (x.amount ?? 0), 0);
     const vol = seg.reduce((q, x) => q + (x.volume ?? 0), 0);
     const upN = seg.filter((x) => x.close >= x.open).length;
-    const cls = pct >= 0 ? "up" : "down";
-    selTip.innerHTML =
-      `<div class="st-h">区间统计 · ${seg.length} 根</div>` +
-      `<div class="st-r full">${ymd(s.timestamp)} → ${ymd(t.timestamp)}</div>` +
-      `<div class="st-r"><span>区间涨跌</span><b class="${cls}">${pct >= 0 ? "+" : ""}${pct.toFixed(2)}%</b></div>` +
-      `<div class="st-r"><span>最高 / 最低</span><b class="num">${fmt(hi)} / ${fmt(lo)}</b></div>` +
-      `<div class="st-r"><span>振幅</span><b class="num">${amp.toFixed(2)}%</b></div>` +
-      `<div class="st-r"><span>区间成交额</span><b class="num">${fmtYi(amt, 1)}</b></div>` +
-      `<div class="st-r"><span>日均成交额</span><b class="num">${fmtYi(amt / seg.length, 1)}</b></div>` +
-      `<div class="st-r"><span>区间成交量</span><b class="num">${fmtVol(vol)}</b></div>` +
-      `<div class="st-r"><span>阳 / 阴</span><b>${upN} / ${seg.length - upN}</b></div>` +
-      `<div class="st-f">Shift + 拖拽框选 · 点击空白关闭</div>`;
-    selTip.style.display = "block";
-    const tw = selTip.offsetWidth, th = selTip.offsetHeight;
-    const flip = x1 + tw + 12 > r.width;
-    selTip.style.left = `${flip ? x0 - tw - 12 : x1 + 12}px`;
-    selTip.style.top = `${Math.max(8, Math.min(r.height - th - 8, 52))}px`;
+    lastSel = {
+      startDate: ymd(s.timestamp), endDate: ymd(t.timestamp), days: seg.length,
+      changePct: base ? (t.close - base) / base * 100 : 0,
+      amp: base ? (hi - lo) / base * 100 : 0,
+      high: hi, low: lo, close: t.close,
+      amount: amt, avgAmount: amt / seg.length, volume: vol,
+      upN, downN: seg.length - upN, x0, x1,
+    };
+    selFund = null;
+    drawSelTip();
+    clearPickFn(true);            // 框出一段 → 单根选中让位（右卡只表达一个口径）
+    document.dispatchEvent(new CustomEvent("yc:kl-range", { detail: { ...lastSel } }));
   };
   el.addEventListener("mousedown", onSelDown, true);
   el.addEventListener("mousemove", onSelMove, true);
@@ -890,6 +1012,82 @@ export function mountKline(el: HTMLElement): KlineChartHandle {
     try { chart.scrollToRealTime(0); } catch { /* 忽略 */ }
   });
 
+  /* ── 单根选中（点击蜡烛）：图上高亮该根，行情页把右列资金卡切到该交易日 ──
+   *  · 用 v10 原生 onCandleBarClick（内部已区分「点击」与「拖拽平移」，不用自己判位移）
+   *  · 唯一真相是「日期」而不是索引：盘中每 12s 重灌数据，索引会漂，日期不会
+   *  · 与框选互斥：选中单根即撤区间、框出一段即撤单根（右卡同时只表达一个口径） */
+  const pick = document.createElement("div");
+  pick.className = "kl-pick";
+  pick.style.display = "none";
+  pick.innerHTML = "<b></b>";
+  el.appendChild(pick);
+  let pickDate: string | null = null;
+
+  const drawPick = (): void => {
+    if (!pickDate) { pick.style.display = "none"; return; }
+    const list = chart.getDataList() as { date?: string }[];
+    const i = list.findIndex((b) => (b.date ?? "") === pickDate);
+    if (i < 0) { pick.style.display = "none"; return; }
+    const px = chart.convertToPixel({ dataIndex: i }) as unknown;
+    const x = (Array.isArray(px) ? px[0] : px)?.x as number | undefined;
+    if (x == null) { pick.style.display = "none"; return; }
+    const bs = chart.getBarSpace?.() as { bar: number } | undefined;
+    const w = Math.max(2, Math.round(bs?.bar ?? 6));
+    pick.style.display = "block";
+    pick.style.left = `${Math.round(x - w / 2)}px`;
+    pick.style.width = `${w}px`;
+    // 高度到导航条上沿：选中带不压住缩略图
+    pick.style.height = `${Math.max(40, el.clientHeight - nav.offsetHeight)}px`;
+    pick.querySelector("b")!.textContent = pickDate;
+  };
+
+  /** 撤掉单根选中（notify=true 同步通知行情页退回当日口径） */
+  const clearPickFn = (notify: boolean): void => {
+    const had = pickDate != null;
+    pickDate = null;
+    pick.style.display = "none";
+    pick.querySelector("b")!.textContent = "";    // 别留下上次的日期标签
+    if (notify && had) document.dispatchEvent(new CustomEvent("yc:kl-pick", { detail: null }));
+  };
+
+  /** 选中第 di 根（越界=撤选中）；同一根重复点不重发，免得白拉一次资金接口 */
+  const pickAtIndex = (di: number | undefined): void => {
+    const list = chart.getDataList() as {
+      timestamp: number; open: number; high: number; low: number; close: number;
+      volume?: number; amount?: number; date?: string;
+    }[];
+    if (di == null || di < 0 || di >= list.length) { clearPickFn(true); return; }
+    const bar = list[di];
+    const date = bar.date ?? ymd(bar.timestamp);
+    if (date === pickDate) return;
+    const prev = di > 0 ? list[di - 1] : null;
+    const base = prev?.close ?? bar.open;
+    pickDate = date;
+    drawPick();
+    clearSel(false);                               // 单根与区间互斥（右卡的区间口径由行情页撤）
+    document.dispatchEvent(new CustomEvent("yc:kl-pick", {
+      detail: {
+        date, index: di,
+        open: bar.open, high: bar.high, low: bar.low, close: bar.close,
+        prevClose: prev?.close ?? null,
+        changePct: base ? (bar.close - base) / base * 100 : 0,
+        amp: base ? (bar.high - bar.low) / base * 100 : 0,
+        amount: bar.amount ?? 0, volume: bar.volume ?? 0,
+      } as PickBar,
+    }));
+  };
+
+  const onBarClick = (...args: unknown[]) => {
+    pickAtIndex((args[0] as { dataIndex?: number } | null | undefined)?.dataIndex);
+  };
+  // 原生精确点击（点在蜡烛实体上）与上面的按列判定互为补充：重复点同一根会被去重
+  try { chart.subscribeAction("onCandleBarClick", onBarClick as never); } catch { /* 忽略 */ }
+  // 选中带跟着视窗走：缩放/滚动/可见范围变化都重算像素位置
+  const onPickView = () => requestAnimationFrame(drawPick);
+  try { chart.subscribeAction("onVisibleRangeChange", onPickView as never); } catch { /* 忽略 */ }
+  try { chart.subscribeAction("onZoom", onPickView as never); } catch { /* 忽略 */ }
+  try { chart.subscribeAction("onScroll", onPickView as never); } catch { /* 忽略 */ }
+
   // 智能高度（闭包函数：setSub 与 resize 内部也复用）
   const applyHeights = () => {
     const auto = localStorage.getItem("yc_autoh") !== "0";
@@ -902,18 +1100,49 @@ export function mountKline(el: HTMLElement): KlineChartHandle {
     } catch { /* 忽略 */ }
   };
 
+  let dataLen = 0;                     // 上一次灌入的 bar 数（判断「增量刷新」还是「换数据源」）
+
   const handle: KlineChartHandle = {
     chart,
-    setData: (bars: Bar[]) => {
+    setData: (bars: Bar[], keepView = false) => {
       const list = bars.map((b) => ({
         timestamp: toTs(b.date), open: b.open, high: b.high, low: b.low,
         close: b.close, volume: b.volume ?? 0, amount: b.amount ?? 0,
         date: b.date,
       }));
+      // 盘中的增量重灌（同标的同周期）不该把视图弹回最右：用户在翻历史时
+      // 每 12s 被拽回最新，选中的那根也就跑出屏幕了 —— 记下窗口，重灌后原样恢复
+      // 只在「同一份数据的增量刷新」里恢复：切到分时/60 分这类数量级差很大的数据源时
+      // 旧范围（例如日线第 1900 根）在新列表里根本不存在，照着恢复会把图拽到空白区
+      const vis = keepView && list.length > 0
+        ? chart.getVisibleRange?.() as { from: number; to: number } | undefined
+        : undefined;
+      // 新旧列表得是同一量级（增量刷新差几十根以内）才谈得上恢复；
+      // 空 → 分时 267 根、日线 2000 → 60 分 480 这种切换一律回到最新
+      const sameScale = dataLen > 0 && Math.abs(list.length - dataLen) <= Math.max(5, dataLen * 0.15);
+      const recoverable = sameScale && !!vis && vis.from >= 0 && vis.to <= list.length;
+      // v10 的 scrollToDataIndex 把目标索引对到视口**右端**（nav 翻页也这么用），
+      // 所以恢复视图要传右边缘那根，而不是 from
+      const keepIdx = recoverable ? Math.max(0, Math.round(vis!.to) - 1) : null;
+      dataLen = list.length;
       tip.style.display = "none";                          // 数据重载时收起旧卡片
       // v10 无 applyNewData，经 DataLoader 一次性回填（策影同款）
       chart.setDataLoader({ getBars: (params) => { params.callback(list, false); } });
-      requestAnimationFrame(() => { navDraw(); try { chart.scrollToRealTime(0); } catch { /* 忽略 */ } });
+      // 重灌数据后索引会变，选中带按日期重新定位（盘中轮询 12s 一次，必须跟着走）
+      requestAnimationFrame(() => {
+        navDraw();
+        try {
+          if (keepIdx != null) chart.scrollToDataIndex(keepIdx, 0);
+          else chart.scrollToRealTime(0);
+        } catch { /* 忽略 */ }
+        drawPick();
+      });
+      // setDataLoader 的首次回填是异步的：等数据真正就绪后再校一次视图，
+      // 否则恢复动作会被后续的加载回调覆盖（视图又跳回默认位置）
+      if (keepIdx != null) window.setTimeout(() => {
+        try { chart.scrollToDataIndex(keepIdx, 0); } catch { /* 忽略 */ }
+        drawPick();
+      }, 160);
     },
     setMain(inds: MainKey[]) {
       // 主图多选叠加（策影同款）：先按实例移除不再选中的，再增量补建缺失的（注册表驱动）
@@ -1001,14 +1230,32 @@ export function mountKline(el: HTMLElement): KlineChartHandle {
       } catch { /* 忽略 */ }
     },
     navRefresh() { requestAnimationFrame(navDraw); },
+    setRangeMode(on: boolean) {
+      rangeMode = on;
+      sel.style.cursor = on ? "crosshair" : "";
+      el.style.cursor = on ? "crosshair" : "";
+      try { chart.setScrollEnabled(!on); } catch { /* 老版本无此 API 时退化为仅 Shift 手势 */ }
+      if (!on) clearSel(true);
+    },
+    isRangeMode() { return rangeMode; },
+    setRangeFund(f: RangeFund | null) {
+      selFund = f;
+      drawSelTip();
+    },
+    clearRange(notify = true) { clearSel(notify); },
+    clearPick(notify = true) { clearPickFn(notify); },
     drawLegend,
     retheme() { chart.setStyles(styles()); requestAnimationFrame(navDraw); },
     resize() {
       chart.resize();
-      requestAnimationFrame(() => { applyHeights(); navDraw(); });
+      requestAnimationFrame(() => { applyHeights(); navDraw(); drawPick(); });
     },
     destroy() {
       try { chart.unsubscribeAction("onCrosshairChange", onCross as never); } catch { /* 忽略 */ }
+      try { chart.unsubscribeAction("onCandleBarClick", onBarClick as never); } catch { /* 忽略 */ }
+      try { chart.unsubscribeAction("onVisibleRangeChange", onPickView as never); } catch { /* 忽略 */ }
+      try { chart.unsubscribeAction("onZoom", onPickView as never); } catch { /* 忽略 */ }
+      try { chart.unsubscribeAction("onScroll", onPickView as never); } catch { /* 忽略 */ }
       el.removeEventListener("mousedown", onSelDown, true);
       el.removeEventListener("mousemove", onSelMove, true);
       el.removeEventListener("mouseup", onSelUp, true);
@@ -1016,6 +1263,7 @@ export function mountKline(el: HTMLElement): KlineChartHandle {
       selTip.remove();
       tip.remove();
       legend.remove();
+      pick.remove();
       nav.remove();
       dispose(el);
     },

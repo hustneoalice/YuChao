@@ -126,17 +126,17 @@ class SearchHit(BaseModel):
 
 
 class TargetItem(BaseModel):
-    """自选目标视图（策影目标页同源口径）：四条件 + 六分段 + 回调。
+    """目标页扫描行（策影目标页同源口径）：指标层 + 四条件布尔。
 
     条件：40日均量（当日量 ≥ 40日均量）、短线趋势橙（收盘 > MA10，K 线通道
     填橙同一判定）、中线趋势橙（收盘 > MA45）、近 20 个交易日有涨停
-    （主板 10% / 创业科创 20% / 北交所 30% 阈值口径）。
+    （主板 10% / 创业科创 20% 阈值口径）。
     ST 股票服务端直接剔除；北交所受 bj_enabled 开关控制。"""
 
     symbol: str
     name: Optional[str] = None
     close: Optional[float] = None
-    vol: Optional[float] = None
+    pct_chg: Optional[float] = Field(default=None, description="当日涨跌幅%")
     vol_ma40: Optional[float] = Field(default=None, description="40日均量")
     vol_ratio: Optional[float] = Field(default=None, description="当日量 / 40日均量")
     vol_hit: bool = Field(default=False, description="条件①：当日量 ≥ 40日均量")
@@ -147,3 +147,10 @@ class TargetItem(BaseModel):
     seg: int = Field(default=0, description="六分段 1..6（60 日窗口收盘分位）")
     seg_name: str = Field(default="", description="六分段名：超卖/低位/弱势/回升/强势/超买")
     pullback: bool = Field(default=False, description="回调中：收盘跌破 MA7 快线")
+
+
+class TargetScanOut(BaseModel):
+    scanned: int = Field(description="实际进入判定的标的数（ST/北交剔除后）")
+    total_hits: int = Field(description="命中当前勾选条件的总数")
+    as_of: str = Field(default="", description="数据截至（最新 K 线日期）")
+    items: list[TargetItem] = Field(default_factory=list, description="命中列表（强势段在前，截断至 limit）")

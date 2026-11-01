@@ -6,7 +6,7 @@ from typing import Optional
 from fastapi import APIRouter, Depends, Query
 
 from ...contracts.common import Adjust, Page, WithParam
-from ...contracts.market import FundFlowRange, Kline, Quote, QuotesOut, SearchHit, TargetItem
+from ...contracts.market import FundFlowRange, Kline, Quote, QuotesOut, SearchHit, TargetScanOut
 from ...errors import vip_required
 from ...foundation import repo
 from ...foundation.db import get_conn
@@ -381,22 +381,27 @@ def industry_reports(symbol: str, limit: int = Query(default=12, ge=1, le=30),
         return {"industry": "", "items": [], "skipped": True}
 
 
-@router.get("/market/targets", response_model=list[TargetItem],
-            summary="自选目标视图（策影目标页同源口径：四条件 + 六分段 + 回调；ST 与北交所服务端剔除）")
-def targets(symbols: str = Query(description="逗号分隔 6 位代码，≤50 只"),
+@router.get("/market/targets", response_model=TargetScanOut,
+            summary="目标页全市场扫描（四条件独立勾选 + 六分段 + 回调；ST 与北交所剔除）")
+def targets(conds: str = Query(default="vol,short,mid,up20",
+                               description="启用条件：vol=40日均量 short=短线橙 mid=中线橙 up20=20日涨停"),
+            limit: int = Query(default=100, ge=1, le=500),
             conn=Depends(get_conn)):
-    """批量计算目标条件：与 K 线图表指标同一套公式（策影 indicatorRegistry 同源）。
+    """指标层按数据日缓存、条件层即时过滤：改条件即刻重筛，数据更新自动重算。
 
     条件① 40日均量 = 当日量 ≥ MA40(volume)；② 短线趋势橙 = 收盘 > MA10；
     ③ 中线趋势橙 = 收盘 > MA45；④ 近 20 个交易日有涨停（pct_chg 阈值口径）。
-    ST 名称直接剔除；北交所按 bj_enabled 开关过滤。"""
-    syms, seen = [], set()
-    for s in symbols.split(","):
-        s = normalize_symbol(s.strip())
-        if s and s not in seen:
-            seen.add(s)
-            syms.append(s)
-    if not syms:
-        return []
-    return TypeAdapter(list[TargetItem]).validate_python(
-        repo.market.stock_targets(conn, syms[:50]))
+    未勾选的条件不参与判定；命中列表按六分段强势在前。"""
+    want = {c.strip() for c in conds.split(",") if c.strip()} & {"vol", "short", "mid", "up20"}
+    rows, meta = repo.market.stock_targets_universe(conn)
+
+    def hit(t: dict) -> bool:
+        return (("vol" not in want or t["vol_hit"]) and
+                ("short" not in want or t["short_orange"]) and
+                ("mid" not in want or t["mid_orange"]) and
+                ("up20" not in want or t["limit_up_20d"]))
+
+    items = sorted((t for t in rows if hit(t)),
+                   key=lambda t: (-t["seg"], -(t["vol_ratio"] or 0)))
+    return TargetScanOut(items=items[:limit], total_hits=len(items),
+                         scanned=meta["scanned"], as_of=meta["as_of"])

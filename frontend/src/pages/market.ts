@@ -1,6 +1,6 @@
 /* 行情页：个股头 + klinecharts K线 + 右列功能卡 */
-import { marketApi, type Bar, type IndexQuote, type Quote } from "../api";
-import { cssv, esc, fmt, fmtChg, fmtYi } from "../fmt";
+import { marketApi, type Bar, type FundFlowRange, type IndexQuote, type Quote } from "../api";
+import { cssv, esc, fmt, fmtChg, fmtVol, fmtYi, fmtYiS } from "../fmt";
 import { sma, bollSeries, kdjSeries, atrSeries, sixSegment, SEGNAME } from "../indicators";
 export { SEGNAME };
 import { ic } from "../icons";
@@ -9,7 +9,7 @@ import { openModal, toast } from "../ui";
 import { openWatchPanel } from "../watch";
 import { stockSearch, type StockSearchHandle } from "../searchbox";
 import { refreshSparksIn, sparkSvg } from "../sparks";
-import { TRENDS, mountKline, setTrendPalette, trendPaletteKey, IND_DEFS, IND_CATS, IND_BY_KEY, type KlineChartHandle, type MainKey, type SubKey } from "./kline";
+import { TRENDS, mountKline, setTrendPalette, trendPaletteKey, IND_DEFS, IND_CATS, IND_BY_KEY, type KlineChartHandle, type MainKey, type SubKey, type RangeFund, type RangeStats, type PickBar } from "./kline";
 
 export const SEG6 = ["超卖", "低位", "弱势", "回升", "强势", "超买"];
 
@@ -40,6 +40,10 @@ export const mk = {
   minuteData: null as { date: string; prevClose: number | null; bars: Bar[] } | null,
   m60: null as Bar[] | null, // 60 分钟K（腾讯实时拉取，不落库）
   from: null as { page: string; label: string } | null,
+  /* 框选区间（K 线拖拽 → 右列资金卡同步）：null = 未框选，卡片走当日口径 */
+  range: null as (RangeStats & { fund: RangeFund | null; loading: boolean; note: string | null }) | null,
+  /* 单根选中（点击蜡烛 → 右列资金卡切该交易日）：与 range 互斥，null = 未选中 */
+  pick: null as (PickBar & { fund: RangeFund | null; loading: boolean; note: string | null }) | null,
 };
 if (!LAYOUT_PANELS[mk.layout]) mk.layout = "single";
 mk.panels = [...LAYOUT_PANELS[mk.layout]];
@@ -109,6 +113,10 @@ function applyPreset(p: Preset): void {
 export async function openStock(s: CurStock, from?: { page: string; label: string } | null): Promise<void> {
   mk.cur = s;
   mk.from = from ?? null;
+  // 换标的：框选区间 / 单根选中都作废（选区属于上一只票，跨标的同步资金是错误的）
+  mk.range = null;
+  mk.pick = null;
+  kls.forEach((k) => { k?.clearRange(false); k?.clearPick(false); });
   localStorage.setItem("yc_last_symbol", `${s.symbol}|${s.name}`);
   renderBackbar();
   updateWatchBtn();
@@ -361,8 +369,16 @@ export function initMarket(): void {
       document.querySelectorAll("#kl-panels .klp").forEach((x) =>
         x.classList.toggle("active", x === klp));
       syncPeriodSeg(mk.panels[i]);
+      // 框选模式跟着焦点面板走（同一时刻只有一个面板可框选）
+      if (document.getElementById("kl-range")?.classList.contains("on")) setKlRangeMode(true);
     }
   });
+  // 框选按钮：开=左键直接拖拽统计（图表平移暂停），关=恢复平移并清空区间
+  document.getElementById("kl-range")!.addEventListener("click", () => {
+    setKlRangeMode(!document.getElementById("kl-range")!.classList.contains("on"));
+  });
+  document.addEventListener("yc:kl-range", onKlRange);
+  document.addEventListener("yc:kl-pick", onKlPick);
   // 指数 ticker：初始 + 30s 轮询；点击跳转该指数K线
   void loadTicker();
   window.setInterval(() => void loadTicker(), 30000);
@@ -796,6 +812,122 @@ export function klResize(): void {
   kls.forEach((k) => k?.resize());
 }
 
+/* ── 框选区间统计（策影鼠标框选移植）──
+   图表只负责"选出哪一段 + 价格/量额"，标的与资金在这里补齐：
+   kline.ts 抛 yc:kl-range → 本次会话拉 /market/fundflow → 回填浮窗卡片 + 右列资金卡。
+   指数没有个股资金流（后端 available=false），前端降级为「仅成交额」，不当错误。 */
+let rangeToken = 0;
+
+/** 框选模式开关：同时只作用于焦点面板，其余面板恢复平移 */
+function setKlRangeMode(on: boolean): void {
+  kls.forEach((k, i) => k?.setRangeMode(on && i === mk.active));
+  document.getElementById("kl-range")?.classList.toggle("on", on);
+  if (!on) {
+    mk.range = null;
+    renderRight();
+  }
+}
+
+async function fetchRangeFund(rs: RangeStats): Promise<void> {
+  const s = mk.cur;
+  if (!s) return;
+  const token = ++rangeToken;
+  try {
+    const r: FundFlowRange = await marketApi.fundflow({
+      symbol: s.symbol, start: rs.startDate, end: rs.endDate, limit: 800,
+    });
+    if (token !== rangeToken || !mk.range) return;
+    const t = r.totals;
+    mk.range.fund = {
+      available: r.available && !!t,
+      covered: r.covered,
+      net_main: t?.net_main ?? null, net_super: t?.net_super ?? null,
+      net_large: t?.net_large ?? null, net_medium: t?.net_medium ?? null,
+      net_small: t?.net_small ?? null,
+    };
+    mk.range.note = r.note ?? null;
+    mk.range.loading = false;
+    activeKl()?.setRangeFund(mk.range.fund);   // 浮窗卡片补资金行
+    renderRight();                             // 右列资金卡切区间口径
+  } catch (e) {
+    if (token !== rangeToken || !mk.range) return;
+    mk.range.loading = false;
+    mk.range.fund = null;
+    mk.range.note = (e as Error).message || "资金流拉取失败";
+    activeKl()?.setRangeFund(null);
+    renderRight();
+  }
+}
+
+/** 图表框选回调（detail=null 表示清空选区） */
+function onKlRange(e: Event): void {
+  const d = (e as CustomEvent).detail as RangeStats | null;
+  if (!d) {
+    if (!mk.range) return;
+    mk.range = null;
+    renderRight();
+    return;
+  }
+  if (!mk.cur) return;
+  mk.pick = null;                              // 区间取代单根（同一张卡只表达一个口径）
+  mk.range = { ...d, fund: null, loading: true, note: null };
+  renderRight();
+  void fetchRangeFund(d);
+}
+
+/* ── 资金卡「单日态」：点击某根 K 线 → 该交易日的资金流 ──
+   价格侧用被点那根 bar 的口径（不是最新价），资金来自 /market/fundflow 单日；
+   分时/60 分周期的资金流是按日采集的，没有对应粒度 —— 只报成交额，不白拉接口。 */
+let pickToken = 0;
+
+async function fetchPickFund(date: string): Promise<void> {
+  const s = mk.cur;
+  if (!s || !mk.pick || mk.pick.date !== date) return;
+  const token = ++pickToken;
+  try {
+    const r: FundFlowRange = await marketApi.fundflow({
+      symbol: s.symbol, start: date, end: date, limit: 8,
+    });
+    if (token !== pickToken || !mk.pick || mk.pick.date !== date) return;
+    const it = r.items?.[0] ?? null;
+    mk.pick.fund = {
+      available: r.available && !!it, covered: it ? 1 : 0,
+      net_main: it?.net_main ?? null, net_super: it?.net_super ?? null,
+      net_large: it?.net_large ?? null, net_medium: it?.net_medium ?? null,
+      net_small: it?.net_small ?? null,
+    };
+    mk.pick.note = r.note ?? (it ? null : "该日无资金流数据（未采集 / 非交易日）");
+    mk.pick.loading = false;
+    renderRight();
+  } catch (e) {
+    if (token !== pickToken || !mk.pick || mk.pick.date !== date) return;
+    mk.pick.loading = false;
+    mk.pick.fund = null;
+    mk.pick.note = (e as Error).message || "资金流拉取失败";
+    renderRight();
+  }
+}
+
+/** 图表单根选中回调（detail=null 表示取消选中） */
+function onKlPick(e: Event): void {
+  const d = (e as CustomEvent).detail as PickBar | null;
+  if (!d) {
+    if (!mk.pick) return;
+    mk.pick = null;
+    renderRight();
+    return;
+  }
+  if (!mk.cur) return;
+  mk.range = null;                             // 单根取代区间
+  const intraday = d.date.length > 10;         // 分时/60分：无按日资金流
+  mk.pick = {
+    ...d, fund: null, loading: !intraday,
+    note: intraday ? "分时 / 60 分周期的资金流只有按日口径，切到日线可看该日资金" : null,
+  };
+  renderRight();
+  if (!intraday) void fetchPickFund(d.date);
+}
+
 function currentLayout(): KLayout {
   return document.body.classList.contains("mobile") ? "single" : mk.layout;
 }
@@ -809,6 +941,7 @@ function ensurePanelDom(): void {
   if (box.dataset.sig === sig) return;
   kls.forEach((k) => k?.destroy());
   kls = [];
+  panelKey.length = 0;                         // 实例重建：视图窗口记忆作废（新画布从最新开始）
   box.dataset.sig = sig;
   box.className = `kl-panels ly-${ly}`;
   // 面板仅承载图表本体：周期/布局/档位/缩放全部在 chartbar，信息条全局共享
@@ -819,6 +952,7 @@ function ensurePanelDom(): void {
 }
 
 /** 应用单个面板：周期聚合 + 指标（副图仅左右布局）+ 数据 + 图内图例 */
+const panelKey: string[] = [];                 // symbol|period：判「同标的重灌」还是「换标的」
 function applyPanel(i: number): void {
   const kl = kls[i];
   if (!kl || !mk.cur) return;
@@ -827,7 +961,11 @@ function applyPanel(i: number): void {
   // 分时主图固定为均价线（MA/趋势通道对每分钟假 K 线无意义），其余周期走默认预设
   kl.setMain(p === "t" ? ["avg"] : mk.mainInds);
   kl.setSub(SUB_OK[currentLayout()]?.[i] ? (p === "t" ? ["vol"] : mk.subInds) : []);
-  kl.setData(barsFor(p));
+  // 同标的同周期的重灌（盘中 12s 轮询）保留视图窗口，换标的/切周期才回到最新
+  const key = `${mk.cur.symbol}|${p}`;
+  const keep = panelKey[i] === key;
+  panelKey[i] = key;
+  kl.setData(barsFor(p), keep);
   kl.drawLegend(p === "t" ? ["avg"] : (SUB_OK[currentLayout()]?.[i] ? [...mk.mainInds] : mk.mainInds));
 }
 
@@ -872,6 +1010,8 @@ export function renderKline(): void {
   empty.style.display = "none";
   ensurePanelDom();
   kls.forEach((_, i) => applyPanel(i));
+  // 布局/周期切换可能重建面板实例：框选态跟着按钮态恢复（否则按钮亮着但拖不动）
+  if (document.getElementById("kl-range")?.classList.contains("on")) setKlRangeMode(true);
   renderKlpBar();
   // 分时/60分面板：换标的后缓存已清，按需补拉（策略图面：先空后满）
   const need = mk.panels.find((p) => (p === "t" && !mk.minuteData) || (p === "60" && !mk.m60));
@@ -890,6 +1030,13 @@ function syncPeriodSeg(p: PKey): void {
 function setPanelPeriod(i: number, p: PKey): void {
   if (mk.panels[i] === p) { syncPeriodSeg(p); return; }
   mk.panels[i] = p;
+  // 切周期 → 单根选中/框选区间失效（日线的「某一天」在周线/分时上没有对应 bar）
+  if (mk.pick || mk.range) {
+    mk.pick = null;
+    mk.range = null;
+    kls.forEach((k) => { k?.clearPick(false); k?.clearRange(false); });
+    renderRight();
+  }
   applyPanel(i);                               // 先渲染（缓存命中即刻有数据）
   void ensurePeriodData(p).then(() => {
     if (mk.panels[i] === p) applyPanel(i);     // 数据到达后重渲（未命中缓存时）
@@ -905,10 +1052,58 @@ function spark(seq: number[], w: number, h: number, color: string): string {
   const pts = seq.map((v, i) => (i * step).toFixed(1) + "," + (h - 2 - ((v - mn) / r) * (h - 4)).toFixed(1)).join(" ");
   return `<svg width="${w}" height="${h}" viewBox="0 0 ${w} ${h}" class="spk" aria-hidden="true"><polyline points="${pts}" fill="none" stroke="${color}" stroke-width="1.4" stroke-linecap="round" stroke-linejoin="round"/></svg>`;
 }
-function mbar(items: [string, number, string][]): string {
-  const mx = Math.max(...items.map((i) => Math.abs(i[1])), 1);
-  return `<div class="mbar">` + items.map((i) =>
-    `<div class="mbl"><span>${i[0]}</span><div class="mbt"><i style="width:${Math.max(4, Math.abs(i[1]) / mx * 100).toFixed(0)}%;background:${i[2]}"></i></div><b class="num ${i[1] >= 0 ? "up" : "down"}">${i[1] > 0 ? "+" : ""}${fmt(i[1])}</b></div>`).join("") + `</div>`;
+/* ── 资金流卡通用件 ──
+   约定：进红退绿（cn 口径下 --up 红 / --down 绿，随 data-dir 切换自动翻转），
+   数值恒带符号、恒以亿为单位；条形以零轴为中心左负右正 —— 方向与量级一眼可读。 */
+type FlowItem = [string, number | null];
+
+/** 方向色：正=流入(红) 负=流出(绿)；不到半个显示单位（50 万）视作持平（中性色） */
+function flowCls(v: number | null | undefined): string {
+  if (v == null || !isFinite(v) || Math.abs(v) < 5e5) return "";
+  return v > 0 ? "up" : "down";
+}
+
+/** 四档明细是否可信：新浪资金流有些交易日只回主力合计（分档全 0）。
+ *  四档代数和与主力差太远，就说明分档没覆盖 —— 此时别摆一排 0.00亿 冒充明细。 */
+function flowDetailOk(items: FlowItem[], main: number | null): boolean {
+  if (main == null || Math.abs(main) < 1e7) return true;          // 主力本身就小，分档为 0 无伤
+  const sum = items.reduce((s, [, v]) => s + (v ?? 0), 0);
+  return Math.abs(sum - main) <= Math.abs(main) * 0.3;
+}
+
+/** 分档缺口的说明行（与 rg-note 同一语言，不额外造样式） */
+const FLOW_DETAIL_MISSING = `<div class="rg-note">分档明细缺失（数据源只回了主力合计），四档条形不可用</div>`;
+
+/** 四档净额：名称 | 零轴双向条 | 带符号净额 */function flowRows(items: FlowItem[]): string {
+  const mx = Math.max(...items.map((i) => Math.abs(i[1] ?? 0)), 1e4);
+  return `<div class="mf-rows">` + items.map(([k, v]) => {
+    // 半幅 50%（最长的一条正好触边）；非零但极小的一档给 1.5% 保底，避免「有金额却看不到条」
+    const raw = Math.abs(v ?? 0) / mx * 50;
+    const dir = flowCls(v);
+    const w = dir ? Math.max(1.5, raw) : 0;                      // 持平档不画条（免得留一根灰刺）
+    const style = `${(v ?? 0) > 0 ? "left:50%" : "right:50%"};width:${w.toFixed(1)}%`;
+    return `<div class="mf-row"><span>${k}</span>` +
+      `<div class="mf-track"><i class="${dir}" style="${style}"></i></div>` +
+      `<b class="num ${dir}">${fmtYiS(v)}</b></div>`;
+  }).join("") + `</div>`;
+}
+
+/** 简版迷你图：四档按绝对值占比的堆叠条（红=净流入档 绿=净流出档） */
+function flowStack(items: FlowItem[], w = 78, h = 8): string {
+  const sum = items.reduce((s, i) => s + Math.abs(i[1] ?? 0), 0) || 1;
+  const segs = items.map(([, v]) => {
+    const p = Math.abs(v ?? 0) / sum * 100;
+    return p < 1 ? "" : `<i style="width:${p.toFixed(1)}%;background:var(--${(v ?? 0) >= 0 ? "up" : "down"})"></i>`;
+  }).join("");
+  return `<div class="mf-stack" style="width:${w}px;height:${h}px">${segs}</div>`;
+}
+
+/** 大数：主体与单位分开（单位小一号，避免「+7.22亿」整体压过标签） */
+function mfLead(label: string, text: string, cls = ""): string {
+  const m = text.match(/^(.*?)(万亿|亿|元|%|倍)?$/);
+  const [body, unit] = m ? [m[1], m[2] ?? ""] : [text, ""];
+  return `<div class="mf-lead"><div class="mf-k">${label}</div>` +
+    `<div class="mf-v ${cls}">${body}${unit ? `<i>${unit}</i>` : ""}</div></div>`;
 }
 
 /* ── 自选股卡片（首个多标的卡）：与左侧自选页同源 store.watchlist，
@@ -1006,6 +1201,115 @@ async function refreshWlQuotes(): Promise<void> {
   } catch { /* 静默：保留旧快照 */ } finally {
     wlQBusy = false;
   }
+}
+
+/* ── 资金卡「区间态」：K 线框选后接管卡片正文（策影 fundPanelMode='range' 同款） ──
+   口径：涨跌幅/成交额来自图表选区（与浮窗卡片一致），资金来自 /market/fundflow 合计；
+   指数 available=false → 只报成交额并注明原因，不伪装成 0 流入。 */
+/* ── 资金卡「单日态」：点击某根 K 线后接管卡片正文 ──
+   价格侧全部取被点那根 bar（不是最新价），资金来自该交易日的 capital_flow；
+   与区间态共用一套视觉语言（rg-head / mf-hd / rg-kv2 / flowRows）。 */
+function moneyflowPickBody(pk: NonNullable<typeof mk.pick>, mode: string): string {
+  const cls = pk.changePct >= 0 ? "up" : "down";
+  const f = pk.fund;
+  const main = f?.net_main ?? null;
+  const items: FlowItem[] = [
+    ["超大单", f?.net_super ?? null],
+    ["大单", f?.net_large ?? null],
+    ["中单", f?.net_medium ?? null],
+    ["小单", f?.net_small ?? null],
+  ];
+  const head = `<div class="rg-head"><span class="rg-tag">单日</span>` +
+    `<b class="num">${esc(pk.date)}</b>` +
+    `<button class="cbtn rg-x" data-pick-clear title="取消选中，回到当日资金">${ic("x", 11)}</button></div>`;
+  const ratio = main != null && pk.amount ? main / pk.amount * 100 : null;
+  if (mode === "simple") {
+    const fundLine = pk.loading ? "资金查询中…"
+      : f?.available ? `主力 <b class="num ${flowCls(main)}">${fmtYiS(main)}</b>`
+      : pk.note ? `<span style="color:var(--faint)">该日无资金流</span>`
+      : `成交额 <b class="num">${pk.amount ? fmtYi(pk.amount, 1) : "—"}</b>`;
+    return head +
+      `<div class="csimple"><div class="st">` +
+      `<div class="mf-k">日涨跌</div>` +
+      `<div class="mf-line"><b class="num ${cls}">${pk.changePct >= 0 ? "+" : ""}${pk.changePct.toFixed(2)}%</b>` +
+      `<span>${fundLine}</span></div></div>` +
+      `<div class="minifig">${f?.available && flowDetailOk(items, main) ? flowStack(items) : ""}</div></div>`;
+  }
+  const kv = (k: string, v: string) => `<div class="rg-kv"><span>${k}</span><b class="num">${v}</b></div>`;
+  const price =
+    `<div class="mf-hd">` +
+    mfLead("日涨跌", `${pk.changePct >= 0 ? "+" : ""}${pk.changePct.toFixed(2)}%`, cls) +
+    `<div class="mf-meta"><div>振幅 <b class="num">${pk.amp.toFixed(2)}%</b></div>` +
+    `<div>收 <b class="num ${cls}">${fmt(pk.close)}</b></div></div></div>` +
+    `<div class="rg-kv2">${kv("开", fmt(pk.open))}${kv("昨收", pk.prevClose != null ? fmt(pk.prevClose) : "—")}` +
+    // 早期日线可能缺 amount（复权表口径），缺就报 "—"，不摆 0.0亿 冒充
+    `${kv("成交额", pk.amount ? fmtYi(pk.amount, 1) : "—")}${kv("量", fmtVol(pk.volume / 100) + "手")}</div>` +
+    `<div class="rg-split"></div>`;
+  let fund: string;
+  if (pk.loading) {
+    fund = `<div class="rg-note">资金流查询中…</div>`;
+  } else if (!f || !f.available) {
+    // 后端 note 是区间口径的措辞（「区间内」「区间资金」），单日卡里换成该日
+    const note = (pk.note || "该标的无个股资金流（指数口径）")
+      .replace("区间内", "该日").replace("区间资金", "单日资金");
+    fund = `<div class="rg-note">${esc(note)}</div>`;
+  } else {
+    fund = `<div class="mf-hd">` + mfLead("主力净流入", fmtYiS(main), flowCls(main)) +
+      `<div class="mf-meta">${ratio != null ? `<div>占成交额 <b class="num">${ratio.toFixed(2)}%</b></div>` : ""}</div></div>` +
+      (flowDetailOk(items, main) ? flowRows(items) : FLOW_DETAIL_MISSING);
+  }
+  return head + price + fund;
+}
+
+function moneyflowRangeBody(rg: NonNullable<typeof mk.range>, mode: string): string {
+  const cls = rg.changePct >= 0 ? "up" : "down";
+  const f = rg.fund;
+  const main = f?.net_main ?? null;
+  const items: FlowItem[] = [
+    ["超大单", f?.net_super ?? null],
+    ["大单", f?.net_large ?? null],
+    ["中单", f?.net_medium ?? null],
+    ["小单", f?.net_small ?? null],
+  ];
+  const head = `<div class="rg-head"><span class="rg-tag">区间 ${rg.days} 根</span>` +
+    `<b class="num">${rg.startDate} → ${rg.endDate}</b>` +
+    `<button class="cbtn rg-x" data-range-clear title="清除区间，回到当日资金">${ic("x", 11)}</button></div>`;
+  if (mode === "simple") {
+    const fundLine = rg.loading ? "资金统计中…"
+      : f?.available ? `主力 <b class="num ${flowCls(main)}">${fmtYiS(main)}</b>`
+      : `成交额 <b class="num">${fmtYi(rg.amount, 1)}</b>`;
+    return head +
+      `<div class="csimple"><div class="st">` +
+      `<div class="mf-k">区间涨跌 · ${rg.days} 根</div>` +
+      `<div class="mf-line"><b class="num ${cls}">${rg.changePct >= 0 ? "+" : ""}${rg.changePct.toFixed(2)}%</b>` +
+      `<span>${fundLine}</span></div></div>` +
+      `<div class="minifig">${f?.available && flowDetailOk(items, main) ? flowStack(items) : ""}</div></div>`;
+  }
+  /* 价格侧：涨跌做成大字（视觉锚点），振幅/阳阴退成右侧小字，
+     最高最低与成交额做成两列键值 —— 不再是六行等权信息流 */
+  const kv = (k: string, v: string) =>
+    `<div class="rg-kv"><span>${k}</span><b class="num">${v}</b></div>`;
+  const price =
+    `<div class="mf-hd">` +
+    mfLead("区间涨跌", `${rg.changePct >= 0 ? "+" : ""}${rg.changePct.toFixed(2)}%`, cls) +
+    `<div class="mf-meta"><div>振幅 <b class="num">${rg.amp.toFixed(2)}%</b></div>` +
+    `<div>阳 / 阴 <b class="num">${rg.upN} / ${rg.downN}</b></div></div></div>` +
+    `<div class="rg-kv2">${kv("最高", fmt(rg.high))}${kv("最低", fmt(rg.low))}` +
+    `${kv("成交额", fmtYi(rg.amount, 1))}${kv("日均", fmtYi(rg.avgAmount, 1))}</div>` +
+    `<div class="rg-split"></div>`;
+  let fund: string;
+  if (rg.loading) {
+    fund = `<div class="rg-note">资金流统计中…</div>`;
+  } else if (!f || !f.available) {
+    fund = `<div class="rg-note">${esc(rg.note || "该标的无个股资金流（指数口径），区间资金请参考成交额")}</div>`;
+  } else {
+    // 覆盖天数只在有缺口时才提示（与卡片头的「N 根」重复时反而添乱）
+    const gap = f.covered < rg.days ? `<div>覆盖 ${f.covered} 天</div>` : "";
+    fund = `<div class="mf-hd">` + mfLead("主力净流入", fmtYiS(main), flowCls(main)) +
+      `<div class="mf-meta">${gap}</div></div>` +
+      (flowDetailOk(items, main) ? flowRows(items) : FLOW_DETAIL_MISSING);
+  }
+  return head + price + fund;
 }
 
 function cardBody(cid: string, mode: string): string {
@@ -1115,20 +1419,43 @@ function cardBody(cid: string, mode: string): string {
       `<div style="flex:1;background:var(--panel-2);border-radius:9px;padding:7px 9px"><div style="font-size:10px;color:var(--faint)">中线趋势</div><div style="font-size:13px;font-weight:650;color:var(--p1)">${midSeq[midSeq.length - 1] > midSeq[0] ? "上行" : "下行"}</div></div></div>`;
   }
   if (cid === "moneyflow") {
+    // 点击某根 K 线 → 单日口径；拖拽框选 → 区间口径；都没有 → 当日（清区即回当日）
+    if (mk.pick) return moneyflowPickBody(mk.pick, mode);
+    if (mk.range) return moneyflowRangeBody(mk.range, mode);
     const cf = q?.capital_flow;
-    const items: [string, number, string][] = [
-      ["超大单", (cf?.net_super ?? 0) / 1e8, "var(--up)"],
-      ["大单", (cf?.net_large ?? 0) / 1e8, "var(--up)"],
-      ["中单", (cf?.net_medium ?? 0) / 1e8, "var(--down)"],
-      ["小单", (cf?.net_small ?? 0) / 1e8, "var(--down)"],
+    const items: FlowItem[] = [
+      ["超大单", cf?.net_super ?? null],
+      ["大单", cf?.net_large ?? null],
+      ["中单", cf?.net_medium ?? null],
+      ["小单", cf?.net_small ?? null],
     ];
-    const main = (cf?.net_main ?? 0) / 1e8;
-    if (mode === "simple") {
-      return `<div class="csimple"><div class="st"><b class="num ${main >= 0 ? "up" : "down"}">${main > 0 ? "+" : ""}${fmt(main)}亿</b> 主力净流入<br><span style="font-size:10px;color:var(--faint)">超大单 +${fmt(items[0][1])} / 小单 ${fmt(items[3][1])}</span></div><div class="minifig">${mbar(items)}</div></div>`;
+    const main = cf?.net_main ?? null;
+    // 无资金流（指数 / 未采集）：不摆一排 0.00 冒充数据，改报成交额并给框选入口提示
+    if (!cf) {
+      const isIdx = (s.symbol || "").includes(".");
+      // 数据日期以最后一根日线为准：指数的 quote.date 会被实时快照写成「今天 21:50」，
+      // 周末/盘后直接展示会把成交额挂到非交易日上
+      const dstr = bars[bars.length - 1]?.date ?? (q?.date ?? "").slice(0, 10);
+      return `<div class="mf-hd">` + mfLead("今日成交额", fmtYi(q?.amount, 1)) +
+        `<div class="mf-meta"><div>${isIdx ? "指数无个股资金流" : "未采集资金流"}</div>` +
+        `<div class="num">${dstr}</div></div></div>` +
+        `<div class="rg-note">在 K 线上框选一段区间，可统计该区间涨跌幅与成交额${isIdx ? "" : " / 主力净流入"}</div>`;
     }
-    return `<div style="display:flex;align-items:baseline;gap:8px"><span style="font-size:20px;font-weight:700" class="num ${main >= 0 ? "up" : "down"}">${main > 0 ? "+" : ""}${fmt(main)}亿</span><span style="font-size:10.5px;color:var(--faint)">主力净流入${cf ? " · " + cf.date : "（无资金流数据）"}</span></div>` +
-      `<div class="flowbars">` + items.map((f) =>
-        `<div class="f"><div class="bar"><i style="height:${Math.round(Math.abs(f[1]) / 1.3 * 100)}%;background:${f[2]};opacity:.8"></i></div><div class="v num ${f[1] >= 0 ? "up" : "down"}">${f[1] > 0 ? "+" : ""}${fmt(f[1])}</div><div class="t">${f[0]}</div></div>`).join("") + `</div>`;
+    /* 资金流入强度：主力净额 / 当日成交额 —— 同样是 7 亿，成交 100 亿与成交 1000 亿的含义完全不同 */
+    const amt = q?.amount ?? null;
+    const ratio = main != null && amt ? main / amt * 100 : null;
+    if (mode === "simple") {
+      return `<div class="csimple"><div class="st">` +
+        `<div class="mf-k">主力净流入${cf.date ? ` · ${cf.date}` : ""}</div>` +
+        `<div class="mf-line"><b class="num ${flowCls(main)}">${fmtYiS(main)}</b>` +
+        (ratio != null ? `<span>占成交额 ${ratio.toFixed(2)}%</span>` : "") +
+        `</div></div><div class="minifig">${flowDetailOk(items, main) ? flowStack(items) : ""}</div></div>`;
+    }
+    return `<div class="mf-hd">` + mfLead("主力净流入", fmtYiS(main), flowCls(main)) +
+      `<div class="mf-meta">` +
+      (ratio != null ? `<div>占成交额 <b class="num">${ratio.toFixed(2)}%</b></div>` : "") +
+      `<div class="num">${cf.date || ""}</div></div></div>` +
+      (flowDetailOk(items, main) ? flowRows(items) : FLOW_DETAIL_MISSING);
   }
   if (cid === "indicators") {
     const closesN = bars.map((b) => b.close);
@@ -1288,6 +1615,22 @@ export function renderRight(): void {
     b.addEventListener("click", () => openModal("modal-vip")));
   el.querySelectorAll<HTMLElement>("[data-ic-go-core]").forEach((b) =>
     b.addEventListener("click", () => document.dispatchEvent(new CustomEvent("yc:goto-page", { detail: "corepicks" }))));
+  // 资金卡「清除区间」：撤掉选区与区间口径，回到当日资金
+  el.querySelectorAll<HTMLElement>("[data-range-clear]").forEach((b) =>
+    b.addEventListener("click", (e) => {
+      e.stopPropagation();
+      mk.range = null;
+      kls.forEach((k) => k?.clearRange(false));
+      renderRight();
+    }));
+  // 资金卡「取消单日」：撤掉单根选中（含图上高亮），回到当日资金
+  el.querySelectorAll<HTMLElement>("[data-pick-clear]").forEach((b) =>
+    b.addEventListener("click", (e) => {
+      e.stopPropagation();
+      mk.pick = null;
+      kls.forEach((k) => k?.clearPick(false));
+      renderRight();
+    }));
   el.querySelectorAll<HTMLElement>("[data-wl-add]").forEach((b) =>
     b.addEventListener("click", () => {
       // 空态引导：聚焦卡内搜索直接添加（不再跳自选页）

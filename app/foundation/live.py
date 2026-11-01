@@ -166,10 +166,16 @@ def _tx_quotes(symbols: List[str]) -> Dict[str, Dict[str, Any]]:
             sym = by_tx.get(tx_key) or by_code.get(p[2]) or p[2]
             # 海外行（usDJI/hkHSI）：核心位 3/4/5/31/32/33/34 与 A 股一致，扩展位是文本 → 关闭
             ext = len(p) > 46 and not _TX_GLOBAL_RE.match(sym)
+            # p[30] = 行情时间 "20261030150003"：K 线合并今日浮根时用它判归属日，
+            # 周末/节假日快照停在上个交易日，靠本地时间会补出假 bar
+            raw_ts = p[30] if len(p) > 30 else ""
+            qdate = (f"{raw_ts[:4]}-{raw_ts[4:6]}-{raw_ts[6:8]}"
+                     if len(raw_ts) >= 8 and raw_ts[:8].isdigit() else None)
             out[sym] = {
                 "name": p[1], "price": num(3), "prev_close": num(4),
                 "open": num(5), "high": num(33), "low": num(34),
                 "chg": num(31), "pct": num(32),
+                "qdate": qdate,
                 "amount": num(37) * 1e4 if num(37) is not None else None,   # 万元 → 元
                 "volume": num(36) * 100 if num(36) is not None else None,   # 手 → 股
                 # 扩展位（基本信息卡用；指数行这些位为空 → None）
@@ -198,6 +204,7 @@ def realtime_quote(symbol: str) -> Optional[Dict[str, Any]]:
         "amount": d["amount"], "volume": d["volume"],
         "turnover": d.get("turnover"), "pe_ttm": d.get("pe_ttm"), "pb": d.get("pb"),
         "total_mv_yi": d.get("total_mv_yi"), "circ_mv_yi": d.get("circ_mv_yi"),
+        "qdate": d.get("qdate"),                             # 行情归属日（腾讯 p[30]）
         "ts": time.strftime("%Y-%m-%d %H:%M"),
     }
 

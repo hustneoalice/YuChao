@@ -339,12 +339,820 @@
         }
       }
     },
+    "/api/v1/me/prefs": {
+      "get": {
+        "tags": [
+          "me"
+        ],
+        "summary": "当前用户偏好",
+        "operationId": "get_prefs_api_v1_me_prefs_get",
+        "parameters": [
+          {
+            "name": "token",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Token"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/PrefsOut"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      },
+      "put": {
+        "tags": [
+          "me"
+        ],
+        "summary": "写入偏好（深合并）",
+        "operationId": "put_prefs_api_v1_me_prefs_put",
+        "parameters": [
+          {
+            "name": "token",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Token"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/PrefsIn"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/PrefsOut"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/me/watchlist": {
+      "get": {
+        "tags": [
+          "me"
+        ],
+        "summary": "云端自选列表",
+        "operationId": "get_watchlist_api_v1_me_watchlist_get",
+        "parameters": [
+          {
+            "name": "token",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Token"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/WatchlistOut"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      },
+      "put": {
+        "tags": [
+          "me"
+        ],
+        "summary": "整表替换云端自选（≤500）",
+        "operationId": "put_watchlist_api_v1_me_watchlist_put",
+        "parameters": [
+          {
+            "name": "token",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Token"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/WatchlistIn"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/WatchlistOut"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/me/cards": {
+      "get": {
+        "tags": [
+          "me"
+        ],
+        "summary": "云端功能卡配置",
+        "operationId": "get_cards_api_v1_me_cards_get",
+        "parameters": [
+          {
+            "name": "token",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Token"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/CardsOut"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      },
+      "put": {
+        "tags": [
+          "me"
+        ],
+        "summary": "整表替换功能卡配置",
+        "operationId": "put_cards_api_v1_me_cards_put",
+        "parameters": [
+          {
+            "name": "token",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Token"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/CardsIn"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/CardsOut"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/me/llm": {
+      "get": {
+        "tags": [
+          "me"
+        ],
+        "summary": "大模型 BYOK 配置（key 不回显）",
+        "operationId": "get_llm_api_v1_me_llm_get",
+        "parameters": [
+          {
+            "name": "token",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Token"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/LlmOut"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      },
+      "put": {
+        "tags": [
+          "me"
+        ],
+        "summary": "写入大模型配置（api_key 传空串清除）",
+        "operationId": "put_llm_api_v1_me_llm_put",
+        "parameters": [
+          {
+            "name": "token",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Token"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/LlmIn"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/LlmOut"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/me/llm/test": {
+      "post": {
+        "tags": [
+          "me"
+        ],
+        "summary": "大模型连通测试（chat/completions）",
+        "description": "用已保存配置实测一次（max_tokens=1）。key 不回显 → 修改 key 后请先 PUT 再测试。",
+        "operationId": "test_llm_api_v1_me_llm_test_post",
+        "parameters": [
+          {
+            "name": "token",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Token"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/TestOut"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/me/feishu": {
+      "get": {
+        "tags": [
+          "me"
+        ],
+        "summary": "飞书推送配置（webhook 不回显）",
+        "operationId": "get_feishu_api_v1_me_feishu_get",
+        "parameters": [
+          {
+            "name": "token",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Token"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/FeishuOut"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      },
+      "put": {
+        "tags": [
+          "me"
+        ],
+        "summary": "写入飞书推送配置",
+        "operationId": "put_feishu_api_v1_me_feishu_put",
+        "parameters": [
+          {
+            "name": "token",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Token"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/FeishuIn"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/FeishuOut"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/me/feishu/test": {
+      "post": {
+        "tags": [
+          "me"
+        ],
+        "summary": "发送飞书测试消息",
+        "operationId": "test_feishu_api_v1_me_feishu_test_post",
+        "parameters": [
+          {
+            "name": "token",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Token"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/TestOut"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/market/fundflow": {
+      "get": {
+        "tags": [
+          "market"
+        ],
+        "summary": "区间资金流明细 + 合计（K 线框选统计同步右列资金卡）",
+        "description": "逐日 capital_flow（新浪唯一事实表）+ 区间合计。\n\n框选区间统计的资金口径与 K 线同源：前端框出 [startDate, endDate] 后一次拉齐，\n合计由服务端代数和给出，避免前端逐行累加口径漂移。",
+        "operationId": "fundflow_api_v1_market_fundflow_get",
+        "parameters": [
+          {
+            "name": "symbol",
+            "in": "query",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "description": "6 位代码，兼容 600519.SH / sh.600519；指数返回 available=false",
+              "title": "Symbol"
+            },
+            "description": "6 位代码，兼容 600519.SH / sh.600519；指数返回 available=false"
+          },
+          {
+            "name": "start",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "起始日期 YYYY-MM-DD",
+              "title": "Start"
+            },
+            "description": "起始日期 YYYY-MM-DD"
+          },
+          {
+            "name": "end",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "结束日期 YYYY-MM-DD",
+              "title": "End"
+            },
+            "description": "结束日期 YYYY-MM-DD"
+          },
+          {
+            "name": "limit",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "integer",
+              "maximum": 1200,
+              "minimum": 1,
+              "default": 400,
+              "title": "Limit"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/FundFlowRange"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/market/minute": {
+      "get": {
+        "tags": [
+          "market"
+        ],
+        "summary": "当日分时（价格线 + 均价线，腾讯实时，1 分钟粒度）",
+        "description": "策影 /api/data/intraday 同源移植：腾讯 minute/query。\n\n返回 bars：date 装到分钟的 datetime，o/h/l/c=分钟价（策影同款假 K 线渲染），\navg=累计成交额/累计成交量/100（VWAP 均价线），prev_close 供涨跌幅坐标。",
+        "operationId": "minute_api_v1_market_minute_get",
+        "parameters": [
+          {
+            "name": "symbol",
+            "in": "query",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "description": "6 位代码，兼容 sh.600519 形态",
+              "title": "Symbol"
+            },
+            "description": "6 位代码，兼容 sh.600519 形态"
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/market/sparks": {
+      "get": {
+        "tags": [
+          "market"
+        ],
+        "summary": "批量当日走势（自选列表 sparkline：降采样价格点 + 昨收）",
+        "description": "自选列表行内迷你走势：每只降采样 ≈40 点（首尾保留），昨收供涨跌着色与基线。\n\n腾讯 minute/query 一次一只 → 线程池 8 并发；单只失败归 missing 不拖垮整批。",
+        "operationId": "sparks_api_v1_market_sparks_get",
+        "parameters": [
+          {
+            "name": "symbols",
+            "in": "query",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "description": "逗号分隔代码，≤50 只",
+              "title": "Symbols"
+            },
+            "description": "逗号分隔代码，≤50 只"
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
     "/api/v1/market/kline": {
       "get": {
         "tags": [
           "market"
         ],
-        "summary": "K 线（复权在查询层派生）",
+        "summary": "K 线（复权在查询层派生；freq=60 为 60 分钟K）",
         "operationId": "kline_api_v1_market_kline_get",
         "parameters": [
           {
@@ -434,6 +1242,24 @@
               "default": 500,
               "title": "Limit"
             }
+          },
+          {
+            "name": "freq",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "60=60 分钟K（腾讯 mkline 实时，不落库）",
+              "title": "Freq"
+            },
+            "description": "60=60 分钟K（腾讯 mkline 实时，不落库）"
           }
         ],
         "responses": {
@@ -465,7 +1291,7 @@
         "tags": [
           "market"
         ],
-        "summary": "个股快照（最新日线+估值+资金流）",
+        "summary": "个股快照（最新日线+估值+资金流，盘中叠实时价）",
         "operationId": "quote_api_v1_market_quote_get",
         "parameters": [
           {
@@ -485,6 +1311,50 @@
               "application/json": {
                 "schema": {
                   "$ref": "#/components/schemas/Quote"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/market/quotes": {
+      "get": {
+        "tags": [
+          "market"
+        ],
+        "summary": "批量快照（自选股卡片：N 只一次渲染，一次腾讯实时 HTTP）",
+        "operationId": "quotes_api_v1_market_quotes_get",
+        "parameters": [
+          {
+            "name": "symbols",
+            "in": "query",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "description": "逗号分隔 ≤50 只，兼容 sh.600519 / 600519.SH / 000001.SH 指数形态",
+              "title": "Symbols"
+            },
+            "description": "逗号分隔 ≤50 只，兼容 sh.600519 / 600519.SH / 000001.SH 指数形态"
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/QuotesOut"
                 }
               }
             }
@@ -542,6 +1412,181 @@
                 "schema": {
                   "$ref": "#/components/schemas/Page_SearchHit_"
                 }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/market/indices": {
+      "get": {
+        "tags": [
+          "market"
+        ],
+        "summary": "指数 ticker 实时行情（东财批量，10s 缓存）",
+        "operationId": "indices_api_v1_market_indices_get",
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/market/news": {
+      "get": {
+        "tags": [
+          "market"
+        ],
+        "summary": "个股资讯（东财搜索，10min 缓存）",
+        "operationId": "news_api_v1_market_news_get",
+        "parameters": [
+          {
+            "name": "symbol",
+            "in": "query",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Symbol"
+            }
+          },
+          {
+            "name": "limit",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "integer",
+              "maximum": 30,
+              "minimum": 1,
+              "default": 12,
+              "title": "Limit"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/market/reports": {
+      "get": {
+        "tags": [
+          "market"
+        ],
+        "summary": "个股研报（东财 reportapi，2h 缓存）",
+        "operationId": "reports_api_v1_market_reports_get",
+        "parameters": [
+          {
+            "name": "symbol",
+            "in": "query",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Symbol"
+            }
+          },
+          {
+            "name": "limit",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "integer",
+              "maximum": 30,
+              "minimum": 1,
+              "default": 12,
+              "title": "Limit"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/market/industry-reports": {
+      "get": {
+        "tags": [
+          "market"
+        ],
+        "summary": "行业研报（按 universe 行业归属，2h 缓存）",
+        "operationId": "industry_reports_api_v1_market_industry_reports_get",
+        "parameters": [
+          {
+            "name": "symbol",
+            "in": "query",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Symbol"
+            }
+          },
+          {
+            "name": "limit",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "integer",
+              "maximum": 30,
+              "minimum": 1,
+              "default": 12,
+              "title": "Limit"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {}
               }
             }
           },
@@ -933,6 +1978,45 @@
         }
       }
     },
+    "/api/v1/data/update/cancel": {
+      "post": {
+        "tags": [
+          "data"
+        ],
+        "summary": "请求停止当前更新 / 清空排队（经控制通道交 updater 进程）",
+        "operationId": "update_cancel_api_v1_data_update_cancel_post",
+        "responses": {
+          "202": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/data/update/state": {
+      "get": {
+        "tags": [
+          "data"
+        ],
+        "summary": "更新编排快照（进行中/排队/最近任务的实时进度）",
+        "description": "读 updater 进程落盘的 update_progress.json（只读快照，节流 ~1s）。\n\n返回 {saved_at, running, queued, recent}；running 任务含 stage/percent/\ndone/total/rows/logs，驱动前端进度条。updater 未运行时返回空快照。",
+        "operationId": "update_state_api_v1_data_update_state_get",
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            }
+          }
+        }
+      }
+    },
     "/api/v1/data/updates": {
       "get": {
         "tags": [
@@ -1079,6 +2163,46 @@
                 "schema": {
                   "$ref": "#/components/schemas/HTTPValidationError"
                 }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/data/health": {
+      "get": {
+        "tags": [
+          "data"
+        ],
+        "summary": "数据体检评估（新鲜度/覆盖率/断档/落账 → 综合分）",
+        "description": "四维打分 0-100，分级 healthy/warn/poor；issues 带修复动作建议。\n\n写锁持有期间只读连接会被拒（DuckDB 跨进程互斥）——此时返回\nunavailable=true 而非 500，前端展示「体检暂时不可用，任务结束后重试」。",
+        "operationId": "health_api_v1_data_health_get",
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/data/repair": {
+      "post": {
+        "tags": [
+          "data"
+        ],
+        "summary": "一键修复：按体检结果生成修复计划并经控制通道提交",
+        "description": "体检 → 生成 actions（新鲜度落后→补触发对应任务、断档→历史回补、\n失败落账→force 重试）→ 逐条落控制通道交 updater 执行（与手动触发\n同一链路，编排器去重/冷却兜底）。一次最多提交 4 个动作（队列串行）。",
+        "operationId": "repair_api_v1_data_repair_post",
+        "responses": {
+          "202": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {}
               }
             }
           }
@@ -1273,6 +2397,18 @@
             ],
             "title": "Turnover Rate"
           },
+          "live": {
+            "anyOf": [
+              {
+                "type": "boolean"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Live",
+            "description": "盘中实时合并的「今日未收盘 bar」标记（非库内落库数据）"
+          },
           "indicators": {
             "anyOf": [
               {
@@ -1374,6 +2510,67 @@
         ],
         "title": "CapitalFlowDay",
         "description": "capital_flow 最新行（资金流唯一事实表，1.0 字段原样）。"
+      },
+      "CardItem": {
+        "properties": {
+          "card_id": {
+            "type": "string",
+            "maxLength": 32,
+            "title": "Card Id"
+          },
+          "enabled": {
+            "type": "boolean",
+            "title": "Enabled",
+            "default": true
+          },
+          "sort": {
+            "type": "integer",
+            "title": "Sort",
+            "default": 0
+          },
+          "mode": {
+            "type": "string",
+            "title": "Mode",
+            "default": "simple"
+          }
+        },
+        "type": "object",
+        "required": [
+          "card_id"
+        ],
+        "title": "CardItem"
+      },
+      "CardsIn": {
+        "properties": {
+          "items": {
+            "items": {
+              "$ref": "#/components/schemas/CardItem"
+            },
+            "type": "array",
+            "title": "Items"
+          }
+        },
+        "type": "object",
+        "required": [
+          "items"
+        ],
+        "title": "CardsIn"
+      },
+      "CardsOut": {
+        "properties": {
+          "items": {
+            "items": {
+              "$ref": "#/components/schemas/CardItem"
+            },
+            "type": "array",
+            "title": "Items"
+          }
+        },
+        "type": "object",
+        "required": [
+          "items"
+        ],
+        "title": "CardsOut"
       },
       "CodesIn": {
         "properties": {
@@ -1616,6 +2813,204 @@
         "type": "object",
         "title": "ExportTrigger"
       },
+      "FeishuIn": {
+        "properties": {
+          "webhook_url": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Webhook Url"
+          },
+          "secret": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Secret"
+          },
+          "enabled": {
+            "anyOf": [
+              {
+                "type": "boolean"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Enabled"
+          }
+        },
+        "type": "object",
+        "title": "FeishuIn"
+      },
+      "FeishuOut": {
+        "properties": {
+          "enabled": {
+            "type": "boolean",
+            "title": "Enabled",
+            "default": false
+          },
+          "webhook_set": {
+            "type": "boolean",
+            "title": "Webhook Set",
+            "default": false
+          },
+          "has_secret": {
+            "type": "boolean",
+            "title": "Has Secret",
+            "default": false
+          }
+        },
+        "type": "object",
+        "title": "FeishuOut"
+      },
+      "FundFlowRange": {
+        "properties": {
+          "symbol": {
+            "type": "string",
+            "title": "Symbol"
+          },
+          "start": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Start"
+          },
+          "end": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "End"
+          },
+          "items": {
+            "items": {
+              "$ref": "#/components/schemas/CapitalFlowDay"
+            },
+            "type": "array",
+            "title": "Items",
+            "default": []
+          },
+          "totals": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/FundFlowTotals"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "covered": {
+            "type": "integer",
+            "title": "Covered",
+            "description": "区间内有资金流数据的天数",
+            "default": 0
+          },
+          "available": {
+            "type": "boolean",
+            "title": "Available",
+            "default": true
+          },
+          "note": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Note"
+          }
+        },
+        "type": "object",
+        "required": [
+          "symbol"
+        ],
+        "title": "FundFlowRange",
+        "description": "区间资金流明细 + 合计（K 线框选统计同步右列资金卡）。\n\navailable=False 表示该标的本身没有个股资金流（指数），items 为空、\nnote 说明原因 —— 前端据此降级为「仅成交额」口径，不当作错误。"
+      },
+      "FundFlowTotals": {
+        "properties": {
+          "net_main": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Net Main"
+          },
+          "net_super": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Net Super"
+          },
+          "net_large": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Net Large"
+          },
+          "net_medium": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Net Medium"
+          },
+          "net_small": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Net Small"
+          }
+        },
+        "type": "object",
+        "title": "FundFlowTotals",
+        "description": "区间资金流合计（框选统计用：区间内逐日 capital_flow 求和）。"
+      },
       "HTTPValidationError": {
         "properties": {
           "detail": {
@@ -1704,6 +3099,82 @@
         ],
         "title": "Kline"
       },
+      "LlmIn": {
+        "properties": {
+          "base_url": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Base Url"
+          },
+          "api_key": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Api Key"
+          },
+          "model": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Model"
+          },
+          "enabled": {
+            "anyOf": [
+              {
+                "type": "boolean"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Enabled"
+          }
+        },
+        "type": "object",
+        "title": "LlmIn"
+      },
+      "LlmOut": {
+        "properties": {
+          "base_url": {
+            "type": "string",
+            "title": "Base Url",
+            "default": ""
+          },
+          "model": {
+            "type": "string",
+            "title": "Model",
+            "default": ""
+          },
+          "enabled": {
+            "type": "boolean",
+            "title": "Enabled",
+            "default": false
+          },
+          "key_set": {
+            "type": "boolean",
+            "title": "Key Set",
+            "default": false
+          }
+        },
+        "type": "object",
+        "title": "LlmOut"
+      },
       "LoginIn": {
         "properties": {
           "identifier": {
@@ -1714,6 +3185,12 @@
           "password": {
             "type": "string",
             "title": "Password"
+          },
+          "remember": {
+            "type": "boolean",
+            "title": "Remember",
+            "description": "记住我：30 天令牌；否则 1 天",
+            "default": true
           }
         },
         "type": "object",
@@ -1763,6 +3240,35 @@
         ],
         "title": "Pool",
         "description": "核心标池：chase 追涨 / dip 低吸。"
+      },
+      "PrefsIn": {
+        "properties": {
+          "prefs": {
+            "additionalProperties": true,
+            "type": "object",
+            "title": "Prefs",
+            "description": "偏好键值（深合并写入）"
+          }
+        },
+        "type": "object",
+        "required": [
+          "prefs"
+        ],
+        "title": "PrefsIn"
+      },
+      "PrefsOut": {
+        "properties": {
+          "prefs": {
+            "additionalProperties": true,
+            "type": "object",
+            "title": "Prefs"
+          }
+        },
+        "type": "object",
+        "required": [
+          "prefs"
+        ],
+        "title": "PrefsOut"
       },
       "Quote": {
         "properties": {
@@ -1932,6 +3438,39 @@
                 "type": "null"
               }
             ]
+          },
+          "rt_price": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Rt Price"
+          },
+          "rt_time": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Rt Time"
+          },
+          "rt_prev_close": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Rt Prev Close"
           }
         },
         "type": "object",
@@ -1940,6 +3479,31 @@
         ],
         "title": "Quote",
         "description": "个股快照：最新日线 + 估值 + 当日资金流 + 池内档案。"
+      },
+      "QuotesOut": {
+        "properties": {
+          "items": {
+            "items": {
+              "$ref": "#/components/schemas/Quote"
+            },
+            "type": "array",
+            "title": "Items"
+          },
+          "missing": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array",
+            "title": "Missing",
+            "default": []
+          }
+        },
+        "type": "object",
+        "required": [
+          "items"
+        ],
+        "title": "QuotesOut",
+        "description": "批量快照（自选股卡片等 N 只一次渲染）：items 顺序与入参一致，\nmissing 为任何表都查不到的入参（含归一后形式）。"
       },
       "RedeemIn": {
         "properties": {
@@ -2226,6 +3790,39 @@
               }
             ],
             "title": "Leader Change"
+          },
+          "member_count": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Member Count"
+          },
+          "main_net_today": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Main Net Today"
+          },
+          "main_net_5d": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Main Net 5D"
           }
         },
         "type": "object",
@@ -2235,7 +3832,7 @@
           "trade_date"
         ],
         "title": "SectorSummary",
-        "description": "sector_index 最新交易日一行（1.0 字段原样；id 即板块名）。"
+        "description": "sector_index 最新交易日一行（id 即板块名）。\n\n2.1 追加板块级聚合（策影板块强度表核心列）：主力净流入按\nstock_universe.industry rollup capital_flow，成分数同源。"
       },
       "SectorType": {
         "type": "string",
@@ -2272,6 +3869,28 @@
               }
             ],
             "title": "Latest Date"
+          },
+          "earliest_date": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Earliest Date"
+          },
+          "coverage": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Coverage"
           }
         },
         "type": "object",
@@ -2279,6 +3898,24 @@
           "table"
         ],
         "title": "TableStatus"
+      },
+      "TestOut": {
+        "properties": {
+          "ok": {
+            "type": "boolean",
+            "title": "Ok"
+          },
+          "message": {
+            "type": "string",
+            "title": "Message"
+          }
+        },
+        "type": "object",
+        "required": [
+          "ok",
+          "message"
+        ],
+        "title": "TestOut"
       },
       "TokenPair": {
         "properties": {
@@ -2488,6 +4125,74 @@
         ],
         "title": "Valuation",
         "description": "daily_valuation 最新行（1.0 字段原样）。"
+      },
+      "WatchItem": {
+        "properties": {
+          "symbol": {
+            "type": "string",
+            "maxLength": 16,
+            "title": "Symbol"
+          },
+          "name": {
+            "type": "string",
+            "title": "Name",
+            "default": ""
+          },
+          "group": {
+            "type": "string",
+            "title": "Group",
+            "default": "默认"
+          },
+          "ts": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Ts"
+          }
+        },
+        "type": "object",
+        "required": [
+          "symbol"
+        ],
+        "title": "WatchItem"
+      },
+      "WatchlistIn": {
+        "properties": {
+          "items": {
+            "items": {
+              "$ref": "#/components/schemas/WatchItem"
+            },
+            "type": "array",
+            "maxItems": 500,
+            "title": "Items"
+          }
+        },
+        "type": "object",
+        "required": [
+          "items"
+        ],
+        "title": "WatchlistIn"
+      },
+      "WatchlistOut": {
+        "properties": {
+          "items": {
+            "items": {
+              "$ref": "#/components/schemas/WatchItem"
+            },
+            "type": "array",
+            "title": "Items"
+          }
+        },
+        "type": "object",
+        "required": [
+          "items"
+        ],
+        "title": "WatchlistOut"
       },
       "WithParam": {
         "type": "string",

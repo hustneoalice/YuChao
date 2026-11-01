@@ -141,11 +141,15 @@ export interface FundFlowRange {
   note?: string | null;
 }
 export interface TargetItem {
-  symbol: string; name?: string | null; close?: number | null; vol?: number | null;
+  symbol: string; name?: string | null; close?: number | null; pct_chg?: number | null;
   vol_ma40?: number | null; vol_ratio?: number | null; vol_hit: boolean;
   short_orange: boolean; mid_orange: boolean;
   limit_up_20d: boolean; limit_up_cnt: number;
   seg: number; seg_name: string; pullback: boolean;
+}
+
+export interface TargetScanOut {
+  scanned: number; total_hits: number; as_of: string; items: TargetItem[];
 }
 
 export const marketApi = {
@@ -162,8 +166,8 @@ export const marketApi = {
   /* 批量快照（自选股卡片：N 只一次渲染，一次腾讯实时 HTTP；≤50 只） */
   quotes: (symbols: string[]) =>
     req<{ items: Quote[]; missing: string[] }>(`/market/quotes?symbols=${encodeURIComponent(symbols.join(","))}`),
-  targets: (symbols: string[]) =>
-    req<TargetItem[]>(`/market/targets?symbols=${encodeURIComponent(symbols.join(","))}`),
+  targets: (conds: string, limit = 300) =>
+    req<TargetScanOut>(`/market/targets?conds=${encodeURIComponent(conds)}&limit=${limit}`),
   sparks: (symbols: string[]) =>
     req<{ items: { symbol: string; prev_close: number | null; points: number[] }[]; missing: string[] }>(`/market/sparks?symbols=${encodeURIComponent(symbols.join(","))}`),
   search: (q: string, limit = 10) => req<{ items: SearchHit[]; total: number }>(`/market/search?q=${encodeURIComponent(q)}&limit=${limit}`),
