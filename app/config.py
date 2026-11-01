@@ -26,6 +26,8 @@ class Settings(BaseSettings):
     redis_url: str | None = None
     # M3 数据包（PRD F14）：导出目录 / 初始包导入均经 updater 排队执行
     export_dir: Path = Path(__file__).resolve().parent.parent / "data" / "exports"
+    # 北交所开关（参考策影）：关闭时全系统不考虑北交所标的（搜索/行情/K线/目标一概过滤）
+    bj_enabled: bool = False
 
     model_config = {"env_prefix": "YUCHAO_", "env_file": ".env", "extra": "ignore"}
 

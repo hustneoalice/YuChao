@@ -50,3 +50,13 @@ def normalize_symbol(symbol: str) -> str:
     if len(s) > 6 and s[:2] in ("SH", "SZ", "BJ"):
         s = s[2:]
     return s
+
+
+# 北交所个股段：43x/83x/87x（老股）与 920 段（现行）；899050 等指数形态不在此列
+_BJ_PREFIXES = ("43", "83", "87", "92")
+
+
+def is_bj(symbol: str) -> bool:
+    """北交所个股判定（裸码段位）。指数 899050.BJ 不算个股。"""
+    s = str(symbol).strip().upper().split(".")[0]
+    return len(s) == 6 and s[:2] in _BJ_PREFIXES

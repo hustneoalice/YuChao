@@ -309,3 +309,56 @@ def test_data_not_ready_503(tmp_path, monkeypatch):
     with TestClient(app) as c:
         r = c.get("/api/v1/data/status")
         assert r.status_code == 503 and r.json()["code"] == "data_not_ready"
+
+
+def test_market_targets(client: TestClient, duckdb_file):
+    """目标视图（策影目标页同源口径）：四条件 + 六分段 + 回调；ST/北交所剔除。"""
+    import duckdb
+
+    con = duckdb.connect(str(duckdb_file))
+    con.executemany(
+        "INSERT OR REPLACE INTO stock_universe VALUES (?,?,?,?,?,?,CURRENT_TIMESTAMP)",
+        [("600555", "*ST海创", "SH", "综合", "traded", "2000-01-01"),
+         ("832000", "北交样本", "BJ", "综合", "traded", "2015-01-01")])
+    con.close()
+
+    r = client.get("/api/v1/market/targets",
+                   params={"symbols": "600519,000858,600555,832000"})
+    assert r.status_code == 200
+    items = {x["symbol"]: x for x in r.json()}
+    assert set(items) == {"600519", "000858"}       # ST 剔除；北交所开关默认关
+    t = items["600519"]                             # 种子 60 根单边上升
+    assert t["name"] == "贵州茅台"
+    assert t["short_orange"] and t["mid_orange"] and t["vol_hit"]
+    assert t["seg"] == 6 and t["seg_name"] == "超买"
+    assert t["pullback"] is False
+    assert t["limit_up_20d"] is False and t["limit_up_cnt"] == 0
+    assert t["vol_ratio"] is not None and t["vol_ratio"] > 0.99
+
+    # 近 20 日涨停：000858 最近一根日线抬到主板涨停幅度（10.5% ≥ 9.9 阈值）
+    con = duckdb.connect(str(duckdb_file))
+    con.execute(
+        "UPDATE daily_ohlcv SET pct_chg = 10.5 WHERE symbol = '000858'"
+        " AND date = (SELECT MAX(date) FROM daily_ohlcv WHERE symbol = '000858')")
+    con.close()
+    r = client.get("/api/v1/market/targets", params={"symbols": "000858"})
+    t = r.json()[0]
+    assert t["limit_up_20d"] is True and t["limit_up_cnt"] == 1
+
+
+def test_search_bj_switch(client: TestClient, duckdb_file, monkeypatch):
+    """北交所开关：关闭（默认）时搜索结果不含北交所标的，开启后恢复。"""
+    import duckdb
+
+    from app.config import settings
+
+    con = duckdb.connect(str(duckdb_file))
+    con.execute(
+        "INSERT OR REPLACE INTO stock_universe VALUES (?,?,?,?,?,?,CURRENT_TIMESTAMP)",
+        ("832000", "北交样本", "BJ", "综合", "traded", "2015-01-01"))
+    con.close()
+    r = client.get("/api/v1/market/search", params={"q": "北交样本"})
+    assert [x["symbol"] for x in r.json()["items"]] == []
+    monkeypatch.setattr(settings, "bj_enabled", True)
+    r = client.get("/api/v1/market/search", params={"q": "北交样本"})
+    assert [x["symbol"] for x in r.json()["items"]] == ["832000"]

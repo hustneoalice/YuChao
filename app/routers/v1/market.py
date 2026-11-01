@@ -6,11 +6,12 @@ from typing import Optional
 from fastapi import APIRouter, Depends, Query
 
 from ...contracts.common import Adjust, Page, WithParam
-from ...contracts.market import Kline, Quote, QuotesOut, SearchHit
+from ...contracts.market import FundFlowRange, Kline, Quote, QuotesOut, SearchHit, TargetItem
 from ...errors import vip_required
 from ...foundation import repo
 from ...foundation.db import get_conn
 from ...foundation import live
+from ...foundation.symbol import index_form, normalize_symbol
 from ...updater.collectors.http import _UA, client as tx_client, tx_symbol
 from pydantic import TypeAdapter
 
@@ -40,6 +41,23 @@ def _tx_fetch(url: str, params: Optional[dict] = None):
                       headers={"User-Agent": _UA, "Referer": _TX_REFERER})
     r.raise_for_status()
     return r.json()
+
+
+@router.get("/market/fundflow", response_model=FundFlowRange,
+            summary="区间资金流明细 + 合计（K 线框选统计同步右列资金卡）")
+def fundflow(
+    symbol: str = Query(description="6 位代码，兼容 600519.SH / sh.600519；指数返回 available=false"),
+    start: Optional[str] = Query(default=None, description="起始日期 YYYY-MM-DD"),
+    end: Optional[str] = Query(default=None, description="结束日期 YYYY-MM-DD"),
+    limit: int = Query(default=400, ge=1, le=1200),
+    conn=Depends(get_conn),
+):
+    """逐日 capital_flow（新浪唯一事实表）+ 区间合计。
+
+    框选区间统计的资金口径与 K 线同源：前端框出 [startDate, endDate] 后一次拉齐，
+    合计由服务端代数和给出，避免前端逐行累加口径漂移。
+    """
+    return repo.market.get_capital_flow_range(conn, symbol, start, end, limit)
 
 
 @router.get("/market/minute", summary="当日分时（价格线 + 均价线，腾讯实时，1 分钟粒度）")
@@ -152,18 +170,30 @@ def _merge_live_bar(bars: list, symbol: str, adjust: Adjust) -> list:
     if not rt or not rt.get("price"):
         return bars
     today = date.today().isoformat()
-    rt_date = (rt.get("ts") or "")[:10]
-    if rt_date != today:                                # 守卫 1
+    # 守卫 1：行情归属日必须是今天。优先用腾讯快照的真实行情日（qdate），
+    # 只有 ts（本地抓取时刻）会在周末/节假日把上一交易日的快照伪装成"今日"，
+    # 从而补出一根假 bar（2026-10-31 周六实测：上证指数多出一根 3547 的假线）。
+    rt_date = (rt.get("qdate") or rt.get("ts") or "")[:10]
+    if rt_date != today:
+        return bars
+    if date.today().weekday() >= 5:                     # 周末双保险：无交易不可能有今日 bar
         return bars
     last = bars[-1]
     last_date = (last.get("date") or "")[:10]
     if rt_date < last_date:                             # 守卫 3
         return bars
     scale = 1.0
-    if adjust is not Adjust.raw and rt.get("prev_close"):
+    # 指数 / 海外指数无复权因子，实时价与库内同为原始价，任何缩放都是错
+    is_index = index_form(symbol) is not None
+    if adjust is not Adjust.raw and not is_index and rt.get("prev_close"):
         prev_qfq = bars[-2]["close"] if last_date == today and len(bars) > 1 else last["close"]
         if prev_qfq and rt["prev_close"]:
-            scale = prev_qfq / rt["prev_close"] or 1.0
+            ratio = prev_qfq / rt["prev_close"]
+            # 守卫 4：跨源昨收对不上（>2%）说明快照陈旧或复权口径错位，
+            # 此时宁可不合并，也不能把一根缩放过 3% 的假 bar 塞进 K 线尾巴
+            if abs(ratio - 1) > 0.02:
+                return bars
+            scale = ratio or 1.0
     f = lambda v: (v * scale) if v is not None else None  # noqa: E731
     o, h, l, c = f(rt.get("open")), f(rt.get("high")), f(rt.get("low")), f(rt["price"])
     c_l = min((v for v in (l, o, c) if v is not None), default=None)
@@ -349,3 +379,24 @@ def industry_reports(symbol: str, limit: int = Query(default=12, ge=1, le=30),
         return live.industry_reports(conn, symbol, limit)
     except Exception:
         return {"industry": "", "items": [], "skipped": True}
+
+
+@router.get("/market/targets", response_model=list[TargetItem],
+            summary="自选目标视图（策影目标页同源口径：四条件 + 六分段 + 回调；ST 与北交所服务端剔除）")
+def targets(symbols: str = Query(description="逗号分隔 6 位代码，≤50 只"),
+            conn=Depends(get_conn)):
+    """批量计算目标条件：与 K 线图表指标同一套公式（策影 indicatorRegistry 同源）。
+
+    条件① 40日均量 = 当日量 ≥ MA40(volume)；② 短线趋势橙 = 收盘 > MA10；
+    ③ 中线趋势橙 = 收盘 > MA45；④ 近 20 个交易日有涨停（pct_chg 阈值口径）。
+    ST 名称直接剔除；北交所按 bj_enabled 开关过滤。"""
+    syms, seen = [], set()
+    for s in symbols.split(","):
+        s = normalize_symbol(s.strip())
+        if s and s not in seen:
+            seen.add(s)
+            syms.append(s)
+    if not syms:
+        return []
+    return TypeAdapter(list[TargetItem]).validate_python(
+        repo.market.stock_targets(conn, syms[:50]))

@@ -127,6 +127,27 @@ export interface IndexQuote {
   symbol: string; name: string; price?: number | null; chg?: number | null;
   pct?: number | null; amount?: number | null;
 }
+/* 区间资金流（K 线框选统计 → 右列资金卡）：available=false 为指数（无个股资金流） */
+export interface FundFlowTotals {
+  net_main?: number | null; net_super?: number | null; net_large?: number | null;
+  net_medium?: number | null; net_small?: number | null;
+}
+export interface FundFlowRange {
+  symbol: string; start?: string | null; end?: string | null;
+  items: ({ date: string } & FundFlowTotals)[];
+  totals?: FundFlowTotals | null;
+  covered: number;
+  available: boolean;
+  note?: string | null;
+}
+export interface TargetItem {
+  symbol: string; name?: string | null; close?: number | null; vol?: number | null;
+  vol_ma40?: number | null; vol_ratio?: number | null; vol_hit: boolean;
+  short_orange: boolean; mid_orange: boolean;
+  limit_up_20d: boolean; limit_up_cnt: number;
+  seg: number; seg_name: string; pullback: boolean;
+}
+
 export const marketApi = {
   kline: (q: { symbol: string; adjust?: string; with?: string; limit?: number; start?: string; end?: string; freq?: string }) =>
     req<Kline>(`/market/kline?${new URLSearchParams(Object.entries(q).filter(([, v]) => v != null).map(([k, v]) => [k, String(v)]))}`),
@@ -134,9 +155,15 @@ export const marketApi = {
   minute: (symbol: string) =>
     req<{ symbol: string; date: string; prev_close?: number; bars: (Bar & { avg: number; has_avg?: boolean })[] }>(`/market/minute?symbol=${encodeURIComponent(symbol)}`),
   quote: (symbol: string) => req<Quote>(`/market/quote?symbol=${encodeURIComponent(symbol)}`),
+  /* 区间资金流：框选 [start,end] 后一次拉齐，合计由服务端代数和给出 */
+  fundflow: (q: { symbol: string; start?: string; end?: string; limit?: number }) =>
+    req<FundFlowRange>(`/market/fundflow?${new URLSearchParams(
+      Object.entries(q).filter(([, v]) => v != null).map(([k, v]) => [k, String(v)]))}`),
   /* 批量快照（自选股卡片：N 只一次渲染，一次腾讯实时 HTTP；≤50 只） */
   quotes: (symbols: string[]) =>
     req<{ items: Quote[]; missing: string[] }>(`/market/quotes?symbols=${encodeURIComponent(symbols.join(","))}`),
+  targets: (symbols: string[]) =>
+    req<TargetItem[]>(`/market/targets?symbols=${encodeURIComponent(symbols.join(","))}`),
   sparks: (symbols: string[]) =>
     req<{ items: { symbol: string; prev_close: number | null; points: number[] }[]; missing: string[] }>(`/market/sparks?symbols=${encodeURIComponent(symbols.join(","))}`),
   search: (q: string, limit = 10) => req<{ items: SearchHit[]; total: number }>(`/market/search?q=${encodeURIComponent(q)}&limit=${limit}`),

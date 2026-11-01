@@ -2,7 +2,8 @@
 from typing import Optional
 
 from .. import db
-from ..symbol import INDEX_NAMES, index_form, normalize_symbol
+from ..symbol import INDEX_NAMES, index_form, is_bj, normalize_symbol
+from ...config import settings
 from ...errors import not_found
 from ...contracts.common import Adjust
 from ...foundation.indicators import standard_indicators
@@ -11,6 +12,8 @@ _UNIVERSE_COLS = "symbol, name, market, industry, status"
 
 
 def universe_entry(conn, symbol: str) -> Optional[dict]:
+    if not settings.bj_enabled and is_bj(symbol):
+        return None                             # 北交所开关关闭：档案视为不存在
     row = conn.execute(
         f"SELECT {_UNIVERSE_COLS} FROM stock_universe WHERE symbol = ?", [symbol]
     ).fetchone()
@@ -161,6 +164,70 @@ def get_quote(conn, symbol: str) -> dict:
     return out
 
 
+_FLOW_KEYS = ("net_main", "net_super", "net_large", "net_medium", "net_small")
+
+
+def get_capital_flow_range(
+    conn,
+    symbol: str,
+    start: Optional[str] = None,
+    end: Optional[str] = None,
+    limit: int = 400,
+) -> dict:
+    """区间资金流明细 + 合计（K 线框选统计 → 右列资金卡同步）。
+
+    capital_flow 只有个股（更新器口径：指数无资金流），指数形态直接返回
+    available=False + note，前端降级为「仅成交额」，不当作 404。
+    返回行按日期正序，totals 为区间内各档净额的代数和（缺值为 None 不参与求和）。
+    """
+    idx = index_form(symbol)
+    if idx is not None and conn.execute(
+        "SELECT 1 FROM daily_ohlcv WHERE symbol = ? LIMIT 1", [idx]
+    ).fetchone():
+        return {
+            "symbol": idx,
+            "start": start, "end": end,
+            "items": [], "totals": None, "covered": 0,
+            "available": False,
+            "note": "指数无个股资金流（capital_flow 仅覆盖个股），区间资金请参考成交额",
+        }
+
+    sym = normalize_symbol(symbol)
+    conds, params = ["symbol = ?"], [sym]
+    if start:
+        conds.append("date >= ?")
+        params.append(start)
+    if end:
+        conds.append("date <= ?")
+        params.append(end)
+    rows = conn.execute(
+        f"""
+        SELECT date, {', '.join(_FLOW_KEYS)} FROM capital_flow
+        WHERE {' AND '.join(conds)}
+        ORDER BY date DESC LIMIT ?
+        """,
+        [*params, limit],
+    ).fetchall()
+    rows.reverse()
+    items = [
+        {"date": str(r[0]), **dict(zip(_FLOW_KEYS, r[1:]))}
+        for r in rows
+    ]
+    totals = {
+        k: (sum(x[k] for x in items if x[k] is not None)
+            if any(x[k] is not None for x in items) else None)
+        for k in _FLOW_KEYS
+    }
+    return {
+        "symbol": sym, "start": start, "end": end,
+        "items": items,
+        "totals": totals if items else None,
+        "covered": len(items),
+        "available": bool(items),
+        "note": None if items else "区间内无资金流数据（该标的未采集 capital_flow）",
+    }
+
+
 def get_quotes(conn, symbols: list[str]) -> tuple[list[dict], list[str]]:
     """批量快照（自选股卡片底座能力）：N 只三段 IN 查询（日线截面/估值/资金流），
     每段 QUALIFY 取各 symbol 最新行——单只 get_quote 循环 N 次的批量版。
@@ -253,7 +320,7 @@ def search(conn, q: str, limit: int = 10) -> list[dict]:
     keys = _UNIVERSE_COLS.replace(", ", ",").split(",")
     hits = [dict(zip(keys, r)) for r in rows]
     if len(hits) >= limit or not q.isascii():
-        return hits
+        return _bj_scoped(hits)
 
     # 纯字母且 SQL 未取满：叠加拼音缩写（东山精密→dsjm）与全拼（dongshan）匹配。
     # 全表 ~5千行，进程内一次性构建缓存，universe 变更由重启/更新任务兜底。
@@ -268,7 +335,80 @@ def search(conn, q: str, limit: int = 10) -> list[dict]:
             seen.add(item["symbol"])
             if len(hits) >= limit:
                 break
-    return hits
+    return _bj_scoped(hits)
+
+
+def _bj_scoped(rows: list[dict]) -> list[dict]:
+    """北交所开关（YUCHAO_BJ_ENABLED，默认关）：关闭时全系统不考虑北交所标的。"""
+    return rows if settings.bj_enabled else [r for r in rows if not is_bj(r["symbol"])]
+
+
+_TGT_SEGNAME = ("", "超卖", "低位", "弱势", "回升", "强势", "超买")
+
+
+def _limit_threshold(symbol: str) -> float:
+    """涨停判定阈值（pct_chg 口径）：创业板/科创板 20%，北交所 30%，其余主板 10%。"""
+    if symbol.startswith(("300", "301", "688")):
+        return 19.9
+    if symbol.startswith(("43", "83", "87", "92")):
+        return 29.9
+    return 9.9
+
+
+def _tail_sma(series: list, period: int) -> Optional[float]:
+    """末位 SMA；样本不足返回 None（与前端 indicators 同口径）。"""
+    if len(series) < period:
+        return None
+    return sum(series[-period:]) / period
+
+
+def stock_targets(conn, symbols: list[str]) -> list[dict]:
+    """自选目标视图批量计算（与 K 线图表指标同源：策影 indicatorRegistry 口径）。
+
+    逐标的取近 60 根日线 → MA7/10/35/45、40日均量、六分段（60 窗口收盘分位
+    → 1..6）、近 20 日涨停次数；ST 直接剔除，北交所按开关过滤。"""
+    out: list[dict] = []
+    for sym in symbols:
+        row = conn.execute(
+            "SELECT name FROM stock_universe WHERE symbol = ?", [sym]).fetchone()
+        name = row[0] if row else None
+        if name and "ST" in str(name).upper():      # ST 直接剔除
+            continue
+        if not settings.bj_enabled and is_bj(sym):  # 北交所开关关闭
+            continue
+        bars = conn.execute(
+            "SELECT close, volume, pct_chg FROM ("
+            "  SELECT close, volume, pct_chg, date,"
+            "         ROW_NUMBER() OVER (ORDER BY date DESC) AS rn"
+            "  FROM daily_ohlcv WHERE symbol = ?) t"
+            " WHERE rn <= 60 ORDER BY date", [sym]).fetchall()
+        if not bars:
+            continue
+        closes = [b[0] for b in bars]
+        vols = [b[1] for b in bars]
+        chgs = [b[2] for b in bars]
+        close, vol = closes[-1], vols[-1]
+        ma7 = _tail_sma(closes, 7)
+        ma10 = _tail_sma(closes, 10)
+        ma45 = _tail_sma(closes, 45)
+        vol_ma40 = _tail_sma(vols, 40)
+        vol_ratio = (vol / vol_ma40) if (vol is not None and vol_ma40) else None
+        # 六分段：60 日窗口内收盘分位 0–1 → 1..6（indicators.sixSegment 同式）
+        below = sum(1 for c in closes if c < close)
+        seg = min(6, int(below / len(closes) * 6) + 1)
+        thr = _limit_threshold(sym)
+        cnt = sum(1 for c in chgs[-20:] if c is not None and c >= thr)
+        out.append({
+            "symbol": sym, "name": name, "close": close, "vol": vol,
+            "vol_ma40": vol_ma40, "vol_ratio": vol_ratio,
+            "vol_hit": bool(vol_ma40 and vol is not None and vol >= vol_ma40),
+            "short_orange": bool(ma10 and close > ma10),
+            "mid_orange": bool(ma45 and close > ma45),
+            "limit_up_20d": cnt > 0, "limit_up_cnt": cnt,
+            "seg": seg, "seg_name": _TGT_SEGNAME[seg],
+            "pullback": bool(ma7 and close < ma7),
+        })
+    return out
 
 
 _PY_CACHE: dict[str, dict[str, str]] = {}
