@@ -1296,7 +1296,7 @@ function applyPanel(i: number): void {
     : market === "sz" ? /^(000|001|002|003|300|301)/.test(code)
     : market === "bj" && /^(4|8|92)/.test(code);
   kl.setData(barsFor(p), keep, stock ? (estimateFloatShares(mk.bars) ?? estimateFloatShares(mk.quote ? [mk.quote] : [])) : null,
-    p === "d" ? mk.cur.trendFocus?.date : undefined);
+    p === "d" ? mk.cur.trendFocus?.date : undefined, mk.cur.symbol);
   if (p === "d") delete mk.cur.trendFocus;
   kl.drawLegend(SUB_OK[currentLayout()]?.[i] ? [...mk.mainInds] : mk.mainInds);
 }

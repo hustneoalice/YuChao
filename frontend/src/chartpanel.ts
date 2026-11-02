@@ -46,7 +46,7 @@ export interface ChartPanelHandle {
   setPeriod: (p: ChartPeriod) => void;
   setMain: (inds: MainKey[]) => void;
   setSub: (inds: SubKey[]) => void;
-  setData: (bars: Bar[], keepView?: boolean, floatShares?: number | null, focusDate?: string) => void;
+  setData: (bars: Bar[], keepView?: boolean, floatShares?: number | null, focusDate?: string, symbol?: string) => void;
   drawLegend: (inds?: MainKey[]) => void;
   resize: () => void;
   applyHeights: () => void;
@@ -233,9 +233,9 @@ export function createChartPanel(host: HTMLElement, opts: ChartPanelOptions = {}
     },
     setMain(inds) { applyMain(inds); },
     setSub(inds) { applySub(inds); },
-    setData(bars, keepView = false, floatShares = null, focusDate) {
+    setData(bars, keepView = false, floatShares = null, focusDate, symbol) {
       toggleEmpty(bars.length === 0);
-      chart.setData(bars, keepView, floatShares, focusDate);
+      chart.setData(bars, keepView, floatShares, focusDate, symbol);
     },
     drawLegend(inds) { chart.drawLegend(inds ?? [...mainSet]); },
     resize() { chart.resize(); },

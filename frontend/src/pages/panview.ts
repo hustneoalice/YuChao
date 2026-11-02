@@ -240,7 +240,7 @@ async function setLink(symbol: string, name: string,
     // 日K：默认 MA + 中线操盘通道（MA35/45）主图；量 + 趋势柱线副图。
     // 趋势柱线公式只依赖 OHLC，个股/指数/基金 K 线都有，故三类标的均显示。
     // 指标开关由面板控制条管理，换标的只重灌数据，不重置用户选择。
-    klD!.setData(klRes.value.bars ?? []);
+    klD!.setData(klRes.value.bars ?? [], false, null, undefined, symbol);
   }
   if (miRes.status === "fulfilled") {
     // 分时：左涨跌幅轴 + 右价格轴 + 昨收虚线 + 均价线 + VOLFS 逐分钟量柱

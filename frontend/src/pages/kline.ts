@@ -1,5 +1,5 @@
 /* K线图表 —— klinecharts 10，配置 1:1 对齐策影 1.0（strategy-lens）
- *  · candle_up_stroke 阳线空心 · 涨 #EF5350 / 跌 #519C2C · 无网格 · 最新价水平线关
+ *  · 阳线空心（涨停实心红）· 跌实心绿 · 涨 #EF5350 / 跌 #519C2C · 无网格 · 最新价水平线关
  *  · 自研操盘趋势：短线 MA7/MA10、中线 MA35/MA45，逐柱填充（强橙/弱蓝）
  *  · registerYAxis('normal') 全局轴模板：成交量轴万/亿（策影 config.ts 同款）
  *  · 滚轮缩放 / 拖拽平移为 klinecharts 原生能力
@@ -56,6 +56,18 @@ export function chartUp(): string {
 }
 export function chartDown(): string {
   return document.documentElement.dataset.dir === "intl" ? UP : DOWN;
+}
+
+/** 涨停判定：按代码所在板块的涨幅上限（主板 10 / 创业科创 20 / 北交 30）。
+ *  创业板 2020-08-24 起才改 20%；阈值留 0.1 余量，避开 9.87% 这类非涨停收盘。 */
+export function isLimitUp(symbol: string | undefined, pct: number | null | undefined, date?: string): boolean {
+  if (!symbol || typeof pct !== "number" || !Number.isFinite(pct)) return false;
+  const code = symbol.split(".")[0];
+  let cap = 10;
+  if (/^(4|8|92)/.test(code)) cap = 30;
+  else if (/^(688|689)/.test(code)) cap = 20;
+  else if (/^(300|301)/.test(code)) cap = date && date >= "2020-08-24" ? 20 : 10;
+  return pct >= cap - 0.1;
 }
 
 /* ── 自研操盘趋势（策影 indicatorRegistry 逐字移植） ──
@@ -269,7 +281,7 @@ function ensureRegistered(): void {
     figures: [
       { key: "zero", title: "", type: "line", styles: () => ({ color: "transparent" }) },
       { key: "short", title: "短线量能", type: "line",
-        styles: (raw: unknown) => ({ color: ((raw as {data?: {current?: {short?: number}}}).data?.current?.short ?? 0) >= 0 ? "#FF5356" : "#2D9E00" }) },
+        styles: (raw: unknown) => ({ color: ((raw as {data?: {current?: {short?: number}}}).data?.current?.short ?? 0) >= 0 ? chartUp() : chartDown() }) },
       { key: "trend", title: "趋势量能", type: "line", styles: () => ({ color: "#25ACFA", size: 1.5 }) },
       { key: "marker", title: "", type: "line", styles: () => ({ color: "transparent" }) },
     ],
@@ -282,7 +294,7 @@ function ensureRegistered(): void {
       ctx.rect(0, 0, bounding.width, bounding.height);
       ctx.clip();
       const fill = (x1: number, y1: number, x2: number, y2: number, positive: boolean) => {
-        ctx.fillStyle = positive ? "#FF5356" : "#2D9E00";
+        ctx.fillStyle = positive ? chartUp() : chartDown();
         ctx.beginPath();
         ctx.moveTo(x1, zeroY);
         ctx.lineTo(x1, y1);
@@ -349,7 +361,7 @@ function ensureRegistered(): void {
     figures: [
       { key: "short", title: "STICKV", type: "line", styles: (raw: unknown) => {
         const v = (raw as {data?: {current?: {short?: number; base?: number}}}).data?.current;
-        return { color: (v?.short ?? 0) >= (v?.base ?? 0) ? "#FF5356" : "#2D9E00", size: 1 };
+        return { color: (v?.short ?? 0) >= (v?.base ?? 0) ? chartUp() : chartDown(), size: 1 };
       } },
       { key: "base", title: "中期", type: "line", styles: () => ({ color: "transparent" }) },
       { key: "zero", title: "", type: "line", styles: () => ({ color: "transparent" }) },
@@ -364,7 +376,7 @@ function ensureRegistered(): void {
       ctx.clip();
       const column = (x: number, from: number, to: number, red: boolean) => {
         const y1 = yAxis.convertToPixel(from), y2 = yAxis.convertToPixel(to);
-        ctx.fillStyle = red ? "#FF5356" : "#2D9E00";
+        ctx.fillStyle = red ? chartUp() : chartDown();
         ctx.fillRect(x - width / 2, Math.min(y1, y2), width, Math.abs(y1 - y2));
       };
       for (let i = Math.max(0, Math.floor(range.from)); i < Math.min(data.length, Math.ceil(range.to) + 1); i++) {
@@ -377,7 +389,7 @@ function ensureRegistered(): void {
       const selected = data[(indicator.extendData as number | undefined) ?? data.length - 1];
       ctx.font = "12px sans-serif";
       ctx.textBaseline = "top";
-      ctx.fillStyle = (selected?.short ?? 0) >= (selected?.base ?? 0) ? "#FF5356" : "#2D9E00";
+      ctx.fillStyle = (selected?.short ?? 0) >= (selected?.base ?? 0) ? chartUp() : chartDown();
       ctx.fillText(`STICKV ${selected?.short == null ? "--" : selected.short.toFixed(2)}`, 8, 6);
       ctx.restore();
       return false;
@@ -407,11 +419,11 @@ function ensureRegistered(): void {
         const protection=data[first].protection!,eye=data[first].eye!;
         const ex=xAxis.convertToPixel((first+last)/2),ey=yAxis.convertToPixel(eye);
         const py=yAxis.convertToPixel(protection),start=xAxis.convertToPixel(anchor),end=xAxis.convertToPixel(g.end);
-        ctx.strokeStyle="#16D84A";ctx.fillStyle="#16D84A";ctx.lineWidth=1;
+        ctx.strokeStyle=chartDown();ctx.fillStyle=chartDown();ctx.lineWidth=1;
         ctx.beginPath();ctx.moveTo(start,py);ctx.lineTo(end,py);ctx.stroke();
         ctx.font="11px sans-serif";ctx.textAlign="left";ctx.textBaseline="bottom";
         ctx.fillText("保护位 "+protection.toFixed(2),Math.min(end+5,bounding.width-100),py-3);
-        ctx.strokeStyle="#FF5356";ctx.fillStyle="#FF5356";
+        ctx.strokeStyle=chartUp();ctx.fillStyle=chartUp();
         g.hits.forEach(i => {
           const tx=xAxis.convertToPixel(i),ty=yAxis.convertToPixel(data[i].low)+4;
           const angle=Math.atan2(ty-ey,tx-ex);
@@ -480,14 +492,20 @@ function ensureRegistered(): void {
       figures: [
         {
           key: "volume", title: "VOL", type: "bar",
-          // v10 回调第一参即 {data:{prev,current,next}}，current 为 calc 结果项
+          // v10 回调第一参即 {data:{prev,current,next}}，current 为 calc 结果项。
+          // 与 K 线同款：阳线空心红、阴线实心绿、涨停阳线实心红；色值直接用 K 线口径。
           styles: (raw: unknown) => {
-            const c = (raw as { data?: { current?: { close?: number; open?: number } } })?.data?.current;
-            const up = cssv("--up") || "#E64545", dn = cssv("--down") || "#2FBF71";
-            if (c?.close == null || c.open == null) return { color: NEUTRAL };
-            if (c.close > c.open) return { color: up };
-            if (c.close < c.open) return { color: dn };
-            return { color: NEUTRAL };
+            const c = (raw as { data?: { current?: { close?: number; open?: number; limitUp?: boolean } } })?.data?.current;
+            const up = chartUp(), dn = chartDown();
+            const bar = (color: string, style: "fill" | "stroke") =>
+              ({ color, borderColor: color, borderSize: 1, style });
+            if (c?.close == null || c.open == null) return bar(NEUTRAL, "fill");
+            if (c.close > c.open) {
+              if (c.limitUp) return bar(up, "fill");
+              return { color: "rgba(0,0,0,0)", borderColor: up, borderSize: 1, style: "stroke" };
+            }
+            if (c.close < c.open) return bar(dn, "fill");
+            return bar(NEUTRAL, "fill");
           },
         },
         { key: "ma1", title: "M1", type: "line", styles: () => ({ color: "#FF9F43", size: 1 }) },
@@ -744,7 +762,7 @@ export interface RangeFund {
 
 export interface KlineChartHandle {
   chart: Chart;
-  setData: (bars: Bar[], keepView?: boolean, floatShares?: number | null, focusDate?: string) => void;
+  setData: (bars: Bar[], keepView?: boolean, floatShares?: number | null, focusDate?: string, symbol?: string) => void;
   /** 主图多选叠加：增量增删，不动已叠加的同名指标 */
   setMain: (inds: MainKey[]) => void;
   /** 图内右上角指标图例（MA/BOLL/操盘趋势，色块+名称；多面板时每实例一份） */
@@ -810,16 +828,27 @@ function styles() {
   const axis = cssv("--axis") || border;
   const text = cssv("--faint") || "#717176";
   const up = chartUp(), dn = chartDown();
+  const hole = cssv("--panel") || "#161618";      // 空心阳线的填充色 = 图表面板底色
   return {
     grid: { show: false },
     separator: { size: 1, color: border, fill: false, activeBackgroundColor: border },
     candle: {
-      type: "candle_up_stroke" as CandleType,
+      // 实心图元 + 逐柱配色：阳线用面板底色填充做出空心（影线只留上下两截），
+      // 涨停阳线改为实心红；阴线实心绿。原 candle_up_stroke 无法给单根涨停改实心。
+      type: "candle_solid" as CandleType,
       tooltip: { showRule: "none" as const },
-      bar: {
-        upColor: "rgba(0,0,0,0)", downColor: dn, noChangeColor: NEUTRAL,
-        upBorderColor: up, downBorderColor: dn, noChangeBorderColor: NEUTRAL,
-        upWickColor: up, downWickColor: dn, noChangeWickColor: NEUTRAL,
+      bar: (data: unknown) => {
+        const cur = (data as { current?: { open?: number; close?: number; limitUp?: boolean } | null })?.current;
+        if (!cur || cur.close == null || cur.open == null) {
+          return { color: NEUTRAL, borderColor: NEUTRAL, wickColor: NEUTRAL };
+        }
+        if (cur.close > cur.open) {
+          return cur.limitUp
+            ? { color: up, borderColor: up, wickColor: up }
+            : { color: hole, borderColor: up, wickColor: up };
+        }
+        if (cur.close < cur.open) return { color: dn, borderColor: dn, wickColor: dn };
+        return { color: NEUTRAL, borderColor: NEUTRAL, wickColor: NEUTRAL };
       },
       // area 形态默认（分时主图用，periodStyles 覆盖线色/填充）
       area: {
@@ -1504,11 +1533,13 @@ export function mountKline(el: HTMLElement): KlineChartHandle {
 
   const handle: KlineChartHandle = {
     chart,
-    setData: (bars: Bar[], keepView = false, floatShares: number | null = null, focusDate?: string) => {
+    setData: (bars: Bar[], keepView = false, floatShares: number | null = null, focusDate?: string, symbol?: string) => {
       const list = bars.map((b) => ({
         timestamp: toTs(b.date), open: b.open, high: b.high, low: b.low,
         close: b.close, volume: b.volume ?? 0, amount: b.amount ?? 0,
         date: b.date, floatShares,
+        // 涨停标记：蜡烛画实心红，成交量柱同步画实心（其余阳线都是空心）
+        limitUp: isLimitUp(symbol, b.pct_chg, b.date),
         // 分时 bar 挂昨收（TIME_AVG 的昨收虚线基准用；日线无此字段 → null）
         baseline: (b as Bar & { baseline?: number | null }).baseline ?? null,
       }));
