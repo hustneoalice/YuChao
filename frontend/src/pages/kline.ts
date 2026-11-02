@@ -1155,17 +1155,17 @@ export function mountKline(el: HTMLElement): KlineChartHandle {
     e.preventDefault(); e.stopPropagation();
     const r = el.getBoundingClientRect();
     const x0 = Math.min(selX0, e.clientX) - r.left, x1 = Math.max(selX0, e.clientX) - r.left;
-    selX0 = null; sel.style.display = "none";
+    selX0 = null;
     // 框选模式下 mousedown 被拦截（stopPropagation），原生点击事件收不到：
     // 位移过小视为「点了一根 K 线」，手动补一次单根选中，两种模式手感一致
-    if (x1 - x0 < 6) { if (pickMode) pickAtIndex(diOfX(x1)); return; }
+    if (x1 - x0 < 6) { if (pickMode) pickAtIndex(diOfX(x1)); drawSelBand(); return; }
     const diOf = diOfX;
     const i0 = diOf(x0), i1 = diOf(x1);
     const list = chart.getDataList() as { timestamp: number; open: number; high: number; low: number; close: number; volume?: number; amount?: number }[];
-    if (i0 == null || i1 == null || !list.length) return;
+    if (i0 == null || i1 == null || !list.length) { drawSelBand(); return; }
     const a = Math.max(0, Math.min(i0, i1)), b = Math.min(list.length - 1, Math.max(i0, i1));
     const seg = list.slice(a, b + 1);
-    if (seg.length < 2) return;
+    if (seg.length < 2) { drawSelBand(); return; }
     const s = seg[0], t = seg[seg.length - 1];
     // 区间涨跌基准 = 首根前一日收盘（与资金流区间同口径，策影同款），首根无前行时退回开盘
     const base = a > 0 ? list[a - 1].close : s.open;
@@ -1182,6 +1182,7 @@ export function mountKline(el: HTMLElement): KlineChartHandle {
       upN, downN: seg.length - upN, x0, x1,
     };
     selFund = null;
+    drawSelBand();                // 松手后保留选区图形（关闭框选时才清）
     drawSelTip();
     clearPickFn(true);            // 框出一段 → 单根选中让位（右卡只表达一个口径）
     document.dispatchEvent(new CustomEvent("yc:kl-range", { detail: { ...lastSel } }));
@@ -1408,6 +1409,27 @@ export function mountKline(el: HTMLElement): KlineChartHandle {
     if (notify && had) document.dispatchEvent(new CustomEvent("yc:kl-pick", { detail: null }));
   };
 
+  /** 持久选区带：框选松手后保留图形，跟随缩放/导航重绘；只有关闭框选模式才消失 */
+  const drawSelBand = (): void => {
+    if (!lastSel) { sel.style.display = "none"; return; }
+    const list = chart.getDataList() as { date?: string }[];
+    const i0 = list.findIndex((b) => (b.date ?? "") === lastSel!.startDate);
+    const i1 = list.findIndex((b) => (b.date ?? "") === lastSel!.endDate);
+    if (i0 < 0 || i1 < 0) { sel.style.display = "none"; return; }
+    const p0 = chart.convertToPixel({ dataIndex: i0 }) as unknown;
+    const p1 = chart.convertToPixel({ dataIndex: i1 }) as unknown;
+    const xa = (Array.isArray(p0) ? p0[0] : p0)?.x as number | undefined;
+    const xb = (Array.isArray(p1) ? p1[0] : p1)?.x as number | undefined;
+    if (xa == null || xb == null) { sel.style.display = "none"; return; }
+    const bs = chart.getBarSpace?.() as { bar: number } | undefined;
+    const w = Math.max(2, Math.round(bs?.bar ?? 6));
+    sel.style.left = `${Math.round(Math.min(xa, xb) - w / 2)}px`;
+    sel.style.width = `${Math.round(Math.abs(xb - xa) + w)}px`;
+    sel.style.top = "0px";
+    sel.style.height = `${el.clientHeight}px`;
+    sel.style.display = "block";
+  };
+
   /** 选中第 di 根（越界=撤选中）；同一根重复点不重发，免得白拉一次资金接口 */
   const pickAtIndex = (di: number | undefined): void => {
     const list = chart.getDataList() as {
@@ -1449,11 +1471,11 @@ export function mountKline(el: HTMLElement): KlineChartHandle {
   };
   // 原生精确点击（点在蜡烛实体上）与上面的按列判定互为补充：重复点同一根会被去重
   try { chart.subscribeAction("onCandleBarClick", onBarClick as never); } catch { /* 忽略 */ }
-  // 选中带跟着视窗走：缩放/滚动/可见范围变化都重算像素位置
-  const onPickView = () => requestAnimationFrame(drawPick);
-  try { chart.subscribeAction("onVisibleRangeChange", onPickView as never); } catch { /* 忽略 */ }
-  try { chart.subscribeAction("onZoom", onPickView as never); } catch { /* 忽略 */ }
-  try { chart.subscribeAction("onScroll", onPickView as never); } catch { /* 忽略 */ }
+  // 选中带/选区带跟着视窗走：缩放/滚动/可见范围变化都重算像素位置
+  const onViewRefresh = () => requestAnimationFrame(() => { drawPick(); drawSelBand(); });
+  try { chart.subscribeAction("onVisibleRangeChange", onViewRefresh as never); } catch { /* 忽略 */ }
+  try { chart.subscribeAction("onZoom", onViewRefresh as never); } catch { /* 忽略 */ }
+  try { chart.subscribeAction("onScroll", onViewRefresh as never); } catch { /* 忽略 */ }
 
   // 智能高度（闭包函数：setSub 与 resize 内部也复用）
   const applyHeights = () => {
@@ -1662,9 +1684,9 @@ export function mountKline(el: HTMLElement): KlineChartHandle {
     destroy() {
       try { chart.unsubscribeAction("onCrosshairChange", onCross as never); } catch { /* 忽略 */ }
       try { chart.unsubscribeAction("onCandleBarClick", onBarClick as never); } catch { /* 忽略 */ }
-      try { chart.unsubscribeAction("onVisibleRangeChange", onPickView as never); } catch { /* 忽略 */ }
-      try { chart.unsubscribeAction("onZoom", onPickView as never); } catch { /* 忽略 */ }
-      try { chart.unsubscribeAction("onScroll", onPickView as never); } catch { /* 忽略 */ }
+      try { chart.unsubscribeAction("onVisibleRangeChange", onViewRefresh as never); } catch { /* 忽略 */ }
+      try { chart.unsubscribeAction("onZoom", onViewRefresh as never); } catch { /* 忽略 */ }
+      try { chart.unsubscribeAction("onScroll", onViewRefresh as never); } catch { /* 忽略 */ }
       el.removeEventListener("mousedown", onSelDown, true);
       el.removeEventListener("mousemove", onSelMove, true);
       el.removeEventListener("mouseup", onSelUp, true);
