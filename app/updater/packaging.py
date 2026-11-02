@@ -121,7 +121,7 @@ def export_package(out_dir: str | None = None, progress: Optional[Callable] = No
                              encoding="utf-8")
     if progress:
         progress(stage="完成", rows=manifest["total_rows"],
-                 message=f"{pkg_path.name} · SHA256 {manifest['sha256'][:16]}…")
+                 message=f"已生成数据包 {pkg_path.name}，完整性校验已写入")
     return {"status": "completed", "rows": manifest["total_rows"],
             "package": str(pkg_path), "manifest": str(manifest_path),
             "sha256": manifest["sha256"],
@@ -183,10 +183,9 @@ def import_package(pkg_path: str | Path, manifest_path: str | Path | None = None
     writer.ensure_schema()                     # 新文件补 update_log/新表/复权视图
     if progress:
         progress(stage="完成", rows=manifest.get("total_rows", 0),
-                 message=f"已导入 {Path(pkg_path).name}（原库备份为 {backup.name}）")
+                 message=f"已导入 {Path(pkg_path).name}（原有数据已备份）")
     return {"status": "completed", "rows": int(manifest.get("total_rows", 0)),
-            "detail": f"导入成功，SHA256 {manifest['sha256'][:16]}…，"
-                      f"原库备份为 {backup.name}"}
+            "detail": f"导入成功，完整性校验通过，原有数据已备份为 {backup.name}"}
 
 
 # -- 编排器任务函数（registry fn 指向这里；ctx = {package?, out_dir?, ...}) ----

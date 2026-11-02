@@ -56,14 +56,14 @@ def update_market_snapshot(progress=None, ctx=None) -> dict:
         fund_map = {r[0]: r[1] for r in funds}
         stocks = list(stock_map) + list(fund_map)
         indexes = [s for s, _ in INDEX_CATALOG]
-        progress(stage="拉取快照", total=len(stocks) + len(indexes), done=0,
-                 message=f"{day} 快照 {len(stock_map)} 股 + {len(fund_map)} 基金 + "
-                         f"{len(indexes)} 指数")
+        progress(stage="拉取行情", total=len(stocks) + len(indexes), done=0,
+                 message=f"{day} 行情 {len(stock_map)} 只股票 + {len(fund_map)} 只基金 + "
+                         f"{len(indexes)} 个指数")
         snap = sources.fetch_qt_snapshot(stocks + indexes,
                                          progress=progress, cancel=cancel)
         if len(snap) < _MIN_SNAPSHOT_ROWS:
-            raise RuntimeError(f"快照仅 {len(snap)} 行（不足 {_MIN_SNAPSHOT_ROWS}，"
-                               f"疑似限流），拒绝落库")
+            raise RuntimeError(f"只取到 {len(snap)} 条行情（少于 {_MIN_SNAPSHOT_ROWS}，"
+                               f"可能被数据源限流），本次不写入")
         index_set = set(indexes)
         rows = []
         for full, t in snap.items():

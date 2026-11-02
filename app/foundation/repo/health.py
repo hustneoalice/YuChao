@@ -21,8 +21,41 @@ import json
 from datetime import date, datetime, timedelta
 
 from ...config import settings
+from ...updater.registry import TASKS
 from ...updater.trading_calendar import is_trading_day
 from .data import _coverage
+
+# 散户能看懂叫法：库表 / 更新任务 → 中文（消息只用中文，原始键仅供前端逻辑
+# 与修复动作使用；registry 里已有 label 的任务名直接复用，个别再按口语改）
+_TABLE_ZH = {
+    "daily_ohlcv": "日线行情", "market_snapshot": "盘中实时快照",
+    "adjust_factor": "复权因子", "capital_flow": "资金流向",
+    "financials": "财务报表", "stock_universe": "证券清单",
+    "sector_index": "行业板块行情", "daily_valuation": "估值数据",
+    "corepicks_result": "核心标名单", "stock_profile": "个股档案",
+    "sector_member": "板块成分", "target_scan": "目标监控指标",
+    "target_trend": "趋势柱线指标", "pe_percentile": "估值分位",
+    "fund_universe": "基金清单", "zy_block": "众赢板块",
+    "zy_block_member": "众赢板块成分",
+}
+_KIND_ZH = {t["kind"]: t["label"] for t in TASKS}
+_KIND_ZH.update({
+    "kline_update": "日线行情", "pe_percentile": "估值分位",
+    "target_scan": "目标监控计算", "sector_index": "行业板块行情",
+    "corepicks": "核心标选股",
+    # 历史账本里的旧数据类型
+    "kline": "日线行情", "valuation": "估值数据",
+    "corepicks_result": "核心标选股", "stock_profile": "个股档案",
+})
+
+
+def _zh_table(name: str) -> str:
+    return _TABLE_ZH.get(name) or "数据表"
+
+
+def _zh_kind(name: str) -> str:
+    return _KIND_ZH.get(name) or "数据更新"
+
 
 # 体检对象：表 → kind / 日期列 / 链位时刻(h,m)（None=宽松日历口径）/ 周更 /
 # 宽松口径的宽限天数 (满分界, 及格界)
@@ -265,9 +298,9 @@ def assess(conn, now: datetime | None = None) -> dict:
             issues.append({
                 "level": "warn" if it["score"] >= 40 else "error",
                 "code": "freshness", "kind": it["kind"],
-                "message": f"{it['table']} 最新 {it['latest'] or '无'}"
+                "message": f"{_zh_table(it['table'])}最新 {it['latest'] or '暂无数据'}"
                            + (f"，预期 {it['expected']}（滞后 {it['lag_days']} 天）"
-                              if it["expected"] else f"（滞后 {it['lag_days']} 天）"),
+                              if it["expected"] else f"（已滞后 {it['lag_days']} 天）"),
                 "action": {"kind": it["kind"], "force": True}
                 if not it.get("lenient") else None,
             })
@@ -276,7 +309,7 @@ def assess(conn, now: datetime | None = None) -> dict:
             issues.append({
                 "level": "warn" if it["coverage"] >= 70 else "error",
                 "code": "coverage", "kind": it["table"],
-                "message": f"{it['table']} 最新截面覆盖率 {it['coverage']}%",
+                "message": f"{_zh_table(it['table'])}最新一天只覆盖 {it['coverage']}% 的股票",
                 "action": {"kind": "backfill", "force": False},
             })
     misses = [g for g in gap_items if g["missing"] or g["drop"]]
@@ -284,22 +317,22 @@ def assess(conn, now: datetime | None = None) -> dict:
         issues.append({
             "level": "error" if any(g["missing"] for g in misses) else "warn",
             "code": "gap", "kind": "backfill",
-            "message": "近 10 交易日断档/异常："
-                       + "、".join(g["date"] + ("缺" if g["missing"] else "骤降")
+            "message": "近 10 个交易日有数据缺失或骤降："
+                       + "、".join(g["date"] + ("缺数据" if g["missing"] else "数量骤降")
                                    for g in misses[:5]),
             "action": {"kind": "backfill", "force": False},
         })
     for f in failed_7d:
         issues.append({
             "level": "warn", "code": "update_log", "kind": f["kind"],
-            "message": f"近 7 天 {f['kind']} 失败 {f['failed']} 次",
+            "message": f"近 7 天「{_zh_kind(f['kind'])}」更新失败 {f['failed']} 次",
             "action": {"kind": f["kind"], "force": True},
         })
     if not alive:
         issues.append({
             "level": "error", "code": "updater", "kind": None,
-            "message": "updater 进程不在线（自动更新与自愈均已停摆）"
-                       "— 启动：python -m app.updater",
+            "message": "自动更新服务未在运行（更新与自动修复都已停止）"
+                       "— 请重启服务",
             "action": None,
         })
 

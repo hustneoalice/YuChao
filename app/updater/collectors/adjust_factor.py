@@ -27,13 +27,13 @@ def update_adjust_factor(progress=None, ctx=None) -> dict:
             import baostock as bs
         except ImportError:
             result.update(status="skipped",
-                          detail="baostock 未安装（pip install baostock），跳过复权因子更新")
+                          detail="复权因子数据源没有装好，本次跳过（不影响看盘）")
             return result
 
         lg = bs.login()
         if getattr(lg, "error_code", "0") not in ("0", 0):
             result.update(status="skipped",
-                          detail=f"baostock 登录失败: {getattr(lg, 'error_msg', '')[:100]}")
+                          detail="复权因子数据源连接失败，本次跳过")
             return result
 
         try:
@@ -46,7 +46,7 @@ def update_adjust_factor(progress=None, ctx=None) -> dict:
             ).fetchall()}
             writer.reset()          # baostock 逐只抓取（全市场极慢）期间不持锁
             progress(stage="采集复权因子", total=len(symbols), done=0,
-                     message=f"baostock 逐只复权因子，{len(symbols)} 个标的")
+                     message=f"逐只更新复权因子，共 {len(symbols)} 个标的")
 
             done = failed = 0
             rows_written = 0

@@ -23,6 +23,17 @@ from ...updater import registry
 router = APIRouter(tags=["data"])
 
 
+_GRADE_ZH = {"healthy": "状态良好", "warn": "需要留意", "poor": "需要处理"}
+
+
+def _kind_label(kind: str) -> str:
+    """任务类型 → 中文名（提示语只用中文，不露英文 kind）。"""
+    for t in registry.TASKS:
+        if t["kind"] == kind:
+            return t["label"]
+    return "更新任务"
+
+
 class UpdateTrigger(BaseModel):
     kind: str = Field(..., description="任务类型，见 GET /data/tasks")
     force: bool = Field(False, description="跳过冷却检查")
@@ -57,12 +68,12 @@ def tasks():
 def update(body: UpdateTrigger):
     if not registry.is_valid_kind(body.kind):
         raise invalid_param(
-            f"未知任务类型: {body.kind}",
-            {"available": [t["kind"] for t in registry.TASKS]})
+            "没有这个更新项目，请从更新项目清单里选择",
+            {"available": [t["label"] for t in registry.TASKS]})
     if not _updater_alive():
         raise HTTPException(
             status_code=503,
-            detail="更新进程未运行（请求不会被消费）— 启动：python -m app.updater")
+            detail="自动更新服务没在运行，暂时无法执行更新，请稍后重启服务再试")
     rid = ControlRequests(settings.control_requests_path).submit(
         body.kind, force=body.force)
     return {
@@ -70,7 +81,7 @@ def update(body: UpdateTrigger):
         "request_id": rid,
         "kind": body.kind,
         "force": body.force,
-        "note": "updater 进程约 2s 内消费；执行结果以 GET /data/updates 落账为准",
+        "note": "后台一般几秒内开始执行，结果见「更新记录」",
     }
 
 
@@ -79,12 +90,12 @@ def update(body: UpdateTrigger):
 def update_cancel():
     if not _updater_alive():
         raise HTTPException(
-            status_code=503, detail="更新进程未运行，无需停止")
+            status_code=503, detail="自动更新服务没在运行，当前没有需要停止的更新")
     rid = ControlRequests(settings.control_requests_path).submit("__cancel__")
     return {
         "accepted": True,
         "request_id": rid,
-        "note": "updater 进程约 2s 内消费；排队任务直接移除，运行中的任务由采集函数自行退出",
+        "note": "排队的任务会直接取消，正在执行的任务会尽快安全结束",
     }
 
 
@@ -117,7 +128,7 @@ def updates(limit: int = 50, data_type: str | None = None,
                                           data_type=data_type, status=status)
     except Exception:
         # 旧库未跑过 ensure_schema：update_log 还不存在（API 只读，不能建表）
-        return {"items": [], "note": "update_log 未初始化——先运行 python -m app.updater"}
+        return {"items": [], "note": "更新记录还没建好——请先启动自动更新服务"}
     return {"items": items}
 
 
@@ -132,28 +143,29 @@ def init(body: InitTrigger):
     """
     if body.mode == "import":
         if not body.package:
-            raise invalid_param("mode=import 需要 package 参数（数据包 .duckdb 路径）")
+            raise invalid_param("导入数据包时需要填写数据包文件路径")
         pkg = Path(body.package).expanduser().resolve()
         if not pkg.exists():
-            raise invalid_param(f"数据包不存在: {pkg}")
+            raise invalid_param("找不到这个数据包文件，请检查路径是否正确")
         if not pkg.suffix == ".duckdb":
-            raise invalid_param("数据包应为 .duckdb 文件（manifest 与主文件同名同目录）")
+            raise invalid_param("数据包必须是 .duckdb 文件（配套的清单文件要放在同一目录）")
         kind, params = "package_import", {"package": str(pkg)}
     elif body.mode == "backfill":
         kind, params = "backfill", {}
     else:
-        raise invalid_param(f"未知 mode: {body.mode}", {"available": ["import", "backfill"]})
+        raise invalid_param("不支持的初始化方式，请选择「导入数据包」或「多源回补」",
+                            {"available": ["import", "backfill"]})
     if not _updater_alive():
         raise HTTPException(
             status_code=503,
-            detail="更新进程未运行（请求不会被消费）— 启动：python -m app.updater")
+            detail="自动更新服务没在运行，暂时无法初始化，请稍后重启服务再试")
     rid = ControlRequests(settings.control_requests_path).submit(kind, params=params)
     return {
         "accepted": True,
         "request_id": rid,
         "mode": body.mode,
         "package": params.get("package"),
-        "note": "updater 进程约 2s 内消费；结果以 GET /data/updates 落账为准",
+        "note": "后台一般几秒内开始执行，结果见「更新记录」",
     }
 
 
@@ -164,7 +176,7 @@ def export(body: ExportTrigger):
     if not _updater_alive():
         raise HTTPException(
             status_code=503,
-            detail="更新进程未运行（请求不会被消费）— 启动：python -m app.updater")
+            detail="自动更新服务没在运行，暂时无法导出，请稍后重启服务再试")
     rid = ControlRequests(settings.control_requests_path).submit(
         "package_export", params=params)
     out_dir = body.out_dir or str(settings.export_dir)
@@ -172,7 +184,7 @@ def export(body: ExportTrigger):
         "accepted": True,
         "request_id": rid,
         "out_dir": out_dir,
-        "note": "导出与更新互斥（编排器排队）；产物 yuchao_data_*.duckdb + .manifest.json",
+        "note": "导出时会先暂停其他更新，导出的文件为 yuchao_data_*.duckdb 和配套的 .manifest.json 校验文件",
     }
 
 
@@ -191,7 +203,7 @@ def health(conn=Depends(get_conn)):
         report = health_assess(conn)
     except Exception:
         return {"unavailable": True,
-                "note": "DuckDB 写锁持有中（更新任务执行窗口），体检稍后自动恢复",
+                "note": "正在更新数据，体检稍后自动恢复",
                 "updater_alive": updater_alive()}
     report["selfheal"] = _selfheal_snapshot()
     return report
@@ -217,14 +229,14 @@ def repair():
     if not _updater_alive():
         raise HTTPException(
             status_code=503,
-            detail="更新进程未运行（修复请求不会被消费）— 启动：python -m app.updater")
+            detail="自动更新服务没在运行，暂时无法自动修复，请稍后重启服务再试")
     from ...foundation.db import open_conn
     conn = open_conn()
     try:
         report = health_assess(conn)
-    except Exception as e:
+    except Exception:
         raise HTTPException(status_code=503,
-                            detail=f"体检暂不可用（写锁持有中），请稍后重试：{e}")
+                            detail="正在更新数据，体检暂时不可用，请稍后再试")
     finally:
         try:
             conn.close()
@@ -244,7 +256,7 @@ def repair():
             break
     if not actions:
         return {"accepted": True, "submitted": [], "plan": [],
-                "message": f"体检 {report['score']} 分（{report['grade']}），无需修复"}
+                "message": f"体检 {report['score']} 分（{_GRADE_ZH.get(report['grade'], '状态正常')}），无需修复"}
 
     submitted = []
     for act in actions:
@@ -258,5 +270,5 @@ def repair():
         "accepted": True,
         "submitted": submitted,
         "score": report["score"],
-        "note": "updater 进程约 2s 内消费；执行结果以 GET /data/updates 与体检复评（GET /data/health）为准",
+        "note": "后台一般几秒内开始执行，结果见「更新记录」和体检复评",
     }

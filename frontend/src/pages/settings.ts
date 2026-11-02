@@ -49,9 +49,12 @@ async function render(): Promise<void> {
 /* ── 数据底座 ── */
 /* 表名 → 中文标签（与后端 _INVENTORY 对齐，仅展示用） */
 const TABLE_ZH: Record<string, string> = {
-  daily_ohlcv: "日线 K 线", adjust_factor: "复权因子", capital_flow: "个股资金流",
-  financials: "财务数据", stock_universe: "证券清单", sector_index: "行业板块",
-  daily_valuation: "全市场估值", corepicks_result: "核心标结果", stock_profile: "个股档案",
+  daily_ohlcv: "日线 K 线", market_snapshot: "盘中实时行情", adjust_factor: "复权因子",
+  capital_flow: "个股资金流", financials: "财务报表", stock_universe: "证券清单",
+  sector_index: "行业板块行情", daily_valuation: "全市场估值", corepicks_result: "核心标名单",
+  stock_profile: "个股档案", target_scan: "目标监控指标", target_trend: "趋势柱线指标",
+  pe_percentile: "估值分位", fund_universe: "基金清单", sector_member: "板块成分",
+  zy_block: "众赢板块", zy_block_member: "众赢板块成分", update_log: "更新记录",
 };
 
 const daysAgo = (d?: string | null): number | null => {
@@ -70,12 +73,17 @@ const STATUS_TEXT: Record<string, [string, string]> = {
   interrupted: ["被中断", "bad"], failed: ["失败", "bad"],
 };
 
-/* 更新记录里的数据类型 → 散户能懂的叫法（兜底显示原文） */
+/* 更新记录里的数据类型 → 散户能懂的叫法（未收录的统一显示「其他更新」，不露英文） */
 const DATA_TYPE_ZH: Record<string, string> = {
-  daily_ohlcv: "日 K 线", kline: "日 K 线", capital_flow: "资金流向",
-  daily_valuation: "估值数据", financials: "财务数据", stock_universe: "证券清单",
-  sector_index: "行业板块", adjust_factor: "复权因子", corepicks: "核心标选股",
-  corepicks_result: "核心标选股", stock_profile: "个股档案", valuation: "估值数据",
+  daily_ohlcv: "日线行情", kline: "日线行情", kline_update: "日线行情",
+  capital_flow: "资金流向", daily_valuation: "估值数据", valuation: "估值数据",
+  financials: "财务报表", stock_universe: "证券清单", sector_index: "行业板块行情",
+  adjust_factor: "复权因子", corepicks: "核心标选股", corepicks_result: "核心标选股",
+  stock_profile: "个股档案", market_snapshot: "盘中实时快照", quotes: "实时行情",
+  fund_universe_sync: "基金清单同步", zy_block_sync: "众赢板块同步",
+  pe_percentile: "估值分位", target_scan: "目标监控计算", backup: "数据备份",
+  feishu_push: "飞书早报", target_push: "两点乾坤推送",
+  package_export: "导出数据包", package_import: "导入数据包", backfill: "历史回补",
 };
 
 /** 大数 → 人话：1.2 万（数据总量/新增条数用） */
@@ -146,7 +154,7 @@ async function refreshUpState(): Promise<void> {
       `<span class="upstat ${st.cap}">${esc(st.label)}</span>` +
       `<span style="font-size:11px;color:var(--faint)">${esc(r.trigger === "manual" ? "手动触发" : "自动触发")}</span>` +
       `<span style="flex:1"></span><b class="num" style="font-size:12.5px">${(r.percent ?? 0).toFixed(1)}%</b>` +
-      (isRun ? `<button class="hbtn upstop" id="up-stop" title="排队任务直接移除，运行中的采集会尽快退出">停止</button>` : "") + `</div>`,
+      (isRun ? `<button class="hbtn upstop" id="up-stop" title="排队中的任务会直接取消，正在进行的更新会尽快安全结束">停止</button>` : "") + `</div>`,
       `<div class="upbar"><i style="width:${pct}%"></i></div>`,
       `<div style="display:flex;justify-content:space-between;font-size:11px">` +
       `<span style="color:var(--dim)">${esc(r.stage || "")}</span>` +
@@ -238,17 +246,17 @@ async function refreshHealth(): Promise<void> {
   const gapMiss = (h.gap?.items ?? []).filter((x) => x.missing || x.drop).length;
   const ret = Object.values(h.selfheal?.kinds ?? {}).reduce((s, k) => s + (k.retries ?? 0), 0);
   const facts: [string, number, string, string][] = [
-    ["新鲜度", h.freshness?.score ?? 0,
-      kline ? `行情 ${ (kline.latest || "").slice(5, 10) } · 滞后${kline.lag_days}日` : "—",
+    ["数据是否最新", h.freshness?.score ?? 0,
+      kline ? `行情 ${ (kline.latest || "").slice(5, 10) } · 落后 ${kline.lag_days} 天` : "—",
       kline && kline.lag_days === 0 ? "ok" : kline && kline.lag_days <= 1 ? "mid" : "bad"],
-    ["覆盖率", h.coverage?.score ?? 0,
-      covWorst ? `${esc(TABLE_ZH[covWorst.table] || covWorst.table)} ${Math.round(covWorst.coverage ?? 0)}%` : "全表完整",
+    ["覆盖多少股票", h.coverage?.score ?? 0,
+      covWorst ? `${esc(TABLE_ZH[covWorst.table] || "数据表")} ${Math.round(covWorst.coverage ?? 0)}%` : "全部完整",
       (covWorst?.coverage ?? 100) >= 90 ? "ok" : (covWorst?.coverage ?? 100) >= 50 ? "mid" : "bad"],
-    ["断档", h.gap?.score ?? 0,
-      gapMiss ? `近10日 ${gapMiss} 处异常` : "近10日无断档",
+    ["历史有没有断", h.gap?.score ?? 0,
+      gapMiss ? `近 10 个交易日 ${gapMiss} 处异常` : "近 10 个交易日无断档",
       gapMiss ? "bad" : "ok"],
-    ["落账", h.ledger?.score ?? 0,
-      h.ledger?.updater_alive ? (ret ? `在线 · 自动重试${ret}次` : "进程在线") : "进程离线",
+    ["自动更新是否正常", h.ledger?.score ?? 0,
+      h.ledger?.updater_alive ? (ret ? `正常 · 自动重试 ${ret} 次` : "正常") : "已停止",
       h.ledger?.updater_alive ? "ok" : "bad"],
   ];
   const bar = (v: number, color: string): string =>
@@ -281,7 +289,7 @@ async function repairNow(): Promise<void> {
   try {
     const r = await dataApi.repair();
     if (r.submitted?.length) {
-      const labels = r.submitted.map((s) => DATA_TYPE_ZH[s.kind] || s.kind).join("、");
+      const labels = r.submitted.map((s) => DATA_TYPE_ZH[s.kind] || "数据更新").join("、");
       toast(`已提交 ${r.submitted.length} 项修复：${labels}`);
       void refreshUpState();
     } else {
@@ -337,7 +345,7 @@ async function renderData(body: HTMLElement): Promise<void> {
     `<span id="health-chip" style="display:inline-flex"></span><span class="sp"></span>` +
     `<button class="hbtn primary" id="health-repair" data-sz="13">一键修复</button></div>` +
     `<div class="upcard" id="health-body"><span style="color:var(--faint);font-size:11.5px">正在体检…</span></div>` +
-    `<div style="font-size:10.5px;color:var(--faint);margin-top:8px">体检看四件事：数据新不新鲜、覆盖全不全、有没有断档、更新进程是否健康；发现的问题点「一键修复」自动补齐</div></div>` +
+    `<div style="font-size:10.5px;color:var(--faint);margin-top:8px">体检看四件事：数据是不是最新、股票覆盖全不全、历史上有没有断档、自动更新是否正常；发现的问题点「一键修复」自动补齐</div></div>` +
     /* ② 数据内容：每类数据更新到哪天（只展示有数据的卡；卖点 = 数据范围年限） */
     `<div class="setsec"><div class="sh"><h3>数据内容</h3>` +
     `<span class="sub">${esc(rangeSub)} · ${fmtW(totalRows)} 条</span><span class="sp"></span>` +
@@ -348,7 +356,7 @@ async function renderData(body: HTMLElement): Promise<void> {
       const cls = freshCls(n);
       const cov = typeof t.coverage === "number" ? t.coverage : null;
       const covCls = cov == null ? "" : cov >= 90 ? "" : cov >= 50 ? "mid" : "bad";
-      return `<div class="dscard"><div class="ds-h"><i class="logdot ${cls}"></i><b>${esc(TABLE_ZH[t.table] || t.table)}</b></div>` +
+      return `<div class="dscard"><div class="ds-h"><i class="logdot ${cls}"></i><b>${esc(TABLE_ZH[t.table] || "其他数据")}</b></div>` +
         `<div class="ds-date num">${esc(t.latest_date || "—")}</div>` +
         `<div class="ds-m"><span class="num">${fmtW(t.rows ?? 0)} 条</span>` +
         `<span class="fresh ${cls}">${freshLabel(n)}</span></div>` +
@@ -363,7 +371,7 @@ async function renderData(body: HTMLElement): Promise<void> {
     (logs.length ? logs.slice(0, 8).map((l) => {
       const [txt, cls] = STATUS_TEXT[String(l.status)] ?? [String(l.status || "—"), "flat"];
       return `<tr><td class="num">${esc(String(l.created_at || l.started_at || "—")).replace("T", " ").slice(0, 16)}</td>` +
-        `<td>${esc(DATA_TYPE_ZH[String(l.data_type || "")] || String(l.data_type || "—"))}</td>` +
+        `<td>${esc(DATA_TYPE_ZH[String(l.data_type || "")] || (l.data_type ? "其他更新" : "—"))}</td>` +
         `<td><span class="tag ${cls}">${esc(txt)}</span></td>` +
         `<td class="n num">${l.rows != null ? "+" + fmtW(l.rows) : "—"}</td>` +
         `<td style="max-width:280px;overflow:hidden;text-overflow:ellipsis;color:var(--faint)">${esc(String(l.detail || l.error || l.message || ""))}</td></tr>`;
@@ -374,7 +382,7 @@ async function renderData(body: HTMLElement): Promise<void> {
     b.addEventListener("click", async () => {
       try {
         await dataApi.trigger(b.dataset.run!);
-        toast(`已触发 ${b.textContent} · updater 将消费执行`);
+        toast(`已触发「${b.textContent}」，后台正在排队执行`);
         void refreshUpState();
       } catch (e) {
         toast((e as Error).message || "触发失败");
@@ -386,7 +394,7 @@ async function renderData(body: HTMLElement): Promise<void> {
     if (!(e.target as HTMLElement).closest(".upstop")) return;
     try {
       await dataApi.cancel();
-      toast("已请求停止 · updater 将消费");
+      toast("已请求停止，正在取消");
       void refreshUpState();
     } catch (err) {
       toast((err as Error).message || "停止失败");
@@ -405,7 +413,7 @@ function renderLook(body: HTMLElement): void {
   const s = getState();
   const swc: [string, string][] = [["amber", "#FF9F43"], ["teal", "#2FD3C5"], ["indigo", "#8A94FF"], ["rose", "#F07C93"]];
   body.innerHTML =
-    `<div class="setsec"><div class="sh">${ic("circle-half", 15)}<h3>外观与主题</h3><span class="mono">F08 · user_prefs</span></div>` +
+    `<div class="setsec"><div class="sh">${ic("circle-half", 15)}<h3>外观与主题</h3></div>` +
     `<div class="setrow"><span class="lab">主题</span><div class="ctl"><span class="seg" id="set-theme">` +
     `<button class="${s.theme === "dark" ? "on" : ""}" data-t="dark">深色 · 看盘默认</button>` +
     `<button class="${s.theme === "light" ? "on" : ""}" data-t="light">浅色 · 文档</button></span></div></div>` +
@@ -433,13 +441,13 @@ function renderVip(body: HTMLElement): void {
   const vip = isVip();
   const until = u?.pro_expires_at?.slice(0, 10);
   body.innerHTML =
-    `<div class="setsec"><div class="sh">${ic("crown-simple", 15)}<h3>VIP 与订阅</h3><span class="mono">F09 · license</span><span class="sp"></span>` +
+    `<div class="setsec"><div class="sh">${ic("crown-simple", 15)}<h3>VIP 与订阅</h3><span class="sp"></span>` +
     `<span class="tag ${vip ? "vip" : "warn"}">${vip ? `VIP有效${until ? " · " + until + " 到期" : ""}` : u ? "免费版" : "未登录"}</span></div>` +
     `<div class="setrow"><span class="lab">当前方案</span><div class="ctl"><span style="font-size:12.5px">${vip ? "VIP · 完整指标" : "免费版 · 公开名单与开源指标"}</span>` +
-    `<span style="font-size:11px;color:var(--faint)">${vip ? "tier 服务端实时校验" : "VIP 指标服务端计算，未授权不返回数据"}</span></div></div>` +
+    `<span style="font-size:11px;color:var(--faint)">${vip ? "会员权益由系统实时核对" : "VIP 指标由系统计算，未开通不显示"}</span></div></div>` +
     `<div class="setrow"><span class="lab">解锁能力</span><div class="ctl"><span style="font-size:12px;color:var(--dim)">K线 VIP 通道 · 核心标三因子明细 · 六分段判定 · 短中线趋势</span></div></div>` +
     `<div class="setrow"><span class="lab"></span><div class="ctl"><button class="hbtn primary" id="set-vip-go" data-ic="credit-card" data-sz="13">${vip ? "续费 / 叠加" : "立即开通"}</button>` +
-    `<span style="font-size:10.5px;color:var(--faint)">兑换码（YC-XXXX-XXXX）核销 → license 自动签发 / 续期</span></div></div></div>`;
+    `<span style="font-size:10.5px;color:var(--faint)">兑换码（YC-XXXX-XXXX）核销后自动开通 / 续期</span></div></div></div>`;
   body.querySelector("#set-vip-go")!.addEventListener("click", () => openModal("modal-vip"));
   body.querySelectorAll<HTMLElement>("[data-ic]").forEach((el) => {
     if (!el.querySelector("svg")) el.innerHTML = ic(el.dataset.ic!, +(el.dataset.sz || 14)) + el.innerHTML;
@@ -451,18 +459,18 @@ function renderAccount(body: HTMLElement): void {
   const u = getState().user;
   if (!u) {
     body.innerHTML =
-      `<div class="setsec"><div class="sh">${ic("user", 15)}<h3>账户</h3><span class="mono">F12 · JWT</span></div>` +
+      `<div class="setsec"><div class="sh">${ic("user", 15)}<h3>账户</h3></div>` +
       `<div class="empty" style="padding:30px"><b>未登录</b><span>登录后同步账户与 VIP 权益</span></div></div>`;
     return;
   }
   body.innerHTML =
-    `<div class="setsec"><div class="sh">${ic("user", 15)}<h3>账户</h3><span class="mono">F12 · JWT</span></div>` +
+    `<div class="setsec"><div class="sh">${ic("user", 15)}<h3>账户</h3></div>` +
     `<div class="setrow"><span class="lab">邮箱</span><div class="ctl"><span>${esc(u.email)}</span></div></div>` +
     `<div class="setrow"><span class="lab">用户名</span><div class="ctl"><span>${esc(u.username || "—")}</span></div></div>` +
-    `<div class="setrow"><span class="lab">用户 ID</span><div class="ctl"><span class="num" style="font-size:11px">${esc(u.id)}</span></div></div>` +
+    `<div class="setrow"><span class="lab">用户编号</span><div class="ctl"><span class="num" style="font-size:11px">${esc(u.id)}</span></div></div>` +
     `<div class="setrow"><span class="lab">注册时间</span><div class="ctl"><span class="num">${esc(u.created_at?.slice(0, 10) || "—")}</span></div></div>` +
     `<div class="setrow"><span class="lab">安全</span><div class="ctl"><button class="hbtn" id="ac-out" data-ic="sign-out" data-sz="13">退出登录</button></div></div></div>` +
-    `<div class="setsec"><div class="sh"><h3>合规声明</h3></div><div class="compliance">本产品仅提供基于公开数据的规则化分析与信息整理，不构成投资建议。付费文案统一为「数据分析工具使用权」。主仓库开源，VIP 指标计算位于闭源包，前端只渲染不计算。</div></div>`;
+    `<div class="setsec"><div class="sh"><h3>合规声明</h3></div><div class="compliance">本产品仅提供基于公开数据的规则化分析与信息整理，不构成投资建议。付费文案统一为「数据分析工具使用权」。VIP 指标由系统统一计算，页面只负责展示。</div></div>`;
   body.querySelector("#ac-out")!.addEventListener("click", () => { logout(); void render(); });
   body.querySelectorAll<HTMLElement>("[data-ic]").forEach((el) => {
     if (!el.querySelector("svg")) el.innerHTML = ic(el.dataset.ic!, +(el.dataset.sz || 14)) + el.innerHTML;
@@ -484,9 +492,9 @@ async function renderFeishu(body: HTMLElement): Promise<void> {
   const [tagCls, tagTxt] = cfg.enabled && cfg.webhook_set ? ["ok", "已启用"]
     : cfg.webhook_set ? ["warn", "已配置 · 未启用"] : ["flat", "未配置"];
   body.innerHTML =
-    `<div class="setsec"><div class="sh">${ic("paper-plane-tilt", 15)}<h3>飞书推送</h3><span class="mono">F10 · user_prefs.feishu</span><span class="sp"></span>` +
+    `<div class="setsec"><div class="sh">${ic("paper-plane-tilt", 15)}<h3>飞书推送</h3><span class="sp"></span>` +
     `<span class="tag ${tagCls}">${tagTxt}</span></div>` +
-    `<div class="setrow"><span class="lab">Webhook 地址</span><div class="ctl">` +
+    `<div class="setrow"><span class="lab">机器人地址</span><div class="ctl">` +
     `<input class="field" id="fs-url" style="flex:1;min-width:260px" placeholder="${cfg.webhook_set ? "已配置 · 留空保持不变" : "https://open.feishu.cn/open-apis/bot/v2/hook/…"}"></div></div>` +
     `<div class="setrow"><span class="lab">签名密钥</span><div class="ctl">` +
     `<input class="field" id="fs-secret" type="password" style="flex:1;min-width:260px" placeholder="${cfg.has_secret ? "已配置 · 留空保持不变" : "机器人开启「加签」时才填"}"></div></div>` +
@@ -503,8 +511,8 @@ async function renderFeishu(body: HTMLElement): Promise<void> {
     `<button class="hbtn primary" id="fs-save">保存</button>` +
     `<button class="hbtn" id="fs-test">发送测试消息</button>` +
     `<button class="hbtn" id="fs-push-now">立即推送两点乾坤</button></div></div>` +
-    `<div style="font-size:10.5px;color:var(--faint);line-height:1.7">获取方式：飞书群 → 设置 → 群机器人 → 添加自定义机器人 → 复制 Webhook 地址。<br>` +
-    `推送内容：核心标早报（追涨池 / 低吸池，含六分段与排名）+ 两点乾坤信号（盘中按实时快照判定）；无命中不打扰。</div></div>`;
+    `<div style="font-size:10.5px;color:var(--faint);line-height:1.7">获取方式：飞书群 → 设置 → 群机器人 → 添加自定义机器人 → 复制机器人地址。<br>` +
+    `推送内容：核心标早报（追涨池 / 低吸池，含六分段与排名）+ 两点乾坤信号（盘中按实时行情判定）；无命中不打扰。</div></div>`;
   let enabled = cfg.enabled;
   let pushEnabled = cfg.push_enabled;
   document.getElementById("fs-sw")!.addEventListener("click", (e) => {
@@ -568,7 +576,7 @@ function parsePushTimes(raw: string): string[] | null {
 async function renderLlm(body: HTMLElement): Promise<void> {
   if (!getState().user) {
     body.innerHTML =
-      `<div class="setsec"><div class="empty" style="padding:50px">${ic("spark", 30)}<b>大模型 · 未登录</b><span>登录后配置你自己的大模型 Key（BYOK，随账户云同步）</span></div></div>`;
+      `<div class="setsec"><div class="empty" style="padding:50px">${ic("spark", 30)}<b>大模型 · 未登录</b><span>登录后可以配置你自己的大模型密钥（随账户云同步）</span></div></div>`;
     return;
   }
   let cfg: LlmCfg;
@@ -579,7 +587,7 @@ async function renderLlm(body: HTMLElement): Promise<void> {
   const [tagCls, tagTxt] = cfg.enabled && cfg.key_set ? ["ok", "已启用"]
     : cfg.key_set ? ["warn", "已配置 · 未启用"] : ["flat", "未配置"];
   body.innerHTML =
-    `<div class="setsec"><div class="sh">${ic("spark", 15)}<h3>大模型（BYOK）</h3><span class="mono">F11 · user_prefs.llm</span><span class="sp"></span>` +
+    `<div class="setsec"><div class="sh">${ic("spark", 15)}<h3>大模型（自带密钥）</h3><span class="sp"></span>` +
     `<span class="tag ${tagCls}">${tagTxt}</span></div>` +
     `<div class="setrow"><span class="lab">接口地址</span><div class="ctl">` +
     `<input class="field" id="llm-url" style="flex:1;min-width:260px" placeholder="https://api.deepseek.com/v1（OpenAI 兼容）" value="${esc(cfg.base_url)}"></div></div>` +
@@ -672,7 +680,7 @@ export async function refreshDatachip(): Promise<void> {
         : `本地行情数据${label}。点击查看数据底座`,
     };
   } catch {
-    face = { text: "行情数据 · 连接失败", cls: "", title: "后端接口不可达，点击查看数据底座" };
+    face = { text: "行情数据 · 连接失败", cls: "", title: "暂时连不上服务，点击查看数据底座" };
   }
   chipIdle = face;
   paintChip();

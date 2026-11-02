@@ -124,7 +124,7 @@ def push_feishu_targets(user: dict = Depends(_user), conn=Depends(get_conn)):
     """用当前最新口径算一次（与定时任务同一函数），便于先看效果再开定时。"""
     cfg = integrations.get_feishu(user["id"])
     if not cfg.get("webhook_url"):
-        return TestOut(ok=False, message="请先填写并保存飞书 Webhook 地址")
+        return TestOut(ok=False, message="请先填写并保存飞书机器人地址")
     payload = integrations.liangdian_message(conn)
     if payload is None:
         return TestOut(ok=True, message="当前没有符合两点乾坤的标的，未发送")

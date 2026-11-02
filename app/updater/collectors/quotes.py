@@ -28,11 +28,11 @@ def update_quotes(progress=None, ctx=None) -> dict:
             "ORDER BY symbol").fetchall()]
         writer.reset()          # 批量抓取（1-3 分钟）期间绝不能持写锁
         progress(stage="采集行情快照", total=len(symbols), done=0,
-                 message=f"{day} 全市场 {len(symbols)} 只（腾讯 qt）")
+                 message=f"{day} 全市场 {len(symbols)} 只股票的实时行情")
 
         raw = sources.fetch_qt_batch(symbols, progress=progress, cancel=cancel)
         if not raw:
-            raise RuntimeError("行情快照为空（腾讯 qt 不可达）")
+            raise RuntimeError("没有取到行情数据（数据源暂时连不上）")
 
         conn = writer.conn()    # 抓完再拿锁，写完立即释放
         # 换手率：当日 daily_ohlcv 行的 turnover_rate 补写（K线车道不带换手率）

@@ -32,7 +32,7 @@ def update_valuation(progress=None, ctx=None) -> dict:
         except RuntimeError as e:
             # 备用车道：东财 push2 被 IP 风控掐连时换腾讯 qt（1.0 2026-09 实战）
             progress(stage="切换备用数据源", total=0, done=0,
-                     message=f"东财 clist 不可达（{str(e)[:80]}），切换腾讯 qt", level="warning")
+                     message=f"主数据源连接失败（{str(e)[:80]}），改用备用数据源", level="warning")
             conn = writer.conn()
             syms = [str(r[0]) for r in conn.execute(
                 "SELECT symbol FROM stock_universe WHERE symbol ~ '^[0-9]{6}$'").fetchall()]

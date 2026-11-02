@@ -33,9 +33,11 @@ def update_sector_index(progress=None, ctx=None) -> dict:
             sectors = sources.fetch_sector_snapshot(
                 board_type=kind, progress=progress, cancel=cancel)
             if not sectors:
-                raise RuntimeError(f"{kind} 板块快照为空（接口可能被限流）")
+                raise RuntimeError(f"{'行业' if kind == 'industry' else '概念'}板块行情为空"
+                                   f"（数据源可能被限流）")
             progress(stage="写入板块", total=len(sectors), done=len(sectors),
-                     message=f"{day} {kind} {len(sectors)} 个板块")
+                     message=f"{day} {'行业' if kind == 'industry' else '概念'}板块 "
+                             f"{len(sectors)} 个")
             conn.execute("DELETE FROM sector_index WHERE trade_date = ? AND kind = ?",
                          [day, kind])
             conn.executemany(

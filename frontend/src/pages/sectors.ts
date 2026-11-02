@@ -91,7 +91,7 @@ function renderHeat(): void {
   const el = document.getElementById("heat")!;
   const rows = filtered();
   if (!rows.length) {
-    el.innerHTML = `<div style="grid-column:1/-1;padding:40px;text-align:center;color:var(--faint);font-size:12px">${q ? "无匹配板块" : "暂无板块数据（sector_index 未落库）"}</div>`;
+    el.innerHTML = `<div style="grid-column:1/-1;padding:40px;text-align:center;color:var(--faint);font-size:12px">${q ? "无匹配板块" : "暂无板块数据（板块行情还没采集到）"}</div>`;
     return;
   }
   el.innerHTML = rows.slice(0, 48).map((s) => {
@@ -116,7 +116,7 @@ function renderRank(): void {
     defaultSort: { label: "涨幅", dir: -1 },
     onChange: renderRank,
     onRow: (s) => void openSector(s.id),
-    empty: q ? "无匹配板块" : "暂无板块数据（sector_index 未落库）",
+    empty: q ? "无匹配板块" : "暂无板块数据（板块行情还没采集到）",
   });
   if (rankReset) { rankPager.reset(); rankReset = false; }
   const rows = rankTbl.sort(filtered());

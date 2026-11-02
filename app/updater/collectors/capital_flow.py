@@ -32,7 +32,7 @@ def update_capital_flow(progress=None, ctx=None) -> dict:
             "SELECT symbol, MAX(date) FROM capital_flow GROUP BY symbol").fetchall()}
         writer.reset()          # 逐只抓取（十几分钟）期间绝不能持写锁
         progress(stage="采集资金流", total=len(symbols), done=0,
-                 message=f"新浪逐只资金流，{len(symbols)} 个标的")
+                 message=f"逐个股票拉取资金流，共 {len(symbols)} 只")
 
         done = failed = 0
         rows_written = 0

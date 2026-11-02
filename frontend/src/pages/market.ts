@@ -1187,7 +1187,7 @@ async function fetchPickFund(date: string): Promise<void> {
       net_large: it?.net_large ?? null, net_medium: it?.net_medium ?? null,
       net_small: it?.net_small ?? null,
     };
-    mk.pick.note = r.note ?? (it ? null : "该日无资金流数据（未采集 / 非交易日）");
+    mk.pick.note = r.note ?? (it ? null : "该日暂无资金流数据（可能非交易日）");
     mk.pick.loading = false;
     renderRight();
   } catch (e) {
@@ -1401,7 +1401,7 @@ function flowDetailOk(items: FlowItem[], main: number | null): boolean {
 }
 
 /** 分档缺口的说明行（与 rg-note 同一语言，不额外造样式） */
-const FLOW_DETAIL_MISSING = `<div class="rg-note">分档明细缺失（数据源只回了主力合计），四档条形不可用</div>`;
+const FLOW_DETAIL_MISSING = `<div class="rg-note">目前只有主力合计数据，四档明细暂未提供</div>`;
 
 /** 四档净额：名称 | 零轴双向条 | 带符号净额 */function flowRows(items: FlowItem[]): string {
   const mx = Math.max(...items.map((i) => Math.abs(i[1] ?? 0)), 1e4);
@@ -1819,7 +1819,7 @@ function cardBody(cid: string, mode: string): string {
       // 周末/盘后直接展示会把成交额挂到非交易日上
       const dstr = bars[bars.length - 1]?.date ?? (q?.date ?? "").slice(0, 10);
       return `<div class="mf-hd">` + mfLead("今日成交额", fmtYi(q?.amount, 1)) +
-        `<div class="mf-meta"><div>${isIdx ? "指数无个股资金流" : "未采集资金流"}</div>` +
+        `<div class="mf-meta"><div>${isIdx ? "指数无个股资金流" : "暂无资金流数据"}</div>` +
         `<div class="num">${dstr}</div></div></div>` +
         `<div class="rg-note">在 K 线上框选一段区间，可统计该区间涨跌幅与成交额${isIdx ? "" : " / 主力净流入"}</div>`;
     }
@@ -1860,7 +1860,7 @@ function cardBody(cid: string, mode: string): string {
   }
   if (cid === "valuation") {
     const v = q?.valuation;
-    if (!v) return `<div style="font-size:11.5px;color:var(--faint)">暂无估值数据（daily_valuation 未覆盖）</div>`;
+    if (!v) return `<div style="font-size:11.5px;color:var(--faint)">暂无估值数据（全市场估值还没采集到）</div>`;
     const row = (k: string, val: number | null | undefined, digits = 2) =>
       `<div class="mbl"><span>${k}</span><div class="mbt"></div><b class="num">${fmt(val, digits)}</b></div>`;
     if (mode === "simple") {
@@ -1992,7 +1992,7 @@ export function renderRight(): void {
     html += `<div class="rcard" data-cid="${def.id}">${cardHead(def)}` +
       `<div class="fbody${p.mode === "simple" && def.id === "signals" ? "" : ""}${false ? " hide" : ""}">${cardBody(def.id, p.mode)}</div></div>`;
   }
-  html += `<div class="cmpl">仅提供基于公开数据的规则化分析，不构成投资建议 · 指标为开源口径前端计算，VIP 明细服务端脱敏返回</div>`;
+  html += `<div class="cmpl">仅提供基于公开数据的规则化分析，不构成投资建议 · 指标按公开规则计算，VIP 明细由系统处理后返回</div>`;
   el.innerHTML = html;
   el.querySelectorAll<HTMLElement>("[data-vip-open]").forEach((b) =>
     b.addEventListener("click", () => openModal("modal-vip")));

@@ -36,7 +36,7 @@ def update_target_scan(progress=None, ctx=None) -> dict:
             result.update(status="cancelled")
             return result
         progress(stage="计算趋势柱线", total=len(scan), done=0,
-                 message="STICKV 逐股分块（每块 150 只）")
+                 message="趋势柱线逐股计算（每批 150 只）")
         trend = repo.compute_target_trends(conn)
         if cancel and cancel():
             result.update(status="cancelled")

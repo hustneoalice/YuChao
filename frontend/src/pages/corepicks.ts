@@ -98,7 +98,7 @@ async function openDetail(symbol: string, pool: string): Promise<void> {
 
   if (!isVip()) {
     (document.getElementById("dt-factors") as HTMLElement).innerHTML =
-      `<div class="factor" style="grid-column:1/-1;display:grid;place-items:center;gap:8px;padding:22px">${ic("lock-key", 22)}<b>VIP 三因子明细已锁定</b><span style="font-size:11px;color:var(--faint)">趋势 / 位置 / 六分段由服务端计算，未授权不返回数据</span><button class="hbtn primary" data-dt-vip style="height:28px">开通 VIP</button></div>`;
+      `<div class="factor" style="grid-column:1/-1;display:grid;place-items:center;gap:8px;padding:22px">${ic("lock-key", 22)}<b>VIP 三因子明细已锁定</b><span style="font-size:11px;color:var(--faint)">趋势 / 位置 / 六分段由系统计算，未开通 VIP 不显示</span><button class="hbtn primary" data-dt-vip style="height:28px">开通 VIP</button></div>`;
     (document.getElementById("dt-kv") as HTMLElement).innerHTML =
       `<dt>资金分</dt><dd class="num">${r.fund_score ?? "—"}</dd><dt>六分段</dt><dd>${esc(r.seg || "—")}</dd>`;
   } else {

@@ -19,91 +19,86 @@ TASKS: tuple[dict, ...] = (
      "fn": "app.updater.collectors.market_snapshot:update_market_snapshot",
      "min_rows": 3000,
      "cooldown_s": 0,     # interval 自带 5min 节律，冷却会拦掉一半轮次
-     "description": "盘中每 5 分钟 qt 全字段快照（价/涨跌停/量额/换手/量比/"
-                    "振幅/买卖一/内外盘/市值 + 10 指数）→ market_snapshot；"
-                    "非交易时段幂等秒跳，全景大页/指数条/市场总貌数据源"},
+     "description": "盘中每 5 分钟刷新一次全市场实时行情（价格/涨跌幅/成交额/"
+                    "换手率/量比/振幅/市值 + 10 个指数）；非交易时段自动跳过，"
+                    "供全景大表、指数条和市场总貌使用"},
     {"kind": "sector_index", "label": "板块行情",
      "fn": "app.updater.collectors.sector_index:update_sector_index",
      "freshness": {"table": "sector_index", "col": "trade_date"},
      "min_rows": 300,
-     "description": "15:35 东财板块清单（行业 t:2 + 概念 t:3）→ sector_index；"
-                    "概念成分逐板块 → sector_member"},
+     "description": "收盘后更新行业板块、概念板块的行情，以及概念板块的成分股"},
     {"kind": "zy_block_sync", "label": "众赢板块同步",
      "fn": "app.updater.collectors.zy_blocks:update_zy_blocks",
      "freshness": {"table": "zy_block", "col": "sync_date"},
-     "description": "16:05 众赢板块体系（1075 个：地域/行业/概念/风格/题材，"
-                    "通达信系匿名接口，低频日级）→ zy_block + 逐板块成分 → "
-                    "zy_block_member；行情一律查询时 × market_snapshot 聚合"},
+     "description": "收盘后更新众赢板块体系（地域/行业/概念/风格/题材等 1000 多个"
+                    "板块）和成分股；板块涨跌按盘中实时行情汇总"},
     {"kind": "fund_universe_sync", "label": "基金清单同步",
      "fn": "app.updater.collectors.fund_universe:update_fund_universe",
      "freshness": {"table": "fund_universe", "col": "sync_date"},
-     "description": "09:05 场内基金清单（ETF/LOF/REIT，新浪节点 + 东财 fallback）"
-                    " → fund_universe；盘中快照任务读此表 kind='fund' 落 market_snapshot"},
+     "description": "开盘前更新场内基金清单（ETF/LOF/REIT，供盘中行情和日线采集使用）"},
     {"kind": "quotes", "label": "实时行情",
      "fn": "app.updater.collectors.quotes:update_quotes",
      "freshness": {"log": True},
-     "description": "16:00 腾讯 qt 批量报价：换手率补写 + 证券简称刷新"},
+     "description": "收盘后补充换手率、刷新证券简称"},
     {"kind": "valuation", "label": "全市场估值",
      "fn": "app.updater.collectors.valuation:update_valuation",
      "freshness": {"table": "daily_valuation", "col": "date"},
      "min_rows": 3000,
-     "description": "16:20 东财 clist 全市场估值 → daily_valuation（腾讯备用车道）"},
+     "description": "收盘后更新全市场估值（市盈率/市净率/市值等）"},
     {"kind": "capital_flow", "label": "个股资金流",
      "fn": "app.updater.collectors.capital_flow:update_capital_flow",
-     "description": "16:30 新浪逐只资金流 → capital_flow（唯一源）"},
+     "description": "收盘后更新每只股票的资金流向（主力净流入等）"},
     {"kind": "pe_percentile", "label": "PE 分位重建",
      "fn": "app.updater.collectors.pe_percentile:rebuild_pe_percentile",
      "needs": ["valuation"],
      "freshness": {"table": "pe_percentile", "col": "updated_at"},
      "min_rows": 2000,
-     "description": "16:50 基于最新估值截面重建全市场 PE 分位与行业中位"},
+     "description": "收盘后重算全市场市盈率排名和行业中位数"},
     {"kind": "kline_update", "label": "K 线增量",
      "fn": "app.updater.collectors.kline:update_kline",
-     "description": "17:00 腾讯 fqkline 日线增量（东财备用）→ daily_ohlcv；"
-                    "目标集 = 个股 + fund_universe 场内基金（ETF/LOF/REIT，"
-                    "新进标的 3000 根建底仓）"},
+     "description": "收盘后补齐当日日线行情（全市场股票和场内基金）；"
+                    "新上市标的自动补历史 K 线"},
     {"kind": "target_scan", "label": "目标监控预计算",
      "fn": "app.updater.collectors.targets:update_target_scan",
      "needs": ["kline_update"],
      "freshness": {"table": "target_scan", "col": "as_of"},
      "min_rows": 3000,
-     "description": "17:20 K 线落库后预计算目标页指标层（均线/量比/六分段/涨停"
-                    " + 趋势柱线 STICKV）→ target_scan / target_trend；"
-                    "用户打开目标页只读现成结果，改条件即时重筛，不再请求内重算"},
+     "description": "收盘后预先算好目标监控要用的指标（均线/量比/六分段/涨停"
+                    "次数/趋势柱线）；打开页面即用，改条件立刻重筛"},
     {"kind": "financials", "label": "财务数据",
      "fn": "app.updater.collectors.financials:update_financials",
      "freshness": {"log": True},
      "min_rows": 500,
-     "description": "17:30 东财财务三表按报告期 → financials（覆盖近两期）"},
+     "description": "收盘后更新最新两期财务报表"},
     {"kind": "backup", "label": "数据备份",
      "fn": "app.updater.collectors.backup:run_backup",
-     "description": "18:10 CHECKPOINT → 整库快照（滚动 7 份，副本可读校验）"},
+     "description": "收盘后给数据库做整库备份（保留最近 7 份，并校验备份可读）"},
     {"kind": "adjust_factor", "label": "复权因子",
      "fn": "app.updater.collectors.adjust_factor:update_adjust_factor",
      "freshness": {"log": True},
-     "description": "周六 09:00 baostock 复权因子（可选依赖，缺失则 skipped）"},
+     "description": "每周六更新复权因子（用于计算前复权 K 线）"},
     {"kind": "corepicks", "label": "核心标推送",
      "fn": "app.updater.collectors.corepicks:update_corepicks",
-     "description": "21:00 核心标引擎占位（应用层迁移后接入）"},
+     "description": "每晚更新核心标选股名单"},
     {"kind": "feishu_push", "label": "飞书推送",
      "fn": "app.updater.collectors.feishu_push:push_corepicks",
      "notify": True,
-     "description": "08:35 核心标名单 → 飞书（按用户配置，名单为空/无人启用则跳过）"},
+     "description": "每个交易日早间把核心标名单推送到飞书（按用户设置，名单为空则不发）"},
     {"kind": "target_push", "label": "两点乾坤推送",
      "fn": "app.updater.collectors.target_push:push_target_signals",
      "notify": True,
      "cooldown_s": 0,     # 每分钟探测：冷却会拦掉相邻时段
-     "description": "按用户设置的时间点（每天可多个，HH:MM）计算趋势柱线当日"
-                    "上穿零轴 + 中线趋势橙的标的 → 飞书；无命中不发空消息"},
+     "description": "按用户设置的时间点（每天可多个）计算「两点乾坤」信号并推送到"
+                    "飞书；没有符合条件的股票就不发"},
     {"kind": "package_export", "label": "导出数据包",
      "fn": "app.updater.packaging:run_export",
-     "description": "底座全量快照 → 离线数据包 + SHA256 manifest（F14，与更新互斥）"},
+     "description": "把全部数据导出成离线数据包（用于备份或迁移）"},
     {"kind": "package_import", "label": "导入数据包",
      "fn": "app.updater.packaging:run_import",
-     "description": "校验（SHA256→行数→抽样）→ 换库（原库 .bak）→ 重建 schema"},
+     "description": "导入离线数据包（先校验完整性，通过后才替换现有数据）"},
     {"kind": "backfill", "label": "历史回补",
      "fn": "app.updater.packaging:run_backfill",
-     "description": "行情→估值→资金流→K线 串行回补（多源降级，init mode=backfill）"},
+     "description": "补齐历史数据（行情→估值→资金流→日线依次回补）"},
 )
 
 _KINDS = {t["kind"] for t in TASKS}

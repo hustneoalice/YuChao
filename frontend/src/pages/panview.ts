@@ -92,7 +92,7 @@ const BLOCK_COLS: DataTableCol<ZyBlockRow>[] = [
       (r.members ? `${Math.round((r.up_count / r.members) * 100)}%` : "—") },
   { label: "领涨股", render: (r) => (r.leader
       ? `${esc(r.leader)} ${pctCell(r.leader_change, "")}` : `<span style="color:var(--faint)">—</span>`) },
-  { label: "成分数", num: true, title: "有当日快照的成分", render: (r) => (r.members ? `<span class="num">${r.members}</span>` : `<span style="color:var(--faint)">0</span>`) },
+  { label: "成分数", num: true, title: "有当日行情的成分股数量", render: (r) => (r.members ? `<span class="num">${r.members}</span>` : `<span style="color:var(--faint)">0</span>`) },
   { label: "成交额", num: true, sort: "amount", render: (r) => fmtYi(r.amount) },
 ];
 
@@ -246,8 +246,8 @@ async function setLink(symbol: string, name: string,
     // 分时：左涨跌幅轴 + 右价格轴 + 昨收虚线 + 均价线 + VOLFS 逐分钟量柱
     intra!.setData(miRes.value);
   } else {
-    intra!.setMessage("分时源暂不可用（日K 正常）");
-    quote.innerHTML = `<span style="color:var(--faint)">分时源暂不可用（日K 正常）</span>`;
+    intra!.setMessage("盘中分时暂时取不到（日线正常）");
+    quote.innerHTML = `<span style="color:var(--faint)">盘中分时暂时取不到（日线正常）</span>`;
   }
 }
 
@@ -299,7 +299,7 @@ function ensureMemberTable(): void {
     defaultSort: { label: "涨跌幅", dir: -1 },
     onChange: () => { memPager!.reset(); void loadMembers(); },
     onRow: (r) => void setLink(r.symbol, r.name || r.symbol, r),
-    empty: "该板块暂无成分（非交易时段上游不返回）",
+    empty: "该板块暂无成分股（非交易时段暂不提供）",
   });
 }
 
