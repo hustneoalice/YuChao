@@ -470,7 +470,8 @@ def _target_scan(conn, conds: str, values: Optional[str],
     rows, meta = repo.market.stock_targets_universe(conn)
     trend_as_of = meta.get("trend_as_of") or meta["as_of"]
     provisional = bool(meta.get("provisional"))
-    if "trend" in want:
+    # 负柱收敛 / 距零轴也依赖 STICKV 预计算序列，启用时同样拼接趋势字段
+    if screening.needs_trend(want):
         trends = repo.market.stock_target_trends(conn)
         rows = [{**row, **trends.get(row['symbol'], {}),
                  "trend_provisional": provisional}
@@ -481,9 +482,16 @@ def _target_scan(conn, conds: str, values: Optional[str],
                 trend_matches(t, trend_mode, trend_recent, trend_still_above, trend_above_days))
 
     items = [t for t in rows if screening.matches(t, want, vals, trend_hit(t) if "trend" in want else None)]
-    items.sort(key=lambda t:
-        ((t.get('trend_cross_ago') if t.get('trend_cross_ago') is not None else 100000), -t['seg'])
-        if "trend" in want else (-t['seg'], -(t['vol_ratio'] or 0)))
+    if "trend" in want:
+        items.sort(key=lambda t:
+            ((t.get('trend_cross_ago') if t.get('trend_cross_ago') is not None else 100000), -t['seg']))
+    elif "negshrink" in want or "nearzero" in want:
+        # 负柱收敛榜：越贴近零轴越靠前（neg_abs 升序），同幅度再按收敛天数/强势段
+        items.sort(key=lambda t: (
+            t.get('neg_abs') if t.get('neg_abs') is not None else 1e9,
+            -(t.get('neg_run') or 0), -t['seg']))
+    else:
+        items.sort(key=lambda t: (-t['seg'], -(t['vol_ratio'] or 0)))
     return items, meta, vals, provisional
 
 
@@ -506,7 +514,7 @@ def targets_export(conds: str = Query(default="vol,short,mid,up20"),
     items, meta, _vals, _provisional = _target_scan(
         conn, conds, values, trend_mode, trend_recent,
         trend_still_above, trend_above_days)
-    with_trend = "trend" in screening.enabled_keys(conds)
+    with_trend = screening.needs_trend(screening.enabled_keys(conds))
 
     cols = [
         ("symbol", "代码", 11, None),
@@ -522,6 +530,8 @@ def targets_export(conds: str = Query(default="vol,short,mid,up20"),
     ]
     if with_trend:
         cols += [
+            ("neg_run", "负柱收敛天数", 12, "0"),
+            ("neg_abs", "距零轴", 9, "0.00"),
             ("trend_value", "STICKV", 9, "0.00"),
             ("trend_cross_date", "最近转正", 11, None),
             ("cross_ago", "距今交易日", 10, "0"),

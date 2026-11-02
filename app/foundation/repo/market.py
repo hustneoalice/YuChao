@@ -736,11 +736,12 @@ def target_trend_snapshot(conn) -> Optional[dict]:
         if not latest or str(latest[0]) != str(head[0]):
             return None
         rows = conn.execute(
-            "SELECT symbol, data_date, trend_value, cross_date, cross_ago, above_days"
-            " FROM target_trend").fetchall()
+            "SELECT symbol, data_date, trend_value, cross_date, cross_ago, above_days,"
+            " neg_run, neg_abs FROM target_trend").fetchall()
         return {r[0]: dict(trend_data_date=r[1], trend_value=r[2],
                            trend_cross_date=r[3], trend_cross_ago=r[4],
-                           trend_above_days=r[5]) for r in rows}
+                           trend_above_days=r[5], neg_run=r[6], neg_abs=r[7])
+                for r in rows}
     except Exception:
         return None
 

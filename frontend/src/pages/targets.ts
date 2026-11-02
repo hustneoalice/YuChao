@@ -128,6 +128,13 @@ const TGT_COLS: DataTableCol<TargetItem>[] = [
   { label: "最近转正", sort: t => t.trend_cross_date ?? "", render: t => t.trend_cross_date ?? "—" },
   { label: "距今交易日", num: true, sort: t => t.trend_cross_ago ?? null, render: t => t.trend_cross_ago == null ? "—" : t.trend_cross_ago === 0 ? "当日" : `${t.trend_cross_ago}日前` },
   { label: "连续上方", num: true, sort: t => t.trend_above_days, render: t => t.trend_value == null ? "—" : `${t.trend_above_days}日` },
+  { label: "负柱收敛", num: true, title: "STICKV 连续为负且逐日收窄的天数（绿柱缩短，提前捕捉上穿零轴）",
+    sort: t => t.neg_run ?? 0, render: t => t.neg_run
+      ? `<span class="tag ${t.neg_run >= 3 ? "acc" : "p1"}">${t.neg_run}日</span>`
+      : `<span style="color:var(--faint)">—</span>` },
+  { label: "距零轴", num: true, title: "当前负柱幅度 |STICKV|，越小越贴近零轴",
+    sort: t => t.neg_abs ?? null,
+    render: t => t.neg_abs == null ? `<span style="color:var(--faint)">—</span>` : t.neg_abs.toFixed(1) },
   { label: "40日均量", num: true, title: "当日成交量 / 40日均量", sort: (t) => t.vol_ratio,
     render: (t) => `<span style="color:${t.vol_hit ? PAL.o : "var(--dim)"}">${t.vol_ratio == null ? "—" : `${t.vol_ratio.toFixed(2)}x`}</span>` },
   { label: "短线趋势", sort: (t) => (t.short_orange ? 1 : 0), render: (t) =>
@@ -144,10 +151,11 @@ const TGT_COLS: DataTableCol<TargetItem>[] = [
 
 function drawPage(): void {
   const empty = document.getElementById("tgt-empty")!;
-  const wantTrend = !!conds["trend"];
+  const wantTrend = !!(conds["trend"] || conds["negshrink"] || conds["nearzero"]);
   if (!pager) pager = createPager(document.getElementById("tgt-pager")!, "targets", drawPage);
   if (tableHasTrend !== wantTrend) { tbl = null; tableHasTrend = wantTrend; }
-  const columns = wantTrend ? TGT_COLS : TGT_COLS.filter(column => !["STICKV", "最近转正", "距今交易日", "连续上方"].includes(column.label));
+  const columns = wantTrend ? TGT_COLS : TGT_COLS.filter(column =>
+    !["STICKV", "最近转正", "距今交易日", "连续上方", "负柱收敛", "距零轴"].includes(column.label));
   if (!tbl) tbl = createDataTable(document.getElementById("tgt-wrap")!, columns, {
     rowKey: (t) => t.symbol,
     onRow: (t) => document.dispatchEvent(new CustomEvent("yc:open-stock", {

@@ -48,9 +48,21 @@ def trend_summary(dates, values, calendar=None):
     age = None
     if cross is not None:
         age = len(values)-1-cross if calendar is None else calendar[dates[-1]]-calendar[dates[cross]]
-    return dict(trend_value=values[-1] if values else None,
+    # 负柱收敛（提前捕捉上穿零轴）：今日仍是绿柱，且逐日向零轴收窄
+    # （v[i] > v[i-1]）。neg_run = 连续收窄的天数，neg_abs = 当前负柱距零轴幅度。
+    neg_run = 0
+    if values and values[-1] is not None and values[-1] < 0:
+        i = len(values) - 1
+        while (i > 0 and values[i] is not None and values[i-1] is not None
+               and values[i] < 0 and values[i] > values[i-1]):
+            neg_run += 1
+            i -= 1
+    last = values[-1] if values else None
+    return dict(trend_value=last,
                 trend_cross_date=dates[cross] if cross is not None else None,
                 trend_cross_ago=age, trend_above_days=above,
+                neg_run=neg_run,
+                neg_abs=abs(last) if last is not None and last < 0 else None,
                 trend_data_date=dates[-1] if dates else '')
 
 

@@ -151,7 +151,10 @@ export interface TargetItem {
   limit_up_20d: boolean; limit_up_cnt: number;
   seg: number; seg_name: string; pullback: boolean;
   trend_value?: number | null; trend_cross_date?: string | null; trend_cross_ago?: number | null;
-  trend_above_days: number; trend_data_date: string; trend_provisional: boolean;
+  trend_above_days: number;
+  neg_run?: number;                       // 连续负柱收窄天数（绿柱缩短）
+  neg_abs?: number | null;                // 当前负柱距零轴幅度 |STICKV|（正值时为 null）
+  trend_data_date: string; trend_provisional: boolean;
 }
 
 export interface TargetScanOut {

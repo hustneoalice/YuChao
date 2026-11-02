@@ -50,12 +50,13 @@ def update_target_scan(progress=None, ctx=None) -> dict:
         conn.execute("DELETE FROM target_trend")
         tr_rows = [(sym, r.get("trend_data_date"), r.get("trend_value"),
                     r.get("trend_cross_date"), r.get("trend_cross_ago"),
-                    r.get("trend_above_days")) for sym, r in trend.items()]
+                    r.get("trend_above_days"), r.get("neg_run"), r.get("neg_abs"))
+                   for sym, r in trend.items()]
         if tr_rows:
             conn.executemany(
                 "INSERT OR REPLACE INTO target_trend "
-                "(symbol,data_date,trend_value,cross_date,cross_ago,above_days) "
-                "VALUES (?,?,?,?,?,?)", tr_rows)
+                "(symbol,data_date,trend_value,cross_date,cross_ago,above_days,"
+                "neg_run,neg_abs) VALUES (?,?,?,?,?,?,?,?)", tr_rows)
         conn.commit()
         result.update(status="completed", rows=len(scan), trend_rows=len(tr_rows), as_of=as_of,
                       detail=f"{as_of}：目标指标 {len(scan)} 只，趋势柱线 {len(tr_rows)} 只")

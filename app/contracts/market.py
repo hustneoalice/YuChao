@@ -156,6 +156,8 @@ class TargetItem(BaseModel):
     trend_cross_date: Optional[str] = None
     trend_cross_ago: Optional[int] = None
     trend_above_days: int = 0
+    neg_run: int = Field(default=0, description="连续负柱收窄天数（绿柱缩短，提前捕捉上穿零轴）")
+    neg_abs: Optional[float] = Field(default=None, description="当前负柱距零轴幅度 |STICKV|（正值时为 null）")
     trend_data_date: str = ""
     trend_provisional: bool = False
 

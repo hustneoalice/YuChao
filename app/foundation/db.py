@@ -163,7 +163,9 @@ NEW_TABLES_DDL = """
     CREATE TABLE IF NOT EXISTS target_trend (
         symbol      VARCHAR PRIMARY KEY,
         data_date   VARCHAR, trend_value DOUBLE,
-        cross_date  VARCHAR, cross_ago INTEGER, above_days INTEGER
+        cross_date  VARCHAR, cross_ago INTEGER, above_days INTEGER,
+        neg_run     INTEGER,   -- 连续负柱收窄天数（绿柱缩短，提前捕捉上穿零轴）
+        neg_abs     DOUBLE     -- 当前负柱距零轴幅度 |STICKV|（正值时为 NULL）
     );
 """
 
@@ -171,6 +173,8 @@ NEW_TABLES_DDL = """
 # 1.0 继承库没有 kind 列——概念板块接入（2.1）统一在此补齐，老库/导入包全兼容。
 MIGRATIONS = (
     "ALTER TABLE sector_index ADD COLUMN IF NOT EXISTS kind VARCHAR DEFAULT 'industry'",
+    "ALTER TABLE target_trend ADD COLUMN IF NOT EXISTS neg_run INTEGER",
+    "ALTER TABLE target_trend ADD COLUMN IF NOT EXISTS neg_abs DOUBLE",
 )
 
 _ADJUST_VIEW = {"qfq": "v_daily_ohlcv_qfq", "hfq": "v_daily_ohlcv_hfq", "raw": "daily_ohlcv"}

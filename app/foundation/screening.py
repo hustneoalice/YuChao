@@ -35,6 +35,16 @@ CONDITIONS: tuple[dict[str, Any], ...] = (
      "default_on": True, "title": "收盘站上 MA45（K 线中线趋势通道填橙同判定）"},
     {"key": "up20", "label": "20日内涨停", "kind": "flag", "field": "limit_up_20d",
      "default_on": True, "title": "近 20 个交易日有过涨停（主板 10% / 创业科创 20%）"},
+    # 趋势柱线「负柱收敛」两条件依赖 STICKV 序列（dep=trend），用于提前捕捉
+    # 即将上穿零轴的标的：绿柱连续缩短 + 当前负柱幅度足够贴近零轴。
+    {"key": "negshrink", "label": "负柱收敛", "kind": "value", "field": "neg_run",
+     "op": ">=", "default": 3, "min": 2, "max": 10, "step": 1, "unit": "日",
+     "default_on": False, "dep": "trend",
+     "title": "STICKV 连续 N 个交易日为负且逐日收窄（绿柱缩短），可提前捕捉即将上穿零轴的标的"},
+    {"key": "nearzero", "label": "距零轴", "kind": "value", "field": "neg_abs",
+     "op": "<=", "default": 20, "min": 2, "max": 100, "step": 1, "unit": "",
+     "default_on": False, "dep": "trend",
+     "title": "当前负柱幅度 |STICKV| 不超过阈值（越小越贴近零轴）；全市场 |STICKV| 中位数约 50"},
 )
 
 _KEYS = {c["key"] for c in CONDITIONS}
@@ -53,6 +63,12 @@ def public_conditions() -> list[dict[str, Any]]:
 def enabled_keys(conds: str) -> set[str]:
     """解析启用条件串（逗号分隔），未知 key 静默忽略（前后端版本错位不报错）。"""
     return {s.strip() for s in (conds or "").split(",") if s.strip()} & _KEYS
+
+
+def needs_trend(enabled: set[str]) -> bool:
+    """启用条件里是否有依赖趋势柱线序列的（trend 本体或 dep=trend 的收敛条件）。"""
+    return any(c["key"] in enabled and (c["kind"] == "trend" or c.get("dep") == "trend")
+               for c in CONDITIONS)
 
 
 def parse_values(raw: Optional[str], enabled: set[str]) -> dict[str, float]:
