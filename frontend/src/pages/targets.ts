@@ -234,4 +234,34 @@ export function loadTargets(): void {
 
 export function initTargets(): void {
   document.getElementById("tgt-refresh")!.addEventListener("click", () => void load());
+  document.getElementById("tgt-export")!.addEventListener("click", () => void exportExcel());
+}
+
+/* 导出当前条件命中的全量列表（后端生成 xlsx，前端按响应头文件名落地） */
+async function exportExcel(): Promise<void> {
+  const btn = document.getElementById("tgt-export") as HTMLButtonElement;
+  const st = document.getElementById("tgt-status")!;
+  if (btn.disabled) return;
+  btn.disabled = true;
+  st.textContent = "正在生成 Excel…";
+  try {
+    const res = await marketApi.targetExport(condsParam(), trend, valuesParam());
+    const blob = await res.blob();
+    const cd = res.headers.get("Content-Disposition") || "";
+    const m = /filename\*=UTF-8''([^;]+)/i.exec(cd);
+    const name = m ? decodeURIComponent(m[1]) : "目标监控.xlsx";
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement("a");
+    a.href = url;
+    a.download = name;
+    document.body.appendChild(a);
+    a.click();
+    a.remove();
+    setTimeout(() => URL.revokeObjectURL(url), 2000);
+    st.textContent = `已导出 ${name}（命中 ${totalHits} 只）`;
+  } catch {
+    st.textContent = "导出失败，请稍后重试";
+  } finally {
+    btn.disabled = false;
+  }
 }

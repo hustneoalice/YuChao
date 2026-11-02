@@ -4,6 +4,7 @@ from datetime import date
 from typing import Literal, Optional
 
 from fastapi import APIRouter, Depends, Query
+from fastapi.responses import StreamingResponse
 
 from ...contracts.common import Adjust, Page, WithParam
 from ...contracts.market import (FundFlowRange, Kline, Quote, QuotesOut, SearchHit,
@@ -449,6 +450,19 @@ def targets(conds: str = Query(default="vol,short,mid,up20",
     所有勾选条件同时满足（AND 叠加）；未勾选的不参与判定。
     flag 条件看布尔字段，value 条件按阈值比较（op 默认 >=），trend 走
     trend_matches 参数化判定；命中列表按六分段强势在前。"""
+    items, meta, vals, provisional = _target_scan(
+        conn, conds, values, trend_mode, trend_recent,
+        trend_still_above, trend_above_days)
+    return TargetScanOut(items=items[:limit], total_hits=len(items), values=vals,
+                         provisional=provisional,
+                         scanned=meta["scanned"], as_of=meta["as_of"],
+                         computed_at=meta.get("computed_at", ""))
+
+
+def _target_scan(conn, conds: str, values: Optional[str],
+                 trend_mode: str, trend_recent: int,
+                 trend_still_above: bool, trend_above_days: int):
+    """目标页条件叠加（端点与 Excel 导出共用）：返回 (items, meta, vals, provisional)。"""
     from ...foundation.target_trend import trend_matches
 
     want = screening.enabled_keys(conds)
@@ -470,10 +484,99 @@ def targets(conds: str = Query(default="vol,short,mid,up20",
     items.sort(key=lambda t:
         ((t.get('trend_cross_ago') if t.get('trend_cross_ago') is not None else 100000), -t['seg'])
         if "trend" in want else (-t['seg'], -(t['vol_ratio'] or 0)))
-    return TargetScanOut(items=items[:limit], total_hits=len(items), values=vals,
-                         provisional=provisional,
-                         scanned=meta["scanned"], as_of=meta["as_of"],
-                         computed_at=meta.get("computed_at", ""))
+    return items, meta, vals, provisional
+
+
+@router.get("/market/targets/export", summary="目标监控导出 Excel（当前条件命中的全量结果）")
+def targets_export(conds: str = Query(default="vol,short,mid,up20"),
+                   values: Optional[str] = Query(default=None),
+                   trend_mode: Literal["cross", "above"] = "cross",
+                   trend_recent: int = Query(default=5, ge=1, le=250),
+                   trend_still_above: bool = True,
+                   trend_above_days: int = Query(default=1, ge=1, le=250),
+                   conn=Depends(get_conn)):
+    """与 /market/targets 同一套条件判定，导出全量命中（不受分页 limit 限制），
+    首个工作表含计算时间/数据截至说明行。"""
+    from openpyxl import Workbook
+    from openpyxl.styles import Font, PatternFill, Alignment
+    from openpyxl.utils import get_column_letter
+    import io
+    from urllib.parse import quote
+
+    items, meta, _vals, _provisional = _target_scan(
+        conn, conds, values, trend_mode, trend_recent,
+        trend_still_above, trend_above_days)
+    with_trend = "trend" in screening.enabled_keys(conds)
+
+    cols = [
+        ("symbol", "代码", 11, None),
+        ("name", "名称", 12, None),
+        ("close", "现价", 9, "0.00"),
+        ("pct_chg", "涨跌幅(%)", 10, "0.00"),
+        ("vol_ratio", "40日均量比", 11, "0.00"),
+        ("short_orange", "短线趋势橙", 10, None),
+        ("mid_orange", "中线趋势橙", 10, None),
+        ("limit_up_cnt", "20日涨停次数", 11, "0"),
+        ("seg", "六分段", 20, None),
+        ("state", "短线状态", 13, None),
+    ]
+    if with_trend:
+        cols += [
+            ("trend_value", "STICKV", 9, "0.00"),
+            ("trend_cross_date", "最近转正", 11, None),
+            ("cross_ago", "距今交易日", 10, "0"),
+            ("above_days", "连续上方天数", 12, "0"),
+        ]
+
+    def cell(t: dict, key: str):
+        if key == "short_orange":
+            return "橙" if t.get("short_orange") else "蓝"
+        if key == "mid_orange":
+            return "橙" if t.get("mid_orange") else "蓝"
+        if key == "seg":
+            return f"第{t.get('seg')}段·{t.get('seg_name') or ''}"
+        if key == "state":
+            return "回调中" if t.get("pullback") else "上行"
+        if key == "cross_ago":
+            n = t.get("trend_cross_ago")
+            return "" if n is None else ("当日" if n == 0 else f"{n}日前")
+        if key == "above_days":
+            n = t.get("trend_above_days")
+            return "" if n is None else n
+        return t.get(key)
+
+    wb = Workbook()
+    ws = wb.active
+    ws.title = "目标监控"
+    last = get_column_letter(len(cols))
+    ws.merge_cells(f"A1:{last}1")
+    ws["A1"] = (f"目标监控 ｜ 计算于 {meta.get('computed_at') or '—'} ｜ "
+                f"数据截至 {meta['as_of']} ｜ 命中 {len(items)} 只")
+    ws["A1"].font = Font(bold=True, size=11)
+    ws["A2"].alignment = Alignment(vertical="center")
+    for i, (_k, label, width, _fmt) in enumerate(cols, start=1):
+        c = ws.cell(row=2, column=i, value=label)
+        c.font = Font(bold=True)
+        c.fill = PatternFill("solid", fgColor="F2F2F2")
+        ws.column_dimensions[get_column_letter(i)].width = width
+    for r, t in enumerate(items, start=3):
+        for i, (key, _label, _w, fmt) in enumerate(cols, start=1):
+            v = cell(t, key)
+            c = ws.cell(row=r, column=i, value=v if v is not None else "")
+            if fmt:
+                c.number_format = fmt
+    ws.freeze_panes = "A3"
+
+    buf = io.BytesIO()
+    wb.save(buf)
+    buf.seek(0)
+    ts = date.today().strftime("%Y%m%d")
+    fname = f"目标监控_{ts}.xlsx"
+    return StreamingResponse(
+        buf,
+        media_type="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+        headers={"Content-Disposition": f"attachment; filename=\"targets_{ts}.xlsx\"; "
+                                        f"filename*=UTF-8''{quote(fname)}"})
 
 
 # -- 2.2 全景大页 ----------------------------------------------------------

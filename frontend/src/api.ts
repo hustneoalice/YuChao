@@ -223,6 +223,9 @@ export const marketApi = {
     req<{ items: Quote[]; missing: string[] }>(`/market/quotes?symbols=${encodeURIComponent(symbols.join(","))}`),
   targets: (conds: string, limit = 10000, trend: { mode: string; recent: number; stillAbove: boolean; aboveDays: number } = { mode: "cross", recent: 5, stillAbove: true, aboveDays: 1 }, values: Record<string, number> = {}) =>
     req<TargetScanOut>(`/market/targets?conds=${encodeURIComponent(conds)}&limit=${limit}&trend_mode=${trend.mode}&trend_recent=${trend.recent}&trend_still_above=${trend.stillAbove}&trend_above_days=${trend.aboveDays}${Object.keys(values).length ? `&values=${encodeURIComponent(JSON.stringify(values))}` : ""}`),
+  /* 目标监控导出：同条件全量命中，返回 xlsx 原始 Response（前端转 blob 下载） */
+  targetExport: (conds: string, trend: { mode: string; recent: number; stillAbove: boolean; aboveDays: number } = { mode: "cross", recent: 5, stillAbove: true, aboveDays: 1 }, values: Record<string, number> = {}) =>
+    req<Response>(`/market/targets/export?conds=${encodeURIComponent(conds)}&trend_mode=${trend.mode}&trend_recent=${trend.recent}&trend_still_above=${trend.stillAbove}&trend_above_days=${trend.aboveDays}${Object.keys(values).length ? `&values=${encodeURIComponent(JSON.stringify(values))}` : ""}`, { raw: true }),
   /* 选股条件元数据：新增指标（如主力吸筹）由后端登记后自动出现在条件栏 */
   targetConds: () => req<TargetCond[]>("/market/targets/conditions"),
   /* 全景大表：服务端排序分页（market_snapshot 毫秒级 SQL） */
