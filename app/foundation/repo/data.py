@@ -2,7 +2,7 @@
 from datetime import datetime
 
 _INVENTORY = (
-    "daily_ohlcv", "adjust_factor", "capital_flow", "financials",
+    "daily_ohlcv", "market_snapshot", "adjust_factor", "capital_flow", "financials",
     "stock_universe", "sector_index", "daily_valuation",
     "corepicks_result",
 )
@@ -44,7 +44,12 @@ def table_status(conn, table: str) -> dict:
     except Exception:
         return {"table": table, "rows": None, "latest_date": None,
                 "earliest_date": None, "coverage": None}
-    latest = str(row[1]) if row and row[1] else None
+    latest = row[1] if row and row[1] else None
+    if isinstance(latest, datetime):
+        # 盘中快照用 updated_at，展示到分钟（盘中每 5 分钟刷新）
+        latest = latest.strftime("%Y-%m-%d %H:%M")
+    elif latest is not None:
+        latest = str(latest)
     coverage = None
     if table in _COVERAGE_TABLES:
         coverage = _coverage(conn, table, _COVERAGE_TABLES[table], latest)
@@ -58,6 +63,7 @@ _DATE_COL = {
     "daily_ohlcv": "date", "adjust_factor": "ex_date", "capital_flow": "date",
     "financials": "report_date", "stock_universe": None, "sector_index": "trade_date",
     "daily_valuation": "date", "corepicks_result": "date",
+    "market_snapshot": "updated_at",
 }
 
 

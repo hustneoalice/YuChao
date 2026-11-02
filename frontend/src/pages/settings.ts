@@ -626,7 +626,7 @@ export async function refreshDatachip(): Promise<void> {
       // i-ok：健康用绿点（--up 是 A 股涨的红，语义是行情不是状态，勿用于健康态）
       cls: cls === "ok" ? "i-ok" : cls === "warn" ? "i-mid" : "",
       title: latest
-        ? `本地行情数据${label}，最新交易日 ${latest}。点击查看数据底座`
+        ? `本地行情数据${label}，最新数据 ${latest}。点击查看数据底座`
         : `本地行情数据${label}。点击查看数据底座`,
     };
   } catch {
