@@ -902,7 +902,7 @@ body.mobile .vpop{width:min(246px,calc(100vw - 16px))}
 .brief{flex:none;height:clamp(118px,34vh,258px);max-height:none;display:flex;flex-direction:column;overflow:hidden}
 .brief .brief-body{flex:1;min-height:0;overflow-y:auto;overscroll-behavior:contain}
 .brief-tabs{display:flex;gap:2px;padding:0 10px;border-bottom:1px solid var(--border)}
-.brief-tabs button{padding:9px 12px;font-size:12px;font-weight:500;color:var(--dim);
+.brief-tabs button{padding:5px 10px;font-size:12px;font-weight:500;color:var(--dim);
   border-bottom:2px solid transparent;margin-bottom:-1px;min-height:0}
 .brief-tabs button:hover{color:var(--text)}
 .brief-tabs button.on{color:var(--accent);border-bottom-color:var(--accent);font-weight:600}
