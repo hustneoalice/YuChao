@@ -725,6 +725,14 @@ _TGT_TREND_CACHE = {"keys": {}, "rows": {}}
 _TGT_TREND_LOCK = Lock()
 _TGT_TREND_CHUNK = 150   # 逐块查询股票数：全市场一次查会打满 DuckDB 1.5GiB 内存上限
 
+# 目标页行内缩略图缓存：(代码, 最新数据日, 根数) → 近 N 根 K 线/MA45/趋势柱线。
+# 只回 300 根历史给 EMA 预热（最长 89 周期衰减后权重 ≈0.1%，肉眼不可见），
+# 避免 50 行页面一次按 2000 根做前复权连接把 API 请求拖到数秒。
+_SPARK_CACHE: dict[str, dict] = {}
+_SPARK_LOCK = Lock()
+_SPARK_MAX = 600
+_SPARK_HISTORY = 300
+
 
 def target_trend_snapshot(conn) -> Optional[dict]:
     """后台预计算的趋势柱线（target_trend 表）；None = 表缺失/落后于最新数据日。"""
@@ -803,6 +811,84 @@ def compute_target_trends(conn):
             finally:
                 cursor.close()
         return {symbol: row for symbol, row in _TGT_TREND_CACHE['rows'].items() if symbol in keys}
+
+
+def target_sparks(conn, symbols, bars: int = 60) -> dict:
+    """目标页行内缩略图：近 bars 根前复权日线 + MA45（中线趋势）+ STICKV 柱线。
+
+    批量一次查询、按（代码, 最新数据日, 根数）缓存；单请求最多 60 只。
+    与 target_trend 同口径（v_daily_ohlcv_qfq + trend_histogram），但只回
+    300 根历史做 EMA 预热——缩略图看形态，不需要 2000 根全量重算。"""
+    from itertools import groupby
+    from ..target_trend import trend_histogram
+
+    syms: list[str] = []
+    seen: set[str] = set()
+    for s in symbols:
+        s = str(s or "").strip()
+        if s and s not in seen:
+            seen.add(s)
+            syms.append(s)
+    syms = syms[:60]
+    n = max(20, min(int(bars or 60), 250))
+    latest = conn.execute("SELECT MAX(date) FROM daily_ohlcv").fetchone()
+    day = str(latest[0]) if latest and latest[0] else ""
+    out: dict[str, dict] = {}
+    todo: list[str] = []
+    with _SPARK_LOCK:
+        for s in syms:
+            hit = _SPARK_CACHE.get(f"{s}|{day}|{n}")
+            if hit is None:
+                todo.append(s)
+            else:
+                out[s] = hit
+    if not todo:
+        return out
+
+    placeholders = ",".join("?" for _ in todo)
+    statement = (
+        "SELECT symbol, date, open, high, low, close FROM v_daily_ohlcv_qfq "
+        f"WHERE symbol IN ({placeholders}) "
+        "QUALIFY ROW_NUMBER() OVER (PARTITION BY symbol ORDER BY date DESC) "
+        f"<= {_SPARK_HISTORY} ORDER BY symbol, date")
+    rows = conn.execute(statement, todo).fetchall()
+    fresh: dict[str, dict] = {}
+    for symbol, group in groupby(rows, key=lambda r: r[0]):
+        recs = list(group)
+        if len(recs) < 2 or any(v is None for r in recs for v in r[2:]):
+            continue
+        closes = [float(r[5]) for r in recs]
+        ma45: list[Optional[float]] = []
+        total = 0.0
+        for i, c in enumerate(closes):
+            total += c
+            if i >= 45:
+                total -= closes[i - 45]
+            ma45.append(total / 45 if i >= 44 else None)
+        trend = trend_histogram(
+            [dict(high=r[3], low=r[4], close=r[5]) for r in recs])
+        tail = recs[-n:]
+        tail_closes = closes[-n:]
+        tail_ma = ma45[-n:]
+        fresh[symbol] = {
+            "symbol": symbol,
+            "dates": [str(r[1]) for r in tail],
+            "open": [round(float(r[2]), 3) for r in tail],
+            "high": [round(float(r[3]), 3) for r in tail],
+            "low": [round(float(r[4]), 3) for r in tail],
+            "close": [round(float(r[5]), 3) for r in tail],
+            "ma45": [None if v is None else round(v, 3) for v in tail_ma],
+            "strong": [None if v is None else tail_closes[i] >= v
+                       for i, v in enumerate(tail_ma)],
+            "trend": [None if v is None else round(v, 2) for v in trend[-n:]],
+        }
+    with _SPARK_LOCK:
+        for symbol, item in fresh.items():
+            _SPARK_CACHE[f"{symbol}|{day}|{n}"] = item
+        while len(_SPARK_CACHE) > _SPARK_MAX:      # 简单 FIFO 淘汰，防长会话内存上涨
+            _SPARK_CACHE.pop(next(iter(_SPARK_CACHE)))
+    out.update(fresh)
+    return out
 
 
 def live_trend_summaries(conn, symbols, bars: int = 2000) -> dict:

@@ -170,6 +170,17 @@ export interface TargetScanOut {
   values?: Record<string, number>; items: TargetItem[];
 }
 
+/* 目标页行内缩略图：近 N 根前复权日线 + MA45（中线趋势）+ STICKV 柱线 */
+export interface TargetSpark {
+  symbol: string;
+  dates: string[];
+  open: number[]; high: number[]; low: number[]; close: number[];
+  ma45: (number | null)[];
+  strong: (boolean | null)[];
+  trend: (number | null)[];
+}
+export interface TargetSparkOut { bars: number; items: TargetSpark[] }
+
 /* 选股条件元数据（后端 foundation/screening.CONDITIONS 下发，条件栏据此渲染） */
 export interface TargetCond {
   key: string; label: string; kind: "flag" | "value" | "trend";
@@ -238,6 +249,9 @@ export const marketApi = {
     req<Response>(`/market/targets/export?conds=${encodeURIComponent(conds)}&trend_mode=${trend.mode}&trend_recent=${trend.recent}&trend_still_above=${trend.stillAbove}&trend_above_days=${trend.aboveDays}${Object.keys(values).length ? `&values=${encodeURIComponent(JSON.stringify(values))}` : ""}`, { raw: true }),
   /* 选股条件元数据：新增指标（如主力吸筹）由后端登记后自动出现在条件栏 */
   targetConds: () => req<TargetCond[]>("/market/targets/conditions"),
+  /* 目标页行内缩略图：批量近 N 根 K 线 + 中线趋势 + 趋势柱线（≤60 只） */
+  targetSparks: (symbols: string, bars: number) =>
+    req<TargetSparkOut>(`/market/targets/spark?symbols=${encodeURIComponent(symbols)}&bars=${bars}`),
   /* 全景大表：服务端排序分页（market_snapshot 毫秒级 SQL） */
   board: (q: { tab: string; sort?: string; page?: number; size?: number; q?: string }) => {
     const p = new URLSearchParams({ tab: q.tab });

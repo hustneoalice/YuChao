@@ -310,11 +310,13 @@ th.n{color:var(--dim)}
 #page-targets table{width:100%}
 #page-targets td:nth-child(2){min-width:78px}
 #page-targets td:nth-child(3){min-width:96px}
-#page-targets td:nth-child(4),#page-targets td:nth-child(5),#page-targets td:nth-child(6){min-width:74px}
-#page-targets td:nth-child(7),#page-targets td:nth-child(8){min-width:58px}
-#page-targets td:nth-child(9){min-width:66px}
-#page-targets td:nth-child(10){min-width:112px}
-#page-targets td:nth-child(11){min-width:96px}
+/* 缩略图列随「显示缩略图」开关增减，用 :has 定位而非序号，避免整列最小宽错位 */
+#page-targets td:has(canvas.tgt-spark){min-width:158px}
+#page-targets td:nth-child(5),#page-targets td:nth-child(6),#page-targets td:nth-child(7){min-width:74px}
+#page-targets td:nth-child(8),#page-targets td:nth-child(9){min-width:58px}
+#page-targets td:nth-child(10){min-width:66px}
+#page-targets td:nth-child(11){min-width:112px}
+#page-targets td:nth-child(12){min-width:96px}
 /* 趋势柱线条件设置行：原生 select / number / checkbox 统一走主题色底，暗色下不再白底浅字看不清 */
 .tgt-trend-set{display:flex;align-items:center;gap:10px;flex-wrap:wrap;padding:10px 0;width:100%}
 .tgt-trend-set label{display:inline-flex;align-items:center;gap:6px;font-size:12px;color:var(--text)}
@@ -328,6 +330,14 @@ th.n{color:var(--dim)}
 .tgt-trend-set select option{background:var(--panel-2);color:var(--text)}
 .tgt-trend-set input[type="checkbox"]{width:13px;height:13px;margin:0;accent-color:var(--accent);cursor:pointer}
 .tgt-trend-hint{font-size:12px;color:var(--faint)}
+/* 目标页行内缩略图：canvas 由脚本按 DPR 绘制；悬停弹出放大卡片（不挡鼠标） */
+.tgt-spark{display:block;border-radius:5px;background:var(--panel-2);cursor:pointer;vertical-align:middle}
+.tgt-spark-pop{position:fixed;z-index:9999;display:none;pointer-events:none;padding:8px 10px 6px;
+  background:var(--panel);border:1px solid var(--axis);border-radius:10px;
+  box-shadow:0 12px 34px rgba(0,0,0,.3)}
+.tgt-spark-pop canvas{display:block;width:380px;height:168px}
+.tgt-spark-pop .cap{margin-top:5px;font-size:11px;color:var(--dim);line-height:1.5}
+.tgt-spark-pop .cap b{color:var(--text)}
 /* 数值型选股条件：chip 后跟阈值输入（与趋势设置同一套底色/焦点样式） */
 .tgt-val{display:inline-flex;align-items:center;gap:6px;font-size:11.5px;color:var(--dim);transition:opacity .15s}
 .tgt-val.off{opacity:.5}

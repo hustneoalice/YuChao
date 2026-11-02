@@ -3,11 +3,11 @@
  * 条件层由 GET /market/targets/conditions 下发元数据驱动条件栏渲染——
  * 后端 screening.CONDITIONS 新增指标（如主力吸筹）后前端自动出现，
  * 勾选/改阈值即时重筛（毫秒级），数据更新才重算指标层。 */
-import { marketApi, type TargetCond, type TargetItem } from "../api";
+import { marketApi, type TargetCond, type TargetItem, type TargetSpark } from "../api";
 import { esc, fmt, fmtChg } from "../fmt";
 import { createPager, slicePage, type Pager } from "../pager";
 import { createDataTable, type DataTable, type DataTableCol } from "../table";
-import { trendPalette } from "./kline";
+import { chartDown, chartUp, trendPalette } from "./kline";
 
 /* 后端不可达时的兜底登记（与 screening.CONDITIONS 同构，仅为首屏不空） */
 const FALLBACK_CONDS: TargetCond[] = [
@@ -73,6 +73,26 @@ try {
 } catch { /* 损坏设置回默认 */ }
 let totalHits = 0;
 
+/* ── 行内缩略图 ──
+ * 上：K 线 + 中线趋势（MA45，站上=橙/跌破=蓝）；下：趋势柱线 STICKV。
+ * 三挡范围（小 30 / 中 60 / 大 120 日）；开关与范围本地记忆，默认开启。
+ * 数据按（代码 + 范围 + 数据日）缓存，翻页/排序只补新出现的行。 */
+type SparkRange = "small" | "medium" | "large";
+const SPARK_BARS: Record<SparkRange, number> = { small: 30, medium: 60, large: 120 };
+const SPARK_LABEL: Record<SparkRange, string> = { small: "小（30 日）", medium: "中（60 日）", large: "大（120 日）" };
+let sparkOn = true;
+let sparkRange: SparkRange = "medium";
+try {
+  const saved = JSON.parse(localStorage.getItem("yc_tgt_spark") || "null");
+  if (saved && typeof saved.on === "boolean" && ["small", "medium", "large"].includes(saved.range)) {
+    sparkOn = saved.on;
+    sparkRange = saved.range;
+  }
+} catch { /* 损坏设置回默认 */ }
+const sparkCache = new Map<string, TargetSpark | null>();
+let sparkDay = "";
+let sparkSeq = 0;
+
 /* 分页（通用组件）：指标层一次算完返回全量，前端切片渲染 */
 let pager: Pager | null = null;
 let tbl: DataTable<TargetItem> | null = null;
@@ -101,6 +121,7 @@ async function load(resetPage = false): Promise<void> {
     totalHits = r.total_hits;
     items = r.items;
     scanned = r.scanned;
+    if (r.as_of && r.as_of !== sparkDay) { sparkCache.clear(); sparkDay = r.as_of; }
     if (resetPage) pager?.reset();
     drawPage();
     const at = r.computed_at || "";
@@ -120,6 +141,8 @@ const TGT_COLS: DataTableCol<TargetItem>[] = [
   { label: "#", width: 34, mono: true, render: (_t, i) => `<span style="color:var(--faint)">${i + 1}</span>` },
   { label: "代码", mono: true, sort: "symbol", render: (t) => t.symbol },
   { label: "名称", sort: "name", render: (t) => `<span style="font-weight:600">${esc(t.name || t.symbol)}</span>` },
+  { label: "近况", width: 150, title: "上方：K 线 + 中线趋势（站上 MA45 为橙、跌破为蓝）；下方：趋势柱线。鼠标悬停可放大查看",
+    render: (t) => `<canvas class="tgt-spark" data-sym="${esc(t.symbol)}" style="width:132px;height:56px"></canvas>` },
   { label: "现价", num: true, sort: "close", render: (t) => fmt(t.close ?? 0) },
   { label: "涨跌幅", num: true, sort: (t) => t.pct_chg ?? null, render: (t) => {
       const ch = t.pct_chg ?? 0;
@@ -154,8 +177,9 @@ function drawPage(): void {
   const wantTrend = !!(conds["trend"] || conds["negshrink"] || conds["nearzero"]);
   if (!pager) pager = createPager(document.getElementById("tgt-pager")!, "targets", drawPage);
   if (tableHasTrend !== wantTrend) { tbl = null; tableHasTrend = wantTrend; }
-  const columns = wantTrend ? TGT_COLS : TGT_COLS.filter(column =>
-    !["STICKV", "最近转正", "距今交易日", "连续上方", "负柱收敛", "距零轴"].includes(column.label));
+  const columns = (wantTrend ? TGT_COLS : TGT_COLS.filter(column =>
+    !["STICKV", "最近转正", "距今交易日", "连续上方", "负柱收敛", "距零轴"].includes(column.label)))
+    .filter(column => column.label !== "近况" || sparkOn);
   if (!tbl) tbl = createDataTable(document.getElementById("tgt-wrap")!, columns, {
     rowKey: (t) => t.symbol,
     onRow: (t) => document.dispatchEvent(new CustomEvent("yc:open-stock", {
@@ -170,10 +194,180 @@ function drawPage(): void {
   PAL.o = `rgb(${pal.fr.join(",")})`;
   PAL.b = `rgb(${pal.sr.join(",")})`;
   tbl.render(pageRows, start);
+  void fillSparks(pageRows);
   document.getElementById("tgt-hits")!.textContent =
     `命中 ${totalHits} / 扫描 ${scanned} 只${totalHits > items.length ? ` · 显示前 ${items.length} 只` : ""}`;
   empty.style.display = items.length ? "none" : "grid";
 }
+
+/* ── 缩略图绘制 ── */
+const sparkKeyOf = (symbol: string): string => `${symbol}|${sparkRange}|${sparkDay}`;
+
+/** 补拉当前页缺失的缩略图数据，然后逐格绘制（失败静默，不影响列表） */
+async function fillSparks(rows: TargetItem[]): Promise<void> {
+  if (!sparkOn) return;
+  const seq = ++sparkSeq;
+  const missing = [...new Set(rows.map((r) => r.symbol))]
+    .filter((s) => !sparkCache.has(sparkKeyOf(s)));
+  /* 后端单请求 ≤60 只：每页 100/200 条时按块补拉，避免超出上限只画前 60 行 */
+  for (let i = 0; i < missing.length; i += 60) {
+    const part = missing.slice(i, i + 60);
+    try {
+      const res = await marketApi.targetSparks(part.join(","), SPARK_BARS[sparkRange]);
+      const got = new Set<string>();
+      for (const it of res.items) { sparkCache.set(sparkKeyOf(it.symbol), it); got.add(it.symbol); }
+      for (const s of part) if (!got.has(s)) sparkCache.set(sparkKeyOf(s), null);
+    } catch {
+      return;                       // 下次重绘（轮询/翻页）再试
+    }
+    if (seq !== sparkSeq) return;
+  }
+  if (seq !== sparkSeq) return;
+  document.getElementById("tgt-wrap")!
+    .querySelectorAll<HTMLCanvasElement>("canvas.tgt-spark").forEach((cv) => {
+      const d = sparkCache.get(sparkKeyOf(cv.dataset.sym || ""));
+      if (d) paintSpark(cv, d);
+    });
+}
+
+/** 一张缩略图：上半 K 线 + MA45 双色趋势线，下半趋势柱线（零轴上红下绿） */
+function paintSpark(cv: HTMLCanvasElement, d: TargetSpark, big = false): void {
+  const W = Math.max(40, Math.round(cv.clientWidth || (big ? 380 : 132)));
+  const H = Math.max(30, Math.round(cv.clientHeight || (big ? 170 : 56)));
+  const dpr = Math.min(window.devicePixelRatio || 1, 2);
+  if (cv.width !== Math.round(W * dpr) || cv.height !== Math.round(H * dpr)) {
+    cv.width = Math.round(W * dpr);
+    cv.height = Math.round(H * dpr);
+  }
+  const ctx = cv.getContext("2d");
+  if (!ctx) return;
+  ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
+  ctx.clearRect(0, 0, W, H);
+  const n = d.close.length;
+  if (!n) return;
+
+  const up = chartUp(), down = chartDown(), pal = trendPalette();
+  const styles = getComputedStyle(document.documentElement);
+  const axis = styles.getPropertyValue("--axis").trim() || "rgba(128,128,128,.25)";
+  const padX = 1, padTop = 2, gap = 3;
+  const histH = Math.max(9, Math.round(H * 0.28));
+  const topH = Math.max(12, H - padTop - histH - gap);
+  const step = (W - padX * 2) / n;
+  const bw = Math.max(1, Math.min(step * 0.72, big ? 4 : 3));
+  const xAt = (i: number): number => padX + (i + 0.5) * step;
+
+  let lo = Infinity, hi = -Infinity;
+  for (const v of d.low) if (v < lo) lo = v;
+  for (const v of d.high) if (v > hi) hi = v;
+  for (const v of d.ma45) if (v != null) { if (v < lo) lo = v; if (v > hi) hi = v; }
+  if (!Number.isFinite(lo) || !Number.isFinite(hi)) return;
+  const span = Math.max(hi - lo, hi * 0.002, 0.01);
+  const yAt = (v: number): number => padTop + topH - ((v - lo) / span) * topH * 0.96 - topH * 0.02;
+
+  /* K 线：阳线红 / 阴线绿（跟随主题涨跌色） */
+  for (let i = 0; i < n; i++) {
+    const color = d.close[i] >= d.open[i] ? up : down;
+    const x = xAt(i);
+    if (big) {
+      ctx.strokeStyle = color;
+      ctx.globalAlpha = 0.65;
+      ctx.lineWidth = 1;
+      ctx.beginPath();
+      ctx.moveTo(x, yAt(d.high[i]));
+      ctx.lineTo(x, yAt(d.low[i]));
+      ctx.stroke();
+      ctx.globalAlpha = 1;
+    }
+    const top = yAt(Math.max(d.open[i], d.close[i]));
+    const bottom = yAt(Math.min(d.open[i], d.close[i]));
+    ctx.fillStyle = color;
+    ctx.fillRect(x - bw / 2, top, bw, Math.max(1, bottom - top));
+  }
+
+  /* 中线趋势：MA45 线按「站上=橙 / 跌破=蓝」逐段着色 */
+  ctx.lineWidth = big ? 1.6 : 1;
+  for (let i = 1; i < n; i++) {
+    const a = d.ma45[i - 1], b = d.ma45[i];
+    if (a == null || b == null) continue;
+    ctx.strokeStyle = d.strong[i] ? pal.fast : pal.slow;
+    ctx.beginPath();
+    ctx.moveTo(xAt(i - 1), yAt(a));
+    ctx.lineTo(xAt(i), yAt(b));
+    ctx.stroke();
+  }
+
+  /* 趋势柱线：与零轴比，红正绿负；上下列之间一条细分割线 */
+  const sepY = padTop + topH + gap / 2;
+  ctx.strokeStyle = axis;
+  ctx.lineWidth = 1;
+  ctx.beginPath();
+  ctx.moveTo(0, sepY);
+  ctx.lineTo(W, sepY);
+  ctx.stroke();
+
+  const values = d.trend.filter((v): v is number => v != null);
+  const maxAbs = Math.max(1, ...values.map((v) => Math.abs(v)));
+  const zeroY = padTop + topH + gap + histH / 2;
+  for (let i = 0; i < n; i++) {
+    const v = d.trend[i];
+    if (v == null) continue;
+    const bh = Math.max(1, Math.abs(v) / maxAbs * (histH / 2 - 1));
+    ctx.fillStyle = v >= 0 ? up : down;
+    ctx.fillRect(xAt(i) - bw / 2, v >= 0 ? zeroY - bh : zeroY, bw, bh);
+  }
+  ctx.strokeStyle = axis;
+  ctx.beginPath();
+  ctx.moveTo(0, zeroY);
+  ctx.lineTo(W, zeroY);
+  ctx.stroke();
+}
+
+/* ── 悬停放大卡片 ── */
+let sparkPop: HTMLDivElement | null = null;
+let sparkPopCv: HTMLCanvasElement | null = null;
+let sparkPopCap: HTMLDivElement | null = null;
+let hoverTimer: ReturnType<typeof setTimeout> | null = null;
+
+function hideSparkPop(): void {
+  if (hoverTimer) { clearTimeout(hoverTimer); hoverTimer = null; }
+  if (sparkPop) sparkPop.style.display = "none";
+}
+
+function placeSparkPop(ev: MouseEvent): void {
+  if (!sparkPop || sparkPop.style.display === "none") return;
+  const pad = 14;
+  const w = sparkPop.offsetWidth || 396, h = sparkPop.offsetHeight || 220;
+  const left = Math.min(ev.clientX + pad, window.innerWidth - w - 8);
+  const top = Math.min(ev.clientY + pad, window.innerHeight - h - 8);
+  sparkPop.style.left = `${Math.max(8, left)}px`;
+  sparkPop.style.top = `${Math.max(8, top)}px`;
+}
+
+function showSparkPop(cv: HTMLCanvasElement, ev: MouseEvent): void {
+  const symbol = cv.dataset.sym || "";
+  const d = sparkCache.get(sparkKeyOf(symbol));
+  if (!d) return;
+  if (!sparkPop) {
+    sparkPop = document.createElement("div");
+    sparkPop.className = "tgt-spark-pop";
+    sparkPop.innerHTML = `<canvas></canvas><div class="cap"></div>`;
+    document.body.appendChild(sparkPop);
+    sparkPopCv = sparkPop.querySelector("canvas")!;
+    sparkPopCap = sparkPop.querySelector(".cap")!;
+  }
+  sparkPop.style.display = "block";
+  paintSpark(sparkPopCv!, d, true);
+  const row = items.find((t) => t.symbol === symbol);
+  const last = d.close.length ? d.close[d.close.length - 1] : null;
+  const tv = d.trend[d.trend.length - 1];
+  sparkPopCap!.innerHTML =
+    `<b>${esc(row?.name || symbol)}</b> <span class="num" style="color:var(--faint)">${esc(symbol)}</span>` +
+    `<span style="color:var(--faint)"> · ${esc(d.dates[0] || "")} ~ ${esc(d.dates[d.dates.length - 1] || "")}</span>` +
+    (last == null ? "" : ` · 最新 <b class="num">${fmt(last)}</b>`) +
+    (tv == null ? "" : ` · 趋势柱线 <b class="${tv > 0 ? "up" : "down"}">${tv.toFixed(1)}</b>`);
+  placeSparkPop(ev);
+}
+
 
 function renderConds(): void {
   const el = document.getElementById("tgt-conds")!;
@@ -205,6 +399,28 @@ function renderConds(): void {
     const still = el.querySelector<HTMLInputElement>('#tgt-trend-still');
     if (still) still.onchange = () => { trend.stillAbove = still.checked; save(); };
   }
+  /* 行内缩略图：开关 + 三挡范围（默认开启，本地记忆，不参与筛选） */
+  el.insertAdjacentHTML("beforeend",
+    `<div class="tgt-trend-set tgt-spark-set">` +
+    `<label><input type="checkbox" id="tgt-spark-on" ${sparkOn ? "checked" : ""}> 显示缩略图</label>` +
+    `<label>范围 <select id="tgt-spark-range">${(Object.keys(SPARK_BARS) as SparkRange[])
+      .map((k) => `<option value="${k}" ${sparkRange === k ? "selected" : ""}>${SPARK_LABEL[k]}</option>`).join("")}</select></label>` +
+    `<span class="tgt-trend-hint">上：K 线 + 中线趋势（橙=站上 MA45）· 下：趋势柱线 · 鼠标悬停放大</span></div>`);
+  const saveSpark = (): void =>
+    localStorage.setItem("yc_tgt_spark", JSON.stringify({ on: sparkOn, range: sparkRange }));
+  el.querySelector<HTMLInputElement>("#tgt-spark-on")!.onchange = (event) => {
+    sparkOn = (event.target as HTMLInputElement).checked;
+    saveSpark();
+    hideSparkPop();
+    tbl = null;                       // 列增减需重建表格
+    drawPage();
+  };
+  el.querySelector<HTMLSelectElement>("#tgt-spark-range")!.onchange = (event) => {
+    sparkRange = (event.target as HTMLSelectElement).value as SparkRange;
+    saveSpark();
+    hideSparkPop();
+    drawPage();
+  };
   el.querySelectorAll<HTMLElement>(".chip[data-c]").forEach((c) =>
     c.addEventListener("click", () => {
       const k = c.dataset.c!;
@@ -243,6 +459,24 @@ export function loadTargets(): void {
 export function initTargets(): void {
   document.getElementById("tgt-refresh")!.addEventListener("click", () => void load());
   document.getElementById("tgt-export")!.addEventListener("click", () => void exportExcel());
+  /* 缩略图悬停放大：事件委托，表格重绘后无需重新绑定 */
+  const wrap = document.getElementById("tgt-wrap")!;
+  const canvasOf = (target: EventTarget | null): HTMLCanvasElement | null =>
+    target instanceof Element ? target.closest<HTMLCanvasElement>("canvas.tgt-spark") : null;
+  wrap.addEventListener("mouseover", (ev) => {
+    const cv = canvasOf(ev.target);
+    if (!cv) return;
+    hideSparkPop();
+    hoverTimer = setTimeout(() => showSparkPop(cv, ev), 160);
+  });
+  wrap.addEventListener("mousemove", (ev) => {
+    if (canvasOf(ev.target)) placeSparkPop(ev);
+    else hideSparkPop();
+  });
+  wrap.addEventListener("mouseout", (ev) => {
+    if (canvasOf(ev.target)) hideSparkPop();
+  });
+  wrap.addEventListener("scroll", hideSparkPop, { passive: true });
 }
 
 /* 导出当前条件命中的全量列表（后端生成 xlsx，前端按响应头文件名落地） */

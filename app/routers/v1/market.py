@@ -495,6 +495,18 @@ def _target_scan(conn, conds: str, values: Optional[str],
     return items, meta, vals, provisional
 
 
+@router.get("/market/targets/spark", summary="目标页行内缩略图（K 线 + 中线趋势 + 趋势柱线，批量）")
+def targets_spark(symbols: str = Query(description="逗号分隔代码，≤60 只"),
+                  bars: int = Query(default=60, ge=20, le=250,
+                                    description="回看的交易日根数（小 30 / 中 60 / 大 120）"),
+                  conn=Depends(get_conn)):
+    syms = [s.strip() for s in symbols.split(",") if s.strip()]
+    if not syms:
+        return {"bars": bars, "items": []}
+    data = repo.market.target_sparks(conn, syms, bars)
+    return {"bars": bars, "items": list(data.values())}
+
+
 @router.get("/market/targets/export", summary="目标监控导出 Excel（当前条件命中的全量结果）")
 def targets_export(conds: str = Query(default="vol,short,mid,up20"),
                    values: Optional[str] = Query(default=None),
