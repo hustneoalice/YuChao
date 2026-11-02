@@ -147,12 +147,13 @@ def feishu_text(text: str) -> dict:
 def feishu_card(title: str, lines: list[tuple[str, str]],
                 template: str = "blue") -> dict:
     """简单卡片：header + 多行 (label, value) markdown 字段。"""
-    elements = [[
+    elements = [
         {"tag": "div", "text": {
             "tag": "lark_md",
             "content": f"**{lbl}**\n{val}",
         }}
-    ] for lbl, val in lines]
+        for lbl, val in lines
+    ]
     return {
         "msg_type": "interactive",
         "card": {
