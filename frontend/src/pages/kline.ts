@@ -171,9 +171,10 @@ function ensureRegistered(): void {
       });
     },
     figures: [
-      { key: "up", title: "UP", type: "line", styles: () => ({ color: "#8E8E93", style: "dashed", lineWidth: 1 }) },
-      { key: "mid", title: "MID", type: "line", styles: () => ({ color: "#FF9F43", style: "dashed", lineWidth: 1 }) },
-      { key: "dn", title: "DN", type: "line", styles: () => ({ color: "#8E8E93", style: "dashed", lineWidth: 1 }) },
+      // 三轨固定色：上红 / 中蓝 / 下绿（红绿用 K 线口径，避免页面里多套红绿）
+      { key: "up", title: "UP", type: "line", styles: () => ({ color: chartUp(), style: "dashed", lineWidth: 1 }) },
+      { key: "mid", title: "MID", type: "line", styles: () => ({ color: "#4C8DFF", style: "dashed", lineWidth: 1 }) },
+      { key: "dn", title: "DN", type: "line", styles: () => ({ color: chartDown(), style: "dashed", lineWidth: 1 }) },
     ],
     draw: (params: { ctx?: CanvasRenderingContext2D; chart?: Chart; indicator?: { result?: unknown[] } }) => {
       const { ctx, chart, indicator } = params;
@@ -981,12 +982,11 @@ export function mountKline(el: HTMLElement): KlineChartHandle {
   el.appendChild(legend);
   const drawLegend = (inds: MainKey[]) => {
     const accC = cssv("--accent") || "#FF9F43", p1C = "#0A84FF", vipC = cssv("--vip") || "#FFD60A";
-    const dimC = cssv("--dim") || "#A1A1A6";
     const parts: string[] = [];
     if (inds.includes("ma"))
       parts.push(`<span><i style="background:${accC}"></i>MA5</span><span><i style="background:${p1C}"></i>MA10</span><span><i style="background:${vipC}"></i>MA20</span>`);
     if (inds.includes("boll"))
-      parts.push(`<span><i style="background:${dimC}"></i>BOLL(20,2)</span>`);
+      parts.push(`<span><i style="background:${chartUp()}"></i><i style="background:#4C8DFF"></i><i style="background:${chartDown()}"></i>BOLL(20,2)</span>`);
     if (inds.includes("avg"))
       parts.push(`<span><i style="background:#26C6DA"></i>均价线</span>`);
     const list = chart.getDataList() as { close: number }[];
