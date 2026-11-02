@@ -1293,7 +1293,7 @@ export function mountKline(el: HTMLElement): KlineChartHandle {
         line.style.left = `${left}%`;
         navYears.appendChild(line);
       }
-      if (((next - left) / 100) * w < 22) return;   // 段太窄：不标年份
+      if (((next - left) / 100) * w < 40) return;   // 段太窄：放不下 4 位年份（11px 字号约 34px 宽）
       const lab = document.createElement("i");
       lab.className = "kl-nav-yr";
       lab.style.left = `${left}%`;

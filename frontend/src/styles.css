@@ -792,7 +792,7 @@ body.mobile .vpop{width:min(246px,calc(100vw - 16px))}
 .kl-nav-ruler span{position:absolute;top:0;transform:translateX(-50%);white-space:nowrap;
   font-family:var(--mono),ui-monospace,monospace;font-size:8.5px;line-height:9px;color:var(--faint)}
 /* 控制条本体：条内直接标年份段（全量数据的年份跨度） */
-.kl-nav-track{position:absolute;left:70px;right:70px;bottom:5px;height:14px;border-radius:4px;
+.kl-nav-track{position:absolute;left:70px;right:70px;bottom:3px;height:16px;border-radius:4px;
   border:1px solid color-mix(in srgb,var(--faint) 22%,transparent);
   background:color-mix(in srgb,var(--faint) 10%,transparent);cursor:pointer;overflow:hidden}
 .kl-nav-win{position:absolute;top:0;height:100%;border-radius:3px;cursor:grab;z-index:1;
@@ -800,12 +800,14 @@ body.mobile .vpop{width:min(246px,calc(100vw - 16px))}
   border:1px solid color-mix(in srgb,var(--accent) 60%,transparent);transition:background .12s}
 .kl-nav-win:hover{background:color-mix(in srgb,var(--accent) 30%,transparent)}
 .kl-nav-win:active{cursor:grabbing}
-/* 年份段：年界竖线 + 年份标（盖在滑块之上，始终可读） */
+/* 年份段：年界竖线 + 年份标（盖在滑块之上，始终可读；字号吃满条内空白） */
 .kl-nav-yrs{position:absolute;inset:0;pointer-events:none;z-index:2}
 .kl-nav-yrline{position:absolute;top:0;bottom:0;width:1px;
   background:color-mix(in srgb,var(--faint) 38%,transparent)}
-.kl-nav-yr{position:absolute;top:0;line-height:12px;padding:0 3px;font-style:normal;
-  font-family:var(--mono),ui-monospace,monospace;font-size:8px;color:var(--dim);white-space:nowrap}
+.kl-nav-yr{position:absolute;top:0;bottom:0;display:flex;align-items:center;padding:0 4px;
+  font-style:normal;font-weight:500;
+  font-family:var(--mono),ui-monospace,monospace;font-size:11px;color:var(--text);
+  opacity:.85;white-space:nowrap}
 .kl-nav-btns{position:absolute;left:0;bottom:1px;height:26px;display:flex;align-items:center;gap:3px;z-index:2}
 .kl-nav-btns.r{left:auto;right:0}
 /* 翻页箭头：底色 + 描边 + 大字号 + 高对比字色，暗色背景下也一眼可见 */
