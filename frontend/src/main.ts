@@ -3,7 +3,7 @@ import "./styles.css";
 import { ic, injectIcons } from "./icons";
 import { authApi, getToken } from "./api";
 import { applyAppearance, getState, patch, setUser, subscribe } from "./store";
-import { toast } from "./ui";
+import { bindModalChrome, toast } from "./ui";
 import { stockSearch } from "./searchbox";
 import { initAuth, refreshVipUI } from "./auth";
 import { initMarket, klResize, openStock, renderKline, renderRight } from "./pages/market";
@@ -137,6 +137,7 @@ function initDevice(): void {
 function boot(): void {
   applyAppearance();
   injectIcons();
+  bindModalChrome();          // 弹窗关闭（X / 遮罩）：之前漏调用，登录框弹出后关不掉
   bindNav();
   initDevice();
   initRailResize();
