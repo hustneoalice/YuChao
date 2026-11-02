@@ -346,6 +346,9 @@ def _bj_scoped(rows: list[dict]) -> list[dict]:
 
 _TGT_SEGNAME = ("", "超卖", "低位", "弱势", "回升", "强势", "超买")
 _TGT_CACHE: dict = {"key": None, "rows": []}
+_TGT_COLS = ("symbol, name, close, pct_chg, vol_ma40, vol_ratio, vol_hit,"
+             " short_orange, mid_orange, limit_up_20d, limit_up_cnt,"
+             " seg, seg_name, pullback")
 
 # 全市场目标指标：一次窗口 SQL 算完（条件无关层），按 (最新K线日期, 标的数, 北交开关) 缓存
 _TGT_SQL = (
@@ -372,11 +375,38 @@ _TGT_SQL = (
     " FROM u GROUP BY symbol")
 
 
+def target_scan_snapshot(conn) -> Optional[tuple[list[dict], dict]]:
+    """后台预计算的指标层（target_scan 表）；None = 表缺失/数据日已过期。
+
+    定时任务在 K 线增量落库后重算落表，端点只读现成结果——
+    打开目标页不再触发全市场窗口 SQL。"""
+    try:
+        head = conn.execute("SELECT MAX(as_of), COUNT(*) FROM target_scan").fetchone()
+        if not head or not head[0] or int(head[1] or 0) < 500:
+            return None
+        latest = conn.execute("SELECT MAX(date) FROM daily_ohlcv").fetchone()
+        if not latest or str(latest[0]) != str(head[0]):
+            return None                            # 预计算落后于最新数据：走即时兜底
+        rows = [dict(zip(_TGT_COLS.replace(", ", ",").split(","), r))
+                for r in conn.execute(f"SELECT {_TGT_COLS} FROM target_scan").fetchall()]
+        return rows, {"as_of": str(head[0]), "scanned": len(rows)}
+    except Exception:                               # 旧库未建表 / 只读模式：兜底直算
+        return None
+
+
 def stock_targets_universe(conn) -> tuple[list[dict], dict]:
-    """目标页全市场扫描（策影目标页同源口径，指标层与条件无关、按数据日缓存）。
+    """目标页全市场扫描：优先读后台定时预计算表，冷启动/过期时才即时算。
 
     六分段/均线/量比/涨停次数一次算好；条件过滤与排序由端点即时完成——
-    用户改条件即刻重筛；数据更新（日期/行数/涨跌幅指纹变化）自动触发重算。"""
+    用户改条件即刻重筛，与是否预计算无关。"""
+    snap = target_scan_snapshot(conn)
+    if snap is not None:
+        return snap
+    return compute_target_scan(conn)
+
+
+def compute_target_scan(conn) -> tuple[list[dict], dict]:
+    """即时计算指标层（定时任务写表 / 预计算缺失时的兜底），按数据指纹进缓存。"""
     fp = conn.execute(
         "SELECT MAX(date), COUNT(*), COUNT(DISTINCT symbol), SUM(pct_chg)"
         " FROM daily_ohlcv").fetchone()
@@ -565,10 +595,41 @@ def snapshot_one(conn, symbol: str) -> Optional[dict]:
 
 _TGT_TREND_CACHE = {"keys": {}, "rows": {}}
 _TGT_TREND_LOCK = Lock()
+_TGT_TREND_CHUNK = 150   # 逐块查询股票数：全市场一次查会打满 DuckDB 1.5GiB 内存上限
+
+
+def target_trend_snapshot(conn) -> Optional[dict]:
+    """后台预计算的趋势柱线（target_trend 表）；None = 表缺失/落后于最新数据日。"""
+    try:
+        head = conn.execute("SELECT MAX(data_date), COUNT(*) FROM target_trend").fetchone()
+        if not head or not head[0] or int(head[1] or 0) < 500:
+            return None
+        latest = conn.execute("SELECT MAX(date) FROM daily_ohlcv").fetchone()
+        if not latest or str(latest[0]) != str(head[0]):
+            return None
+        rows = conn.execute(
+            "SELECT symbol, data_date, trend_value, cross_date, cross_ago, above_days"
+            " FROM target_trend").fetchall()
+        return {r[0]: dict(trend_data_date=r[1], trend_value=r[2],
+                           trend_cross_date=r[3], trend_cross_ago=r[4],
+                           trend_above_days=r[5]) for r in rows}
+    except Exception:
+        return None
 
 
 def stock_target_trends(conn):
-    """逐股票内容缓存；行情增量更新只重算变化的股票。"""
+    """趋势柱线汇总：优先读后台预计算表，缺失/过期时即时分块补算。"""
+    snap = target_trend_snapshot(conn)
+    if snap is not None:
+        return snap
+    return compute_target_trends(conn)
+
+
+def compute_target_trends(conn):
+    """逐股票内容缓存、按块查询：行情增量更新只重算变化的股票。
+
+    分块是硬约束——一次查全市场 5550×2000 根会让 DuckDB 撞内存上限 OOM
+    （2026-11-02 线上实测，连带后续 quotes 请求一起 500）。"""
     from itertools import groupby
     from ..target_trend import trend_histogram, trend_summary
 
@@ -588,25 +649,28 @@ def stock_target_trends(conn):
                 "SELECT DISTINCT date FROM daily_ohlcv ORDER BY date").fetchall())}
             cursor = conn.cursor()
             try:
-                placeholders = ','.join('?' for _ in changed)
-                cursor.execute(f"""
-                    SELECT symbol, date, high, low, close FROM v_daily_ohlcv_qfq
-                    WHERE symbol IN ({placeholders})
-                    QUALIFY ROW_NUMBER() OVER (PARTITION BY symbol ORDER BY date DESC) <= 2000
-                    ORDER BY symbol, date
-                """, changed)
-                def records():
-                    while batch := cursor.fetchmany(8192):
-                        yield from batch
-                for symbol, group in groupby(records(), key=lambda row: row[0]):
-                    rows = list(group)
-                    if any(any(value is None for value in row[2:]) for row in rows):
-                        _TGT_TREND_CACHE['rows'].pop(symbol, None)
-                        continue
-                    bars = [dict(high=r[2], low=r[3], close=r[4]) for r in rows]
-                    _TGT_TREND_CACHE['rows'][symbol] = trend_summary(
-                        [str(r[1]) for r in rows], trend_histogram(bars), calendar)
+                for i in range(0, len(changed), _TGT_TREND_CHUNK):
+                    part = changed[i:i + _TGT_TREND_CHUNK]
+                    placeholders = ','.join('?' for _ in part)
+                    cursor.execute(f"""
+                        SELECT symbol, date, high, low, close FROM v_daily_ohlcv_qfq
+                        WHERE symbol IN ({placeholders})
+                        QUALIFY ROW_NUMBER() OVER (PARTITION BY symbol ORDER BY date DESC) <= 2000
+                        ORDER BY symbol, date
+                    """, part)
+                    def records():
+                        while batch := cursor.fetchmany(8192):
+                            yield from batch
+                    for symbol, group in groupby(records(), key=lambda row: row[0]):
+                        rows = list(group)
+                        if any(any(value is None for value in row[2:]) for row in rows):
+                            _TGT_TREND_CACHE['rows'].pop(symbol, None)
+                            continue
+                        bars = [dict(high=r[2], low=r[3], close=r[4]) for r in rows]
+                        _TGT_TREND_CACHE['rows'][symbol] = trend_summary(
+                            [str(r[1]) for r in rows], trend_histogram(bars), calendar)
+                    for symbol in part:                    # 分块完成即记账，重跑不重复
+                        _TGT_TREND_CACHE['keys'][symbol] = keys[symbol]
             finally:
                 cursor.close()
-            _TGT_TREND_CACHE['keys'] = keys
         return {symbol: row for symbol, row in _TGT_TREND_CACHE['rows'].items() if symbol in keys}

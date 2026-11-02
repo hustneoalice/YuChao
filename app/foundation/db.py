@@ -143,6 +143,28 @@ NEW_TABLES_DDL = """
         market VARCHAR NOT NULL,           -- SH / SZ
         sync_date DATE DEFAULT current_date   -- 新鲜度守卫
     );
+
+    -- 目标页指标层（后台定时预计算，见 updater/collectors/targets）：全市场
+    -- 均线/量比/六分段/涨停次数一次算好落表；端点只做条件过滤（改条件毫秒级，
+    -- 打开页面不再触发全市场窗口 SQL）。as_of = 数据日，供新鲜度守卫使用。
+    CREATE TABLE IF NOT EXISTS target_scan (
+        symbol        VARCHAR PRIMARY KEY,
+        name          VARCHAR,
+        close         DOUBLE, pct_chg DOUBLE,
+        vol_ma40      DOUBLE, vol_ratio DOUBLE, vol_hit BOOLEAN,
+        short_orange  BOOLEAN, mid_orange BOOLEAN,
+        limit_up_20d  BOOLEAN, limit_up_cnt INTEGER,
+        seg           INTEGER, seg_name VARCHAR, pullback BOOLEAN,
+        as_of         VARCHAR
+    );
+
+    -- 目标页趋势柱线 STICKV（预计算）：逐股分块算 2000 根 qfq，避免单条全市场
+    -- 窗口查询打满 DuckDB 内存上限（1.5GiB，2026-11-02 请求内直算实测 OOM）。
+    CREATE TABLE IF NOT EXISTS target_trend (
+        symbol      VARCHAR PRIMARY KEY,
+        data_date   VARCHAR, trend_value DOUBLE,
+        cross_date  VARCHAR, cross_ago INTEGER, above_days INTEGER
+    );
 """
 
 # 存量表迁移（幂等；writer.ensure_schema / scripts/ensure_schema.py 共用执行）。

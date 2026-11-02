@@ -1,26 +1,69 @@
-/* 目标页：全市场四条件扫描（策影目标页同源口径）。
- * 指标层（均线/量比/六分段/涨停次数）服务端一次算好按数据日缓存；
- * 条件层前端勾选 → 传参即时重筛；数据更新后缓存键变化自动重算。
- * 页面打开时加载，驻留期间 60s 轮询（数据更新即新结果）。 */
-import { marketApi, type TargetItem } from "../api";
+/* 目标页：全市场多条件叠加选股（策影目标页同源口径）。
+ * 指标层（均线/量比/六分段/涨停次数…）服务端后台定时预计算落表，端点只读；
+ * 条件层由 GET /market/targets/conditions 下发元数据驱动条件栏渲染——
+ * 后端 screening.CONDITIONS 新增指标（如主力吸筹）后前端自动出现，
+ * 勾选/改阈值即时重筛（毫秒级），数据更新才重算指标层。 */
+import { marketApi, type TargetCond, type TargetItem } from "../api";
 import { esc, fmt, fmtChg } from "../fmt";
 import { createPager, slicePage, type Pager } from "../pager";
 import { createDataTable, type DataTable, type DataTableCol } from "../table";
 import { trendPalette } from "./kline";
 
-type Cond = "vol" | "short" | "mid" | "up20" | "trend";
-const CONDS: { k: Cond; label: string; title: string }[] = [
-  { k: "trend", label: "趋势柱线", title: "STICKV 负转正或持续在零轴上方，可独立筛选或与其他条件同时满足" },
-  { k: "vol", label: "40日均量", title: "当日成交量 ≥ 40日均量" },
-  { k: "short", label: "短线趋势橙", title: "收盘站上 MA10（K 线短线趋势通道填橙同判定）" },
-  { k: "mid", label: "中线趋势橙", title: "收盘站上 MA45（K 线中线趋势通道填橙同判定）" },
-  { k: "up20", label: "20日内涨停", title: "近 20 个交易日有过涨停（主板 10% / 创业科创 20%）" },
+/* 后端不可达时的兜底登记（与 screening.CONDITIONS 同构，仅为首屏不空） */
+const FALLBACK_CONDS: TargetCond[] = [
+  { key: "trend", label: "趋势柱线", kind: "trend", default_on: false,
+    title: "STICKV 负转正或持续在零轴上方，可独立筛选或与其他条件同时满足" },
+  { key: "vol", label: "40日均量", kind: "value", op: ">=", default: 1.0,
+    min: 0.0, max: 10.0, step: 0.1, unit: "x", default_on: true,
+    title: "当日成交量 / 40日均量 不小于阈值" },
+  { key: "short", label: "短线趋势橙", kind: "flag", default_on: true,
+    title: "收盘站上 MA10（K 线短线趋势通道填橙同判定）" },
+  { key: "mid", label: "中线趋势橙", kind: "flag", default_on: true,
+    title: "收盘站上 MA45（K 线中线趋势通道填橙同判定）" },
+  { key: "up20", label: "20日内涨停", kind: "flag", default_on: true,
+    title: "近 20 个交易日有过涨停（主板 10% / 创业科创 20%）" },
 ];
-let conds: Record<Cond, boolean> = { vol: true, short: true, mid: true, up20: true, trend: false };
-try {
-  const raw = localStorage.getItem("yc_tgt_conds");
-  if (raw) conds = { ...conds, ...(JSON.parse(raw) as Partial<Record<Cond, boolean>>) };
-} catch { /* 损坏回默认全勾 */ }
+
+function readJSON<T>(key: string, fallback: T): T {
+  try {
+    const raw = localStorage.getItem(key);
+    return raw ? (JSON.parse(raw) as T) : fallback;
+  } catch { return fallback; }
+}
+
+function clampVal(c: TargetCond, v: number): number {
+  const lo = c.min ?? -Infinity, hi = c.max ?? Infinity;
+  return Math.min(hi, Math.max(lo, v));
+}
+
+let meta: TargetCond[] = FALLBACK_CONDS;
+let conds: Record<string, boolean> = {};
+let tvals: Record<string, number> = {};
+let metaLoaded = false;
+
+function applyMeta(list: TargetCond[]): void {
+  meta = list.length ? list : FALLBACK_CONDS;
+  const savedC = readJSON<Record<string, boolean>>("yc_tgt_conds", {});
+  const savedV = readJSON<Record<string, number>>("yc_tgt_vals", {});
+  conds = {};
+  tvals = {};
+  for (const c of meta) {
+    conds[c.key] = typeof savedC[c.key] === "boolean" ? savedC[c.key] : c.default_on;
+    if (c.kind === "value") {
+      const v = Number(savedV[c.key]);
+      tvals[c.key] = Number.isFinite(v) ? clampVal(c, v) : Number(c.default ?? 0);
+    }
+  }
+}
+
+async function ensureMeta(): Promise<void> {
+  if (metaLoaded) return;
+  metaLoaded = true;
+  try {
+    applyMeta(await marketApi.targetConds());
+  } catch { applyMeta(FALLBACK_CONDS); }
+}
+
 let timer: ReturnType<typeof setInterval> | null = null;
 let revision = 0;
 let trend = { mode: "cross", recent: 5, stillAbove: true, aboveDays: 1 };
@@ -38,7 +81,14 @@ let items: TargetItem[] = [];
 let scanned = 0;
 
 function condsParam(): string {
-  return CONDS.filter((d) => conds[d.k]).map((d) => d.k).join(",");
+  return meta.filter((d) => conds[d.key]).map((d) => d.key).join(",");
+}
+
+/* 数值条件的阈值只随启用条件下发；未勾选的不参与判定 */
+function valuesParam(): Record<string, number> {
+  const out: Record<string, number> = {};
+  for (const d of meta) if (d.kind === "value" && conds[d.key]) out[d.key] = tvals[d.key];
+  return out;
 }
 
 async function load(resetPage = false): Promise<void> {
@@ -46,7 +96,7 @@ async function load(resetPage = false): Promise<void> {
   const st = document.getElementById("tgt-status")!;
   st.textContent = "计算中…";
   try {
-    const r = await marketApi.targets(condsParam(), 10000, trend);
+    const r = await marketApi.targets(condsParam(), 10000, trend, valuesParam());
     if (request !== revision) return;
     totalHits = r.total_hits;
     items = r.items;
@@ -91,14 +141,15 @@ const TGT_COLS: DataTableCol<TargetItem>[] = [
 
 function drawPage(): void {
   const empty = document.getElementById("tgt-empty")!;
+  const wantTrend = !!conds["trend"];
   if (!pager) pager = createPager(document.getElementById("tgt-pager")!, "targets", drawPage);
-  if (tableHasTrend !== conds.trend) { tbl = null; tableHasTrend = conds.trend; }
-  const columns = conds.trend ? TGT_COLS : TGT_COLS.filter(column => !["STICKV", "最近转正", "距今交易日", "连续上方"].includes(column.label));
+  if (tableHasTrend !== wantTrend) { tbl = null; tableHasTrend = wantTrend; }
+  const columns = wantTrend ? TGT_COLS : TGT_COLS.filter(column => !["STICKV", "最近转正", "距今交易日", "连续上方"].includes(column.label));
   if (!tbl) tbl = createDataTable(document.getElementById("tgt-wrap")!, columns, {
     rowKey: (t) => t.symbol,
     onRow: (t) => document.dispatchEvent(new CustomEvent("yc:open-stock", {
       detail: { symbol: t.symbol, name: t.name || t.symbol,
-        trendFocus: conds.trend ? { date: t.trend_cross_date ?? t.trend_data_date } : undefined,
+        trendFocus: wantTrend ? { date: t.trend_cross_date ?? t.trend_data_date } : undefined,
         from: { page: "targets", label: "目标监控" } } })),
   });
   pager.update(items.length);
@@ -115,10 +166,18 @@ function drawPage(): void {
 
 function renderConds(): void {
   const el = document.getElementById("tgt-conds")!;
-  el.innerHTML = CONDS.map((d) =>
-    `<button type="button" class="chip${conds[d.k] ? " on" : ""}" aria-pressed="${conds[d.k]}" data-c="${d.k}" title="${esc(d.title)}">${esc(d.label)}</button>`).join("") +
+  el.innerHTML = meta.map((d) => {
+    const on = !!conds[d.key];
+    const chip = `<button type="button" class="chip${on ? " on" : ""}" aria-pressed="${on}" data-c="${d.key}" title="${esc(d.title || "")}">${esc(d.label)}</button>`;
+    if (d.kind !== "value") return chip;
+    const unit = d.unit ? ` ${esc(d.unit)}` : "";
+    return `<span class="tgt-val${on ? "" : " off"}">${chip}<label>${d.op === "<=" ? "≤" : "≥"}` +
+      `<input type="number" data-v="${d.key}" aria-label="${esc(d.label)}阈值"` +
+      `${d.min == null ? "" : ` min="${d.min}"`}${d.max == null ? "" : ` max="${d.max}"`}` +
+      ` step="${d.step ?? "any"}" value="${tvals[d.key]}"${on ? "" : " disabled"}>${unit}</label></span>`;
+  }).join("") +
     `<span style="font-size:11.5px;color:var(--faint)">所有勾选条件同时满足 · ST 已剔除 · 未勾选不参与判定</span>`;
-  if (conds.trend) {
+  if (conds["trend"]) {
     el.insertAdjacentHTML("beforeend", `<div class="tgt-trend-set">
       <label>趋势柱线 <select id="tgt-trend-mode"><option value="cross" ${trend.mode === "cross" ? "selected" : ""}>负转正</option><option value="above" ${trend.mode === "above" ? "selected" : ""}>零轴上方</option></select></label>
       ${trend.mode === "cross" ? `<label>最近 <select id="tgt-trend-recent">${[1,3,5,10,20].map(n => `<option value="${n}" ${trend.recent === n ? "selected" : ""}>${n}</option>`).join('')}<option value="custom" ${![1,3,5,10,20].includes(trend.recent) ? "selected" : ""}>自定义</option></select> 个交易日</label>
@@ -137,17 +196,32 @@ function renderConds(): void {
   }
   el.querySelectorAll<HTMLElement>(".chip[data-c]").forEach((c) =>
     c.addEventListener("click", () => {
-      const k = c.dataset.c as Cond;
+      const k = c.dataset.c!;
       conds[k] = !conds[k];
       localStorage.setItem("yc_tgt_conds", JSON.stringify(conds));
       renderConds();
-      void load(true);                   // 改条件 → 即时重筛（指标层缓存，毫秒级）
+      void load(true);                   // 改条件 → 即时重筛（指标层只读，毫秒级）
     }));
+  /* 数值阈值：失焦/回车提交，clamp 回登记范围后即时重筛 */
+  el.querySelectorAll<HTMLInputElement>("input[data-v]").forEach((inp) => {
+    inp.addEventListener("change", () => {
+      const d = meta.find((x) => x.key === inp.dataset.v);
+      if (!d || !inp.reportValidity()) return;
+      const v = Number(inp.value);
+      if (!Number.isFinite(v)) return;
+      tvals[d.key] = clampVal(d, v);
+      inp.value = String(tvals[d.key]);
+      localStorage.setItem("yc_tgt_vals", JSON.stringify(tvals));
+      void load(true);
+    });
+  });
 }
 
 export function loadTargets(): void {
-  renderConds();
-  void load();
+  void ensureMeta().then(() => {
+    renderConds();
+    void load();
+  });
   if (!timer) {                          // 驻留轮询：数据更新（缓存键变化）即出新结果
     timer = setInterval(() => {
       if (document.getElementById("page-targets")?.classList.contains("on")) void load();

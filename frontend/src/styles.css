@@ -328,6 +328,15 @@ th.n{color:var(--dim)}
 .tgt-trend-set select option{background:var(--panel-2);color:var(--text)}
 .tgt-trend-set input[type="checkbox"]{width:13px;height:13px;margin:0;accent-color:var(--accent);cursor:pointer}
 .tgt-trend-hint{font-size:12px;color:var(--faint)}
+/* 数值型选股条件：chip 后跟阈值输入（与趋势设置同一套底色/焦点样式） */
+.tgt-val{display:inline-flex;align-items:center;gap:6px;font-size:11.5px;color:var(--dim);transition:opacity .15s}
+.tgt-val.off{opacity:.5}
+.tgt-val label{display:inline-flex;align-items:center;gap:4px}
+.tgt-val input{width:56px;height:26px;padding:0 7px;background:var(--panel-2);color:var(--text);
+  border:1px solid var(--border);border-radius:6px;font-size:12px;outline:none}
+.tgt-val input:hover{border-color:var(--axis)}
+.tgt-val input:focus{border-color:color-mix(in srgb,var(--accent) 55%,transparent)}
+.tgt-val input:disabled{cursor:not-allowed}
 /* 通用分页条（全列表一套设计） */
 .pager{display:flex;gap:8px;align-items:center;justify-content:flex-end;padding:10px 2px 0;flex-wrap:wrap}
 .pager:empty{display:none}

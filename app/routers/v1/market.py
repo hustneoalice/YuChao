@@ -6,9 +6,10 @@ from typing import Literal, Optional
 from fastapi import APIRouter, Depends, Query
 
 from ...contracts.common import Adjust, Page, WithParam
-from ...contracts.market import FundFlowRange, Kline, Quote, QuotesOut, SearchHit, TargetScanOut
+from ...contracts.market import (FundFlowRange, Kline, Quote, QuotesOut, SearchHit,
+                                 TargetCondItem, TargetScanOut)
 from ...errors import not_found, vip_required
-from ...foundation import repo
+from ...foundation import repo, screening
 from ...foundation.db import get_conn
 from ...foundation import live
 from ...foundation.symbol import index_form, normalize_symbol
@@ -420,26 +421,38 @@ def industry_reports(symbol: str, limit: int = Query(default=12, ge=1, le=30),
         return {"industry": "", "items": [], "skipped": True}
 
 
+@router.get("/market/targets/conditions", response_model=list[TargetCondItem],
+            summary="目标页可选选股条件元数据（前端条件栏据此渲染）")
+def target_conditions():
+    """条件登记在 foundation/screening.CONDITIONS：新增指标（如主力吸筹）
+    只改那处，前端条件栏与阈值输入自动出现。"""
+    return screening.public_conditions()
+
+
 @router.get("/market/targets", response_model=TargetScanOut,
-            summary="目标页全市场扫描（独立条件组合 + 趋势柱线；ST 与北交所剔除）")
+            summary="目标页全市场扫描（多条件叠加 + 趋势柱线；ST 与北交所剔除）")
 def targets(conds: str = Query(default="vol,short,mid,up20",
-                               description="启用条件：vol=40日均量 short=短线橙 mid=中线橙 up20=20日涨停 trend=趋势柱线"),
+                               description="启用条件，逗号分隔（见 /market/targets/conditions）"),
+            values: Optional[str] = Query(default=None,
+                                          description='数值条件阈值 JSON，如 {"vol": 1.5}'),
             limit: int = Query(default=100, ge=1, le=10000),
             trend_mode: Literal["cross", "above"] = "cross",
             trend_recent: int = Query(default=5, ge=1, le=250),
             trend_still_above: bool = True,
             trend_above_days: int = Query(default=1, ge=1, le=250),
             conn=Depends(get_conn)):
-    """指标层按数据日缓存、条件层即时过滤：改条件即刻重筛，数据更新自动重算。
+    """指标层后台定时预计算（target_scan / target_trend），条件层即时过滤：
+    改条件或阈值即刻重筛（毫秒级），只有数据更新才重算指标层。
 
-    条件① 40日均量 = 当日量 ≥ MA40(volume)；② 短线趋势橙 = 收盘 > MA10；
-    ③ 中线趋势橙 = 收盘 > MA45；④ 近 20 个交易日有涨停（pct_chg 阈值口径）。
-    未勾选的条件不参与判定；命中列表按六分段强势在前。"""
+    所有勾选条件同时满足（AND 叠加）；未勾选的不参与判定。
+    flag 条件看布尔字段，value 条件按阈值比较（op 默认 >=），trend 走
+    trend_matches 参数化判定；命中列表按六分段强势在前。"""
     from datetime import datetime
     from zoneinfo import ZoneInfo
     from ...foundation.target_trend import trend_matches
 
-    want = {c.strip() for c in conds.split(",") if c.strip()} & {"vol", "short", "mid", "up20", "trend"}
+    want = screening.enabled_keys(conds)
+    vals = screening.parse_values(values, want)
     rows, meta = repo.market.stock_targets_universe(conn)
     if "trend" in want:
         trends = repo.market.stock_target_trends(conn)
@@ -449,18 +462,15 @@ def targets(conds: str = Query(default="vol,short,mid,up20",
                  "trend_provisional": provisional and trends.get(row['symbol'], {}).get('trend_data_date') == now.date().isoformat()}
                 for row in rows]
 
-    def hit(t: dict) -> bool:
-        return (("vol" not in want or t["vol_hit"]) and
-                ("short" not in want or t["short_orange"]) and
-                ("mid" not in want or t["mid_orange"]) and
-                ("up20" not in want or t["limit_up_20d"]) and
-                ("trend" not in want or (t.get('trend_data_date') == meta['as_of'] and
-                    trend_matches(t, trend_mode, trend_recent, trend_still_above, trend_above_days))))
+    def trend_hit(t: dict) -> bool:
+        return (t.get('trend_data_date') == meta['as_of'] and
+                trend_matches(t, trend_mode, trend_recent, trend_still_above, trend_above_days))
 
-    items = sorted((t for t in rows if hit(t)), key=lambda t:
+    items = [t for t in rows if screening.matches(t, want, vals, trend_hit(t) if "trend" in want else None)]
+    items.sort(key=lambda t:
         ((t.get('trend_cross_ago') if t.get('trend_cross_ago') is not None else 100000), -t['seg'])
         if "trend" in want else (-t['seg'], -(t['vol_ratio'] or 0)))
-    return TargetScanOut(items=items[:limit], total_hits=len(items),
+    return TargetScanOut(items=items[:limit], total_hits=len(items), values=vals,
                          scanned=meta["scanned"], as_of=meta["as_of"])
 
 

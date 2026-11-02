@@ -158,10 +158,30 @@ class TargetItem(BaseModel):
     trend_provisional: bool = False
 
 
+class TargetCondItem(BaseModel):
+    """可选条件元数据（GET /market/targets/conditions，前端条件栏据此渲染）。
+
+    kind：flag 布尔条件 / value 数值阈值条件 / trend 复合条件（趋势柱线参数）。
+    新增条件只需在 screening.CONDITIONS 登记，前端自动出现。"""
+
+    key: str
+    label: str
+    kind: str = Field(description="flag | value | trend")
+    default: Optional[float] = None
+    min: Optional[float] = None
+    max: Optional[float] = None
+    step: Optional[float] = None
+    unit: str = ""
+    op: Optional[str] = Field(default=None, description="value 条件的比较方向：>= | <=")
+    default_on: bool = Field(default=True, description="条件栏初始是否勾选")
+    title: str = ""
+
+
 class TargetScanOut(BaseModel):
     scanned: int = Field(description="实际进入判定的标的数（ST/北交剔除后）")
     total_hits: int = Field(description="命中当前勾选条件的总数")
     as_of: str = Field(default="", description="数据截至（最新 K 线日期）")
+    values: dict[str, float] = Field(default_factory=dict, description="本次生效的数值条件阈值")
     items: list[TargetItem] = Field(default_factory=list, description="命中列表（强势段在前，截断至 limit）")
 
 

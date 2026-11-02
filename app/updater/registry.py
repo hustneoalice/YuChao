@@ -62,6 +62,14 @@ TASKS: tuple[dict, ...] = (
      "description": "17:00 腾讯 fqkline 日线增量（东财备用）→ daily_ohlcv；"
                     "目标集 = 个股 + fund_universe 场内基金（ETF/LOF/REIT，"
                     "新进标的 3000 根建底仓）"},
+    {"kind": "target_scan", "label": "目标监控预计算",
+     "fn": "app.updater.collectors.targets:update_target_scan",
+     "needs": ["kline_update"],
+     "freshness": {"table": "target_scan", "col": "as_of"},
+     "min_rows": 3000,
+     "description": "17:20 K 线落库后预计算目标页指标层（均线/量比/六分段/涨停"
+                    " + 趋势柱线 STICKV）→ target_scan / target_trend；"
+                    "用户打开目标页只读现成结果，改条件即时重筛，不再请求内重算"},
     {"kind": "financials", "label": "财务数据",
      "fn": "app.updater.collectors.financials:update_financials",
      "freshness": {"log": True},
@@ -106,6 +114,7 @@ CRON_CHAIN: tuple[tuple[str, int, int], ...] = (
     ("capital_flow", 16, 30),
     ("pe_percentile", 16, 50),
     ("kline_update", 17, 0),
+    ("target_scan", 17, 20),      # 目标页指标层预计算（K 线落库后）
     ("financials", 17, 30),
     ("backup", 18, 10),           # 更新链收尾后快照；策影零备份，这是超越点
     ("corepicks", 21, 0),

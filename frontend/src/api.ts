@@ -151,7 +151,14 @@ export interface TargetItem {
 }
 
 export interface TargetScanOut {
-  scanned: number; total_hits: number; as_of: string; items: TargetItem[];
+  scanned: number; total_hits: number; as_of: string; values?: Record<string, number>; items: TargetItem[];
+}
+
+/* 选股条件元数据（后端 foundation/screening.CONDITIONS 下发，条件栏据此渲染） */
+export interface TargetCond {
+  key: string; label: string; kind: "flag" | "value" | "trend";
+  default?: number | null; min?: number | null; max?: number | null;
+  step?: number | null; unit?: string; op?: string | null; default_on: boolean; title?: string;
 }
 
 /* ── 2.2 全景大页（market_snapshot 派生，盘中 5 分钟刷新） ── */
@@ -208,8 +215,10 @@ export const marketApi = {
   /* 批量快照（自选股卡片：N 只一次渲染，一次腾讯实时 HTTP；≤50 只） */
   quotes: (symbols: string[]) =>
     req<{ items: Quote[]; missing: string[] }>(`/market/quotes?symbols=${encodeURIComponent(symbols.join(","))}`),
-  targets: (conds: string, limit = 10000, trend: { mode: string; recent: number; stillAbove: boolean; aboveDays: number } = { mode: "cross", recent: 5, stillAbove: true, aboveDays: 1 }) =>
-    req<TargetScanOut>(`/market/targets?conds=${encodeURIComponent(conds)}&limit=${limit}&trend_mode=${trend.mode}&trend_recent=${trend.recent}&trend_still_above=${trend.stillAbove}&trend_above_days=${trend.aboveDays}`),
+  targets: (conds: string, limit = 10000, trend: { mode: string; recent: number; stillAbove: boolean; aboveDays: number } = { mode: "cross", recent: 5, stillAbove: true, aboveDays: 1 }, values: Record<string, number> = {}) =>
+    req<TargetScanOut>(`/market/targets?conds=${encodeURIComponent(conds)}&limit=${limit}&trend_mode=${trend.mode}&trend_recent=${trend.recent}&trend_still_above=${trend.stillAbove}&trend_above_days=${trend.aboveDays}${Object.keys(values).length ? `&values=${encodeURIComponent(JSON.stringify(values))}` : ""}`),
+  /* 选股条件元数据：新增指标（如主力吸筹）由后端登记后自动出现在条件栏 */
+  targetConds: () => req<TargetCond[]>("/market/targets/conditions"),
   /* 全景大表：服务端排序分页（market_snapshot 毫秒级 SQL） */
   board: (q: { tab: string; sort?: string; page?: number; size?: number; q?: string }) => {
     const p = new URLSearchParams({ tab: q.tab });
