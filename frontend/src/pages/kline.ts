@@ -1175,7 +1175,7 @@ export function mountKline(el: HTMLElement): KlineChartHandle {
       // 点击（非拖拽）→ 按 x 列命中单根：点在这根 K 线所在的列上就算选中，
       // 不像原生 onCandleBarClick 那样要求精确落在实体矩形里（间隙/空白高度点不中）
       // 落在未来空白区（无对应 bar）则撤掉选中
-      if (e.button === 0 && Math.abs(e.clientX - downX) < 5) {
+      if (pickMode && e.button === 0 && Math.abs(e.clientX - downX) < 5) {
         const r = el.getBoundingClientRect();
         pickAtIndex(diOfX(e.clientX - r.left));
       }
