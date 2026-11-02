@@ -31,6 +31,7 @@ function localPrefs(): Prefs {
     trend_palette: localStorage.getItem("yc_trendpal") || "B",
     k_main: j<string[]>("yc_kmain", []),
     k_sub: j<string[]>("yc_ksub", []),
+    k_indfav: j<string[]>("yc_indfav", []),   // ★ 常显指标（工具栏两行）：换浏览器/换端也要一致
   };
 }
 
@@ -48,6 +49,7 @@ function applyPrefs(p: Prefs): void {
     if (typeof p.trend_palette === "string") setTrendPalette(p.trend_palette);
     if (Array.isArray(p.k_main)) localStorage.setItem("yc_kmain", JSON.stringify(p.k_main));
     if (Array.isArray(p.k_sub)) localStorage.setItem("yc_ksub", JSON.stringify(p.k_sub));
+    if (Array.isArray(p.k_indfav)) localStorage.setItem("yc_indfav", JSON.stringify(p.k_indfav));
   } finally {
     endApply();
   }

@@ -755,6 +755,7 @@ export function initMarket(): void {
       const favs = new Set(readIndFavs());
       if (favs.has(k)) favs.delete(k); else favs.add(k);
       writeIndFavs([...favs]);
+      notifyLocal("prefs");              // ★ 常显集合也走云端偏好：换浏览器/换端一致
       renderIpanel();
       return;
     }
@@ -808,6 +809,7 @@ export function initMarket(): void {
       const k = ((t.closest<HTMLElement>("i[data-xshow]") ?? t) as HTMLElement).dataset.xshow;
       if (k) {
         writeIndFavs(readIndFavs().filter((x) => x !== k));
+        notifyLocal("prefs");           // 同 ★：常显集合变了就推云端
         renderIndBar();
       }
       return;
