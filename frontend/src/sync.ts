@@ -26,6 +26,8 @@ function localPrefs(): Prefs {
     theme: s.theme, dir: s.dir, accent: s.accent,
     k_layout: localStorage.getItem("yc_klayout") || "single",
     k_autoh: localStorage.getItem("yc_autoh") ?? "1",
+    // 研报面板高度（0 = 默认）：行情页图表/研报分隔条，登录后跨端记住
+    k_brief_h: localStorage.getItem("yc_briefh") || "0",
     trend_palette: localStorage.getItem("yc_trendpal") || "B",
     k_main: j<string[]>("yc_kmain", []),
     k_sub: j<string[]>("yc_ksub", []),
@@ -42,6 +44,7 @@ function applyPrefs(p: Prefs): void {
     loadAppearance({ theme, dir, accent });
     if (typeof p.k_layout === "string") localStorage.setItem("yc_klayout", p.k_layout);
     if (p.k_autoh === "0" || p.k_autoh === "1") localStorage.setItem("yc_autoh", p.k_autoh);
+    if (typeof p.k_brief_h === "string") localStorage.setItem("yc_briefh", p.k_brief_h);
     if (typeof p.trend_palette === "string") setTrendPalette(p.trend_palette);
     if (Array.isArray(p.k_main)) localStorage.setItem("yc_kmain", JSON.stringify(p.k_main));
     if (Array.isArray(p.k_sub)) localStorage.setItem("yc_ksub", JSON.stringify(p.k_sub));

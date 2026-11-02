@@ -116,7 +116,8 @@ svg{display:block}
 /* 行情页工具栏加自选（icon-only，TradingView 同款）：态 .on 高亮 + title 提示 */
 #kl-watch.on{border-color:color-mix(in srgb,var(--accent) 35%,transparent);color:var(--accent);
   background:color-mix(in srgb,var(--accent) 12%,transparent)}
-#kl-watch svg{width:13px;height:13px}
+#kl-watch{width:30px;height:30px}
+#kl-watch svg{width:16px;height:16px}
 
 /* 收藏按钮 · 快捷分组浮层（心形点开即可换组 / 新建 / 移出） */
 .wpop{position:fixed;z-index:250;width:220px;padding:8px;
@@ -150,9 +151,10 @@ svg{display:block}
 /* 自选列表行内走势 sparkline */
 #wl-wrap svg.spark{display:block;margin:0 auto;opacity:.9}
 .up{color:var(--up)} .down{color:var(--down)}
-.datachip{display:flex;align-items:center;gap:7px;height:30px;padding:0 11px;
+.datachip{display:flex;align-items:center;gap:7px;height:30px;padding:0 11px;min-width:232px;
   border:1px solid var(--border);border-radius:999px;font-size:11.5px;color:var(--dim);
-  background:var(--panel)}
+  background:var(--panel);white-space:nowrap;overflow:hidden}
+.datachip span{overflow:hidden;text-overflow:ellipsis}
 .datachip i{width:7px;height:7px;border-radius:50%;background:var(--down);flex:none}
 .datachip.i-ok i{background:#30D158} .datachip.i-mid i{background:var(--warn);animation:pulse 1.2s infinite}
 .datachip.i-run i{background:var(--accent);animation:pulse 1.2s infinite}
@@ -214,19 +216,24 @@ svg{display:block}
 .phead2 .sp{flex:1}
 .chartbox{background:var(--panel);border:1px solid var(--border);border-radius:10px;overflow:hidden;
   display:flex;flex-direction:column;min-height:0;position:relative}
-.chartbar{display:flex;align-items:center;gap:8px;padding:7px 12px;border-bottom:1px solid var(--border);min-height:42px}
+.chartbar{display:flex;align-items:center;gap:7px;padding:7px 12px;border-bottom:1px solid var(--border);min-height:42px;
+  overflow-x:auto;scrollbar-width:none}
+.chartbar::-webkit-scrollbar{display:none}
 /* 图表底部控制条（策影双层布局）：布局/档位/缩放/加自选移至底部，顶栏只留周期+指标 */
-/* 图表整体高度拖拽手柄：footbar 上缘细横条，hover 变亮提示可拖 */
+/* 图表/研报分隔手柄（chartbox 底缘）：悬停/拖拽时高亮，提示这一条可以上下拉 */
 .kl-vgrip{height:5px;flex:none;cursor:row-resize;position:relative;z-index:3}
+.kl-vgrip[hidden]{display:none!important}
 .kl-vgrip::after{content:"";position:absolute;left:50%;top:50%;transform:translate(-50%,-50%);
-  width:34px;height:3px;border-radius:2px;background:var(--border);transition:background .15s}
-.kl-vgrip:hover::after{background:var(--accent)}
+  width:38px;height:3px;border-radius:2px;background:var(--scroll);transition:background .15s,width .15s}
+.kl-vgrip:hover::after,.kl-vgrip.on::after{background:var(--accent);width:56px}
 .chartbar .sp{flex:1}
 .barsep{width:1px;height:14px;background:var(--border);margin:0 2px}
-.chartbar .seg button{padding:3px 10px;font-size:11.5px}
+.chartbar .seg button{padding:3px 9px;font-size:11.5px}
 /* 工具栏按钮统一不换行：文字按钮（框选）在窄屏也不会被挤成竖排 */
 .chartbar .cbtn{white-space:nowrap;flex:none;width:auto;min-width:24px;padding:0 7px}
 .chartbar .cbtn.text{font-size:11.5px}
+/* 工具条挤窄时按钮不许被压成竖排（方案/框选这类双字按钮中招过） */
+.chartbar .hbtn{white-space:nowrap;flex:none}
 /* K线顶部信息条（东财/同花顺网页头部同款）：
    名称 代码 | 现价 涨跌 | 最高 最低 开盘 昨收 | 成交额 换手 …… 总市值 PE */
 .kl-info{display:flex;align-items:center;gap:10px;flex-wrap:wrap;min-height:40px;
@@ -513,13 +520,43 @@ body.mobile .rcard .cbar{opacity:1}
 .ksy-q .dim{color:var(--faint);font-size:10.5px}
 .ksy-q .dim b{font-size:11px;font-weight:500}
 .kl-symbar .cbtn{width:24px;height:24px;border-radius:7px}
+/* 信息条内容（行情页共享条 / 图表面板头部共用）：display:contents 让子项直接参与父级 flex */
+.ksy-head{display:contents}
+
+/* ── 可复用图表面板（chartpanel：行情页多面板 + 全景右下角日K）── */
+.cp-root{display:flex;flex-direction:column;min-height:0;position:relative}
+.cp-bar{display:flex;align-items:center;gap:5px;flex:none;flex-wrap:nowrap;
+  padding:4px 9px;border-bottom:1px solid var(--border-soft);min-height:26px;
+  overflow-x:auto;overflow-y:hidden;scrollbar-width:none}
+.cp-bar::-webkit-scrollbar{display:none}
+.cp-bar[hidden]{display:none!important}
+.cp-title{font-size:11px;font-weight:650;color:var(--text);flex:none;margin-right:2px}
+.cp-grp{display:inline-flex;align-items:center;gap:3px;flex:none}
+.cp-k{font-size:9.5px;color:var(--faint)}
+.cp-div{width:1px;height:13px;flex:none;background:var(--border);margin:0 3px}
+.cp-bar .seg{padding:0;background:transparent}
+.cp-bar .seg button{font-size:10px;padding:2px 6px;min-height:17px;line-height:1.5}
+.cp-body{flex:1;min-height:0}
+.cp-empty{position:absolute;inset:0;display:grid;place-items:center;padding:12px;
+  font-size:11.5px;color:var(--faint);pointer-events:none;text-align:center}
+.cp-empty[hidden]{display:none!important}
+/* 行情页「分时」面板：与全景右下角同一套 canvas 分时图（左涨跌幅/右价格/均价/昨收虚线/量柱），
+   切到分时隐藏 klinecharts 本体，其余周期恢复 */
+.klp.intra > .cp-bar,.klp.intra > .cp-body,.klp.intra > .cp-empty,
+.klp.intra > .kl-nav{display:none}
+.klp-intra{position:relative;flex:1;min-height:0}
+.klp-intra[hidden]{display:none!important}
+.pan-kl .legend{position:absolute;top:6px;left:8px;z-index:5;justify-content:flex-start;
+  flex-wrap:wrap;gap:5px 8px;font-size:10px;pointer-events:none;
+  background:color-mix(in srgb,var(--panel) 74%,transparent);padding:2px 7px;border-radius:7px;
+  max-width:calc(100% - 16px)}
 .sh-stats{display:flex;flex-direction:column;align-items:flex-end;gap:4px;margin-left:auto;font-size:11px;color:var(--dim);white-space:nowrap}
 .sh-stats .srow{display:grid;grid-template-columns:repeat(6,auto);gap:5px 18px}
 .sh-stats .srow:last-child:nth-child(2){grid-template-columns:repeat(3,auto)}
 .sh-stats b{color:var(--text);font-weight:600;font-size:12px}
 .sh-stats .srow:last-child b{color:var(--dim);font-weight:550}
 .mkt-row{display:flex;gap:8px;flex:1;min-height:0}
-.kl-col{flex:1;min-width:0;display:flex;flex-direction:column;gap:8px}
+.kl-col{flex:1;min-width:0;min-height:0;display:flex;flex-direction:column;gap:8px}
 .rightcol{width:var(--rcol-w, 366px);min-width:280px;flex:none;display:flex;flex-direction:column;gap:8px;overflow-y:auto;padding-right:2px}
 .rcol-grip{width:6px;flex:none;cursor:col-resize;border-radius:3px;background:transparent;position:relative;margin-left:-4px}
 .rcol-grip::after{content:"";position:absolute;left:50%;top:50%;transform:translate(-50%,-50%);
@@ -556,6 +593,73 @@ body.mobile .rcard .cbar{opacity:1}
 .cbtn:hover{color:var(--text);background:var(--panel-2)}
 .cbtn.on{color:var(--accent);border-color:color-mix(in srgb,var(--accent) 35%,transparent);
   background:color-mix(in srgb,var(--accent) 12%,transparent)}
+
+/* ═══ 成交量参数浮层（副图齿轮 → 贴按钮弹出的轻量 popover）═══
+   刻意不用原生 dialog：UA 默认会把面板摆到视口中央、输入框给白底 + 原生
+   微调箭头，暗色主题下是刺眼的白块。这里全部走 token，深浅主题自动跟随；
+   定位由 JS 锚定齿轮（右对齐、空间不足向上翻、贴边夹取）。 */
+.kl-vset{position:absolute;right:58px;z-index:9;display:none;place-items:center;
+  width:22px;height:22px;min-height:22px;padding:0;border-radius:6px;
+  color:var(--faint);border:1px solid transparent;line-height:1;
+  background:color-mix(in srgb,var(--panel) 78%,transparent);
+  backdrop-filter:blur(6px);-webkit-backdrop-filter:blur(6px);
+  transition:color .12s,background .12s,border-color .12s}
+.kl-vset:hover{color:var(--text);background:var(--panel-3);border-color:var(--border)}
+.kl-vset.on{color:var(--accent);background:var(--accent-soft);
+  border-color:color-mix(in srgb,var(--accent) 40%,transparent)}
+.kl-vset svg{width:13px;height:13px}
+
+.vpop{position:fixed;z-index:250;width:246px;
+  display:flex;flex-direction:column;max-height:calc(100vh - 16px);
+  background:var(--panel);border:1px solid var(--border);border-radius:12px;
+  box-shadow:var(--shadow);animation:wpopIn .12s ease-out}
+.vpop[hidden]{display:none!important}
+
+.vpop-head{display:flex;align-items:center;gap:6px;padding:10px 10px 7px 12px}
+.vpop-head b{font-size:13px;font-weight:650;letter-spacing:.01em}
+.vpop-head .mono{font-size:9.5px;color:var(--faint);letter-spacing:.1em;
+  padding:0 5px;border-radius:4px;background:var(--panel-2);line-height:15px}
+.vpop-x{margin-left:auto;width:22px;height:22px;min-height:22px;padding:0;
+  border-radius:6px;display:grid;place-items:center;color:var(--faint)}
+.vpop-x:hover{background:var(--panel-2);color:var(--text)}
+.vpop-x svg{width:11px;height:11px}
+
+.vpop-body{padding:0 12px;min-height:0;overflow-y:auto;overflow-x:hidden}
+.vpop-row{display:flex;align-items:center;gap:8px;height:38px;
+  border-top:1px solid var(--border-soft)}
+.vpop-row:first-child{border-top:0}
+.vpop-sw{flex:none;width:10px;height:3px;border-radius:2px;background:var(--c,var(--faint))}
+.vpop-lb{flex:none;width:26px;font-family:var(--mono);font-size:10.5px;
+  letter-spacing:.06em;color:var(--dim)}
+.vpop-row.off .vpop-sw{opacity:.25}
+.vpop-row.off .vpop-lb,.vpop-row.off .vstep{opacity:.38}
+
+/* 步进器：− [值] ＋ 合为一个控件，比原生 number 微调箭头大得多、也好点 */
+.vstep{margin-left:auto;display:flex;align-items:center;height:26px;
+  background:var(--panel-2);border:1px solid var(--border);border-radius:8px;
+  transition:border-color .12s,box-shadow .12s}
+.vstep:focus-within{border-color:color-mix(in srgb,var(--accent) 55%,transparent);
+  box-shadow:0 0 0 3px var(--accent-soft)}
+.vstep button{width:21px;height:24px;min-height:24px;padding:0;color:var(--dim);
+  font-size:13px;line-height:1;border-radius:6px}
+.vstep button:hover:not(:disabled){color:var(--text);background:var(--panel-3)}
+.vstep button:disabled{opacity:.28;cursor:default}
+.vstep input{width:36px;height:24px;padding:0;border:0;background:none;outline:none;
+  text-align:center;font-family:var(--mono);font-size:12.5px;color:var(--text);
+  font-variant-numeric:tabular-nums;-moz-appearance:textfield;appearance:textfield}
+.vstep input::-webkit-inner-spin-button,.vstep input::-webkit-outer-spin-button{
+  -webkit-appearance:none;margin:0}
+.vpop .switch{width:36px;height:21px;min-height:21px;padding:0;border:0;flex:none}
+
+.vpop-tip{padding:6px 12px 0;font-size:10.5px;line-height:1.55;color:var(--faint)}
+.vpop-tip.is-warn{color:var(--warn)}
+.vpop-foot{display:flex;align-items:center;gap:8px;margin-top:9px;
+  padding:8px 10px 9px 12px;border-top:1px solid var(--border-soft)}
+.vpop-foot .sp{flex:1}
+.vpop-foot .hbtn{height:26px;padding:0 12px;font-size:11.5px}
+.vpop-reset{font-size:11px;color:var(--faint);padding:0;min-height:24px}
+.vpop-reset:hover{color:var(--accent)}
+body.mobile .vpop{width:min(246px,calc(100vw - 16px))}
 
 /* ── 指标管理面板（预设 / 主图 / 副图 分组显影）──
    fixed + JS 动态定位：打开时精确贴在「指标」按钮正下方（右对齐），
@@ -784,15 +888,17 @@ body.mobile .rcard .cbar{opacity:1}
 .kl-tip .grp b{font-weight:500;color:var(--text);font-size:11px}
 .kl-tip .grp b.up{color:var(--up)} .kl-tip .grp b.down{color:var(--down)}
 
-/* ── K线下方资讯/研报面板 ── */
-.brief{flex:none;max-height:min(258px,34vh);display:flex;flex-direction:column;overflow:hidden}
-.brief .brief-body{overflow-y:auto;min-height:0}
+/* ── K线下方资讯/研报面板 ──
+   高度由底部手柄拖拽控制（改的是这一块，图表 flex:1 自动吃掉剩余空间），
+   默认 clamp 值即「没手动调过」时的观感；内容超出由 .brief-body 内部滚动。 */
+.brief{flex:none;height:clamp(118px,34vh,258px);max-height:none;display:flex;flex-direction:column;overflow:hidden}
+.brief .brief-body{flex:1;min-height:0;overflow-y:auto;overscroll-behavior:contain}
 .brief-tabs{display:flex;gap:2px;padding:0 10px;border-bottom:1px solid var(--border)}
 .brief-tabs button{padding:9px 12px;font-size:12px;font-weight:500;color:var(--dim);
   border-bottom:2px solid transparent;margin-bottom:-1px;min-height:0}
 .brief-tabs button:hover{color:var(--text)}
 .brief-tabs button.on{color:var(--accent);border-bottom-color:var(--accent);font-weight:600}
-.brief-body{max-height:196px;overflow-y:auto}
+.brief-body{overflow-y:auto}
 .bitem{display:block;padding:8px 14px;border-bottom:1px solid var(--border-soft);text-decoration:none}
 .bitem:last-child{border-bottom:0}
 .bitem:hover{background:var(--panel-2)}
@@ -976,7 +1082,7 @@ body.mobile .gsearch{flex:1;width:auto;min-width:0}
 body.mobile .gsearch .gbox .mono{display:none}
 /* 手机版：空闲态藏 datachip（省空间），更新活动时强制显示紧凑徽章（顶栏唯一全局进度入口） */
 body.mobile .datachip{display:none}
-body.mobile .datachip.i-run,body.mobile .datachip.i-mid{display:flex;height:26px;padding:0 9px;font-size:10.5px;gap:5px}
+body.mobile .datachip.i-run,body.mobile .datachip.i-mid{display:flex;height:26px;padding:0 9px;font-size:10.5px;gap:5px;min-width:0;max-width:52vw}
 body.mobile .vipbadge{display:none}
 body.mobile .userchip #user-name{display:none}
 body.mobile .brand span{display:none}
@@ -1061,14 +1167,24 @@ body.mobile.fold .factorgrid{grid-template-columns:1fr 1fr}
   border-bottom:1px solid var(--border);font-size:11.5px;color:var(--dim)}
 .pan-mem-head b{font-size:12.5px;font-weight:650;color:var(--text)}
 .pan-left tr.sel td{background:var(--accent-soft)}
-.pan-right{width:clamp(380px,38%,560px);flex:none;display:flex;flex-direction:column;gap:10px;min-height:0}
-.pan-linkhead{display:flex;align-items:baseline;gap:8px;padding:2px 4px;flex:none}
-.pan-linkhead b{font-size:13.5px;font-weight:650}
-.pan-linkhead .sub{font-size:11px;color:var(--faint)}
-.pan-chartbox{display:flex;flex-direction:column;min-height:0;
+.pan-right{width:clamp(380px,38%,560px);flex:none;display:flex;flex-direction:column;gap:8px;min-height:0}
+.pan-chartbox{display:flex;flex-direction:column;min-height:90px;
   background:var(--panel);border:1px solid var(--border);border-radius:12px;overflow:hidden}
-.pan-charttitle{display:flex;align-items:center;gap:12px;flex:none;font-size:11px;font-weight:600;color:var(--dim);
+/* 分时 / 日K 高度拖拽分隔条 */
+.pan-hsplit{flex:none;height:6px;margin:-3px 0;cursor:row-resize;position:relative;touch-action:none}
+.pan-hsplit::after{content:"";position:absolute;left:50%;top:50%;width:34px;height:2px;
+  transform:translate(-50%,-50%);border-radius:2px;background:var(--border)}
+.pan-hsplit:hover::after{background:var(--accent)}
+.pan-charttitle{display:flex;align-items:center;flex-wrap:wrap;gap:4px 12px;flex:none;
+  font-size:11px;font-weight:600;color:var(--dim);
   padding:7px 12px 5px;border-bottom:1px solid var(--border-soft)}
+.pan-charttitle b{font-size:13px;font-weight:650;color:var(--text);letter-spacing:.2px}
+.pan-charttitle .sub{font-size:11px;color:var(--faint)}
+.pan-charttitle .pan-quote{font-size:12px;font-weight:600;color:var(--text)}
+/* 分时图右上角「加自选」：与行情页同尺寸 */
+#pan-watch{width:30px;height:30px;min-width:30px}
+#pan-watch svg{width:16px;height:16px}
+.pan-charttitle .pan-sub-tag{font-size:10.5px;font-weight:500;color:var(--faint)}
 .pan-charttitle .pan-lg{display:inline-flex;align-items:center;gap:5px;font-weight:500;color:var(--faint)}
 .pan-charttitle .pan-lg i{display:block;width:11px;height:2px;border-radius:2px;background:var(--text)}
 .pan-charttitle .pan-lg i.a,.pan-charttitle .pan-lg i.b{background:var(--intra-avg)}

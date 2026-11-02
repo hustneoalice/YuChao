@@ -10,7 +10,9 @@ import { openModal, toast } from "../ui";
 import { openWatchPanel } from "../watch";
 import { stockSearch, type StockSearchHandle } from "../searchbox";
 import { refreshSparksIn, sparkSvg } from "../sparks";
-import { TRENDS, mountKline, setTrendPalette, trendPaletteKey, IND_DEFS, IND_CATS, IND_BY_KEY, type KlineChartHandle, type MainKey, type SubKey, type RangeFund, type RangeStats, type PickBar } from "./kline";
+import { TRENDS, setTrendPalette, trendPaletteKey, IND_DEFS, IND_CATS, IND_BY_KEY, type KlineChartHandle, type MainKey, type SubKey, type RangeFund, type RangeStats, type PickBar } from "./kline";
+import { createChartPanel, quoteHeadHtml, type ChartPanelHandle } from "../chartpanel";
+import { createIntraday, type IntradayHandle } from "../intraday";
 
 export const SEG6 = ["超卖", "低位", "弱势", "回升", "强势", "超买"];
 
@@ -174,6 +176,7 @@ export async function openStock(s: CurStock, from?: { page: string; label: strin
     // 缓存命中：立即整屏渲染，然后 SWR 静默回验（末根可能被盘中轮询推进过）
     mk.bars = hit.bars;
     mk.minuteData = null;
+    minuteAt = 0;
     mk.m60 = null;
     renderKline();
     renderRight();
@@ -198,6 +201,7 @@ export async function openStock(s: CurStock, from?: { page: string; label: strin
     mk.bars = k.bars;
     mk.quote = null;
     mk.minuteData = null;                      // 换标的：分时/60分缓存作废，切到时重拉
+    minuteAt = 0;
     mk.m60 = null;
     renderKline();
     renderRight();
@@ -226,6 +230,8 @@ export async function openStock(s: CurStock, from?: { page: string; label: strin
    行情日 < 末根日（盘前昨收快照）时不动 K 线，与策影 _quote_is_today 同思路。 ── */
 let pollTimer: ReturnType<typeof setInterval> | null = null;
 let pollBusy = false;
+/** 上次分时数据刷新时刻（与全景 30s 重载对齐；后端 minute 有 30s TTL） */
+let minuteAt = 0;
 
 function stopPoll(): void {
   if (pollTimer) { clearInterval(pollTimer); pollTimer = null; }
@@ -241,9 +247,26 @@ async function pollTick(): Promise<void> {
     qcache.set(s.symbol, { q, at: Date.now() });               // 喂缓存：切走再切回时热 quote 秒上屏
     mk.quote = q;
     renderRight();
+    // 分时面板：与全景一致随轮询静默刷新（全景 30s 重载；后端 minute 有 30s TTL）
+    if (mk.panels.includes("t") && Date.now() - minuteAt > 25_000) {
+      minuteAt = Date.now();
+      try {
+        const d = await marketApi.minute(s.symbol);
+        if (mk.cur?.symbol === s.symbol) {
+          mk.minuteData = { date: d.date, prevClose: d.prev_close ?? null,
+            bars: d.bars.map((b) => ({ ...b, baseline: d.prev_close ?? undefined })) as Bar[] };
+          mk.panels.forEach((p, i) => { if (p === "t") applyPanel(i); });
+        }
+      } catch { /* 分时刷新失败：保留上一帧 */ }
+    }
+    // 今日尚无真实成交（盘前腾讯 qdate 已切到今天，但 open 仍为 0）：
+    // 只刷新右列，绝不动 K 线 —— 否则会补出 open/high/low=0 的假今日 bar
+    if (!q.rt_live) return;
     // 分时/60分面板：今日浮根只属于日线序列，分钟周期不合并（右列刷新即可）
     if (mk.panels[mk.active] === "t" || mk.panels[mk.active] === "60") return;
-    const rtDate = (q.rt_time || q.date || "").slice(0, 10);
+    // 行情归属日优先用 rt_date（腾讯 p[30]）：盘前/周末仍是上一交易日，
+    // 用 rt_time（本次抓取时刻）会把昨收当成今天，补出一根假今日 K 线
+    const rtDate = (q.rt_date || q.rt_time || q.date || "").slice(0, 10);
     if (!q.rt_price || !rtDate || !mk.bars.length) return;
     const last = mk.bars[mk.bars.length - 1];
     const lastDate = last.date.slice(0, 10);
@@ -281,6 +304,8 @@ function startPoll(): void {
 type BriefTab = "news" | "reports" | "indrep";
 let briefTab: BriefTab = "news";
 const briefCache = new Map<string, string>(); // key → 渲染好的 HTML
+/** initMarket 接上的「研报高度」同步动作（showBriefing 在模块顶层，拿不到手柄引用） */
+let briefShownHook: (() => void) | null = null;
 
 function briefKey(sym: string, t: BriefTab): string {
   return `${sym}|${t}`;
@@ -290,6 +315,7 @@ function showBriefing(): void {
   const s = mk.cur!;
   const panel = document.getElementById("brief-panel")!;
   panel.hidden = false;
+  briefShownHook?.();                    // 露出拖拽手柄并回填已保存的高度
   briefCache.clear();
   drawBrief("加载中…");
   void loadBrief(s.symbol, briefTab);
@@ -619,40 +645,86 @@ export function initMarket(): void {
       renderIndMore();
     }
   });
-  // 图表整体高度拖拽（footbar 上缘手柄）：向下拖增高，双击恢复默认；高度持久化
+  /* ── 图表/研报分界手柄 ──
+     拖拽调的是「研报面板」高度：图表保持 flex:1 自动吃掉剩余空间，底部行情条 flex:none
+     永远贴底（旧版给 chartbox 定高，一直拖就把行情条顶出视口）。研报装不下时由
+     .brief-body 内部滚动。高度写 yc_briefh，并随 prefs 云同步（登录后跨端记住）。 */
   const vgrip = document.getElementById("kl-vgrip")!;
   const chartbox = vgrip.closest<HTMLElement>(".chartbox")!;
-  try {
-    const saved = Number(localStorage.getItem("yc_klh"));
-    if (saved >= 320 && saved <= window.innerHeight - 160) {
-      chartbox.style.flex = "none";
-      chartbox.style.height = `${saved}px`;
-    }
-  } catch { /* 忽略坏值 */ }
+  const briefPanel = document.getElementById("brief-panel")!;
+  const klcol = briefPanel.parentElement as HTMLElement;
+  const ticker = document.getElementById("tickerbar")!;
+
+  const BRIEF_MIN = 108;   // 露出 tab 行 + 一行条目
+  const CHART_MIN = 300;   // 图表最小可用高度
+
+  const colGap = (): number =>
+    (parseFloat(getComputedStyle(klcol).rowGap || "8") || 8) * 2;   // chartbox|brief|ticker
+
+  /** 研报可用的最大高度：给图表留足 CHART_MIN */
+  const briefMax = (): number => {
+    const avail = klcol.clientHeight - ticker.offsetHeight - colGap();
+    return Math.max(BRIEF_MIN, Math.round(avail - CHART_MIN));
+  };
+
+  /** px 落值；null = 回默认（CSS clamp） */
+  const applyBriefH = (px: number | null): void => {
+    briefPanel.style.height = px == null ? "" : `${Math.round(px)}px`;
+    // 图表恒为 flex:1（吃掉 brief 之外的空间）；旧版「图表定高」的内联写法必须撤掉，
+    // 否则底部行情条会被顶出视口
+    chartbox.style.flex = "1";
+    chartbox.style.minHeight = "0";
+    chartbox.style.height = "";
+    vgrip.hidden = briefPanel.hidden;   // 研报没显示时没有可拖的东西
+  };
+  const savedBriefH = (): number | null => {
+    const n = Number(localStorage.getItem("yc_briefh"));
+    return Number.isFinite(n) && n >= BRIEF_MIN ? n : null;
+  };
+  localStorage.removeItem("yc_klh");    // 旧口径（图表高度）作废，避免两套互相打架
+  applyBriefH(savedBriefH());
+  briefShownHook = () => applyBriefH(savedBriefH());   // 研报首次出现时把手柄放出来
+
   vgrip.addEventListener("pointerdown", (e) => {
+    if (briefPanel.hidden) return;
     e.preventDefault();
     vgrip.setPointerCapture(e.pointerId);
-    const h0 = chartbox.offsetHeight, y0 = e.clientY;
-    const onMove = (ev: PointerEvent) => {
-      const h = Math.round(Math.min(window.innerHeight - 160, Math.max(320, h0 + ev.clientY - y0)));
-      chartbox.style.flex = "none";
-      chartbox.style.height = `${h}px`;
+    vgrip.classList.add("on");
+    document.body.style.cursor = "row-resize";
+    document.body.style.userSelect = "none";
+    const h0 = briefPanel.offsetHeight, y0 = e.clientY;
+    const maxH = briefMax();
+    let last = h0;
+    const onMove = (ev: PointerEvent): void => {
+      last = Math.round(Math.min(maxH, Math.max(BRIEF_MIN, h0 - (ev.clientY - y0))));
+      applyBriefH(last);
     };
-    const onUp = (ev: PointerEvent) => {
+    const onUp = (ev: PointerEvent): void => {
       vgrip.removeEventListener("pointermove", onMove);
       vgrip.removeEventListener("pointerup", onUp);
       vgrip.removeEventListener("pointercancel", onUp);
+      vgrip.classList.remove("on");
+      document.body.style.cursor = "";
+      document.body.style.userSelect = "";
       onMove(ev);
-      localStorage.setItem("yc_klh", String(chartbox.offsetHeight));
+      localStorage.setItem("yc_briefh", String(last));
+      notifyLocal("prefs");            // 登录用户 → 云端偏好，换设备也记得
     };
     vgrip.addEventListener("pointermove", onMove);
     vgrip.addEventListener("pointerup", onUp);
     vgrip.addEventListener("pointercancel", onUp);
   });
   vgrip.addEventListener("dblclick", () => {
-    chartbox.style.flex = "";
-    chartbox.style.height = "";
-    localStorage.removeItem("yc_klh");
+    applyBriefH(null);
+    localStorage.setItem("yc_briefh", "0");   // 哨兵 0 = 默认，云同步也能表达「清掉」
+    notifyLocal("prefs");
+  });
+  // 视口变化：原高度可能已经超过上限（窗口变矮），收回合法区间
+  window.addEventListener("resize", () => {
+    const h = savedBriefH();
+    if (h == null) return;
+    const capped = Math.min(h, briefMax());
+    if (capped !== h) { localStorage.setItem("yc_briefh", String(capped)); applyBriefH(capped); }
   });
   renderIpanel();
   // 指标/方案/配色点击处理：常显两行（#kl-indbar）与方案浮层（#kl-ipanel）共用一套委托
@@ -772,6 +844,9 @@ export function initMarket(): void {
     }
     mk.mainInds = readInds("yc_kmain", KMAIN_OK, mk.mainInds);
     mk.subInds = readInds("yc_ksub", KSUB_OK, mk.subInds);
+    // 研报高度也随 prefs 回来（换设备登录后同一套版面）
+    const bh = Number(localStorage.getItem("yc_briefh"));
+    applyBriefH(Number.isFinite(bh) && bh >= BRIEF_MIN ? Math.min(bh, briefMax()) : null);
     syncIndUI();
     renderIpanel();
     renderKline();
@@ -976,11 +1051,12 @@ export async function ensurePeriodData(p: PKey): Promise<void> {
   const s = mk.cur;
   if (!s) return;
   try {
-    if (p === "t" && !mk.minuteData) {
+    if (p === "t" && (!mk.minuteData || !mk.minuteData.bars.length)) {
       const d = await marketApi.minute(s.symbol);
       if (mk.cur?.symbol !== s.symbol) return;
       mk.minuteData = { date: d.date, prevClose: d.prev_close ?? null,
         bars: d.bars.map((b) => ({ ...b, baseline: d.prev_close ?? undefined })) as Bar[] };
+      minuteAt = Date.now();
     } else if (p === "60" && !mk.m60) {
       const k = await marketApi.kline({ symbol: s.symbol, freq: "60" });
       if (mk.cur?.symbol !== s.symbol) return;
@@ -993,6 +1069,11 @@ export async function ensurePeriodData(p: PKey): Promise<void> {
 
 /* ── K线（klinecharts 10 · 策影同款配置，见 kline.ts）——多周期面板引擎 ── */
 let kls: (KlineChartHandle | null)[] = [];
+/* 面板外壳（与全景右下角同一个 chartpanel 控件；行情页关头部，信息条全局共享） */
+let chartPanels: ChartPanelHandle[] = [];
+/* 分时面板：与全景右下角同一套独立 canvas 分时图（左涨跌幅/右价格/均价/昨收虚线/量柱） */
+const intras: (IntradayHandle | null)[] = [];
+const intraEls: HTMLElement[] = [];
 
 /** 焦点面板句柄（chartbar 周期段/观察档/缩放作用于它） */
 function activeKl(): KlineChartHandle | null {
@@ -1002,6 +1083,7 @@ function activeKl(): KlineChartHandle | null {
 /** 供外部（侧栏拖拽/窗口 resize）触发的图表重排 */
 export function klResize(): void {
   kls.forEach((k) => k?.resize());
+  intras.forEach((k) => k?.resize());
 }
 
 /* ── 框选区间统计（策影鼠标框选移植）──
@@ -1131,16 +1213,30 @@ function ensurePanelDom(): void {
   const slots = LAYOUT_PANELS[ly];
   const sig = `${ly}|${slots.join(",")}`;
   if (box.dataset.sig === sig) return;
-  kls.forEach((k) => k?.destroy());
+  chartPanels.forEach((p) => p.destroy());
+  chartPanels = [];
+  intras.forEach((k) => k?.destroy());
+  intras.length = 0;
+  intraEls.length = 0;
   kls = [];
   panelKey.length = 0;                         // 实例重建：视图窗口记忆作废（新画布从最新开始）
   box.dataset.sig = sig;
   box.className = `kl-panels ly-${ly}`;
   // 面板仅承载图表本体：周期/布局/档位/缩放全部在 chartbar，信息条全局共享
   box.innerHTML = slots.map((p, i) =>
-    `<div class="klp${i === mk.active ? " active" : ""}" data-pi="${i}">` +
-    `<div class="klp-main"></div></div>`).join("");
-  kls = [...box.querySelectorAll<HTMLElement>(".klp-main")].map((el) => mountKline(el));
+    `<div class="klp${i === mk.active ? " active" : ""}" data-pi="${i}"></div>`).join("");
+  box.querySelectorAll<HTMLElement>(".klp").forEach((el, i) => {
+    const panel = createChartPanel(el, { head: "none" });
+    chartPanels.push(panel);
+    kls.push(panel.chart);
+    // 分时层：与全景同一套 canvas 分时图，切到「分时」时显示、其余周期隐藏
+    const intraEl = document.createElement("div");
+    intraEl.className = "klp-intra";
+    intraEl.hidden = true;
+    el.appendChild(intraEl);
+    intraEls[i] = intraEl;
+    intras[i] = null;
+  });
 }
 
 /** 应用单个面板：周期聚合 + 指标（副图仅左右布局）+ 数据 + 图内图例 */
@@ -1149,10 +1245,28 @@ function applyPanel(i: number): void {
   const kl = kls[i];
   if (!kl || !mk.cur) return;
   const p = mk.panels[i] ?? "d";
+  const isIntra = p === "t";
+  // 分时面板：与全景右下角同一套 canvas 分时图（左涨跌幅/右价格/均价线/昨收虚线/量柱），
+  // 容器里隐藏 klinecharts 本体；其余周期恢复 K 线并重算尺寸（隐藏期间画布宽高为 0）
+  const mount = intraEls[i] ?? null;
+  mount?.parentElement?.classList.toggle("intra", isIntra);
+  if (mount) mount.hidden = !isIntra;
+  if (isIntra) {
+    if (!intras[i]) intras[i] = createIntraday(mount!);
+    const d = mk.minuteData;
+    // 盘前/采集未就绪：分时源给空数组，画时段网格并提示（与全景同一组件的空态）
+    if (d && !d.bars.length) intras[i]!.setMessage("今日分时数据尚未生成");
+    else intras[i]!.setData(d ? {
+      symbol: mk.cur.symbol, date: d.date, prev_close: d.prevClose, bars: d.bars,
+    } : null);
+    intras[i]!.resize();
+    return;
+  }
+  if (panelKey[i]?.endsWith("|t")) requestAnimationFrame(() => kl.resize());
   kl.setPeriod(p);                             // 季线走自然季聚合，独立周期标签
   // 分时主图固定为均价线（MA/趋势通道对每分钟假 K 线无意义），其余周期走默认预设
-  kl.setMain(p === "t" ? ["avg"] : mk.mainInds);
-  kl.setSub(SUB_OK[currentLayout()]?.[i] ? (p === "t" ? ["volfs"] : mk.subInds) : []);
+  kl.setMain(mk.mainInds);
+  kl.setSub(SUB_OK[currentLayout()]?.[i] ? mk.subInds : []);
   // 同标的同周期的重灌（盘中 12s 轮询）保留视图窗口，换标的/切周期才回到最新
   const key = `${mk.cur.symbol}|${p}`;
   const keep = panelKey[i] === key;
@@ -1167,37 +1281,31 @@ function applyPanel(i: number): void {
   kl.setData(barsFor(p), keep, stock ? (estimateFloatShares(mk.bars) ?? estimateFloatShares(mk.quote ? [mk.quote] : [])) : null,
     p === "d" ? mk.cur.trendFocus?.date : undefined);
   if (p === "d") delete mk.cur.trendFocus;
-  kl.drawLegend(p === "t" ? ["avg"] : (SUB_OK[currentLayout()]?.[i] ? [...mk.mainInds] : mk.mainInds));
+  kl.drawLegend(SUB_OK[currentLayout()]?.[i] ? [...mk.mainInds] : mk.mainInds);
 }
 
 /** 个股信息条（chartbox 最顶，东财网页头部同款）：名称+代码+行业 | 现价 涨跌幅 | 开 高 低 昨收。
- *  多面板共享一条（同标的只显一次），面板头只留周期切换。 */
+ *  多面板共享一条（同标的只显一次）；HTML 由 chartpanel.quoteHeadHtml 统一渲染。 */
 function renderKlpBar(): void {
   const s = mk.cur, q = mk.quote;
   const bar = document.getElementById("kl-symbar");
-  if (!bar || !s) return;
+  const head = document.getElementById("kl-head");
+  if (!bar || !head || !s) return;
   bar.hidden = false;
-  const nb = bar.querySelector(".ksy-name"), cb = bar.querySelector(".ksy-code"),
-    ib = bar.querySelector(".ksy-ind"), qb = bar.querySelector(".ksy-q");
-  nb!.textContent = s.name || s.symbol;
-  cb!.textContent = s.symbol.replace(/\./g, "·");
-  if (ib) ib.textContent = q?.industry || "";
-  // 现价/涨跌幅：实时快照优先，缺省用日 K 最后一根
+  // 现价/涨跌幅：今日已有成交（rt_live）才用实时价；盘前回到上一交易日收盘口径
   const bars = mk.bars;
-  const last = bars[bars.length - 1];
-  const prevBar = bars.length > 1 ? bars[bars.length - 2].close : null;
-  const price = q?.rt_price ?? last?.close;
-  const pct = q?.pct_chg ?? (prevBar ? (last.close - prevBar) / prevBar * 100 : null);
-  const pc = q?.rt_prev_close ?? prevBar;
-  const cls = (pct ?? 0) >= 0 ? "up" : "down";
-  const f = (v?: number | null) => v == null || !isFinite(v) ? "—" : fmt(v);
-  qb!.innerHTML = price == null ? "" :
-    `<b class="${cls}">${f(price)}</b>` +
-    (pct == null ? "" : `<span class="${cls}">${pct >= 0 ? "+" : ""}${pct.toFixed(2)}%</span>`) +
-    `<span class="dim">开 <b class="${(q?.open ?? 0) >= pc! ? "up" : "down"}">${f(q?.open ?? last?.open)}</b></span>` +
-    `<span class="dim">高 <b class="up">${f(q?.high ?? last?.high)}</b></span>` +
-    `<span class="dim">低 <b class="down">${f(q?.low ?? last?.low)}</b></span>` +
-    (pc == null ? "" : `<span class="dim">昨收 <b class="num">${f(pc)}</b></span>`);
+  const view = quoteView(q, bars);
+  head.innerHTML = quoteHeadHtml({
+    name: s.name || s.symbol,
+    code: s.symbol,
+    industry: q?.industry,
+    price: view.price,
+    pct: view.pct,
+    open: view.open,
+    high: view.high,
+    low: view.low,
+    prevClose: view.base,
+  }, "full");
 }
 
 export function renderKline(): void {
@@ -1215,7 +1323,8 @@ export function renderKline(): void {
   if (document.getElementById("kl-range")?.classList.contains("on")) setKlRangeMode(true);
   renderKlpBar();
   // 分时/60分面板：换标的后缓存已清，按需补拉（策略图面：先空后满）
-  const need = mk.panels.find((p) => (p === "t" && !mk.minuteData) || (p === "60" && !mk.m60));
+  const need = mk.panels.find((p) =>
+    (p === "t" && (!mk.minuteData || !mk.minuteData.bars.length)) || (p === "60" && !mk.m60));
   if (need) void ensurePeriodData(need).then(() => {
     mk.panels.forEach((p, i) => { if (p === need) applyPanel(i); });
   });
@@ -1523,6 +1632,25 @@ function moneyflowRangeBody(rg: NonNullable<typeof mk.range>, mode: string): str
   return head + price + fund;
 }
 
+/** 头部/基本信息卡口径：只有 rt_live（今日已有成交）才用实时价 vs 昨收；
+    盘前腾讯 09:00 后已把 qdate 与昨收切到今天，直接混用实时价与库内涨跌幅会
+    出现「最新价≈昨收、涨跌幅却是昨天」的错位。盘前一律回到上一交易日收盘口径。 */
+function quoteView(q: Quote | null, bars: Bar[]) {
+  const last = bars.length ? bars[bars.length - 1] : null;
+  const prevBar = bars.length > 1 ? bars[bars.length - 2].close : null;
+  const live = !!q?.rt_live && q.rt_price != null;
+  const price = live ? q!.rt_price! : (last?.close ?? q?.close ?? null);
+  const base = live ? (q?.rt_prev_close ?? prevBar) : prevBar;
+  const pct = price != null && base ? (price / base - 1) * 100 : (q?.pct_chg ?? null);
+  return {
+    live, price, pct, base,
+    chgAbs: price != null && base ? price - base : null,
+    open: live ? q?.open : last?.open,
+    high: live ? q?.high : last?.high,
+    low: live ? q?.low : last?.low,
+  };
+}
+
 function cardBody(cid: string, mode: string): string {
   const s = mk.cur;
   if (!s) return "";
@@ -1535,12 +1663,10 @@ function cardBody(cid: string, mode: string): string {
     // 策影 BasicInfoCard 同款：名称代码 + 3 列字段网格（缺值整格不渲染）+ 概念 chips
     const last = bars[bars.length - 1];
     if (!last) return `<div class="bempty">暂无基本信息</div>`;
-    const prev = bars.length > 1 ? bars[bars.length - 2].close : last.open;
-    const rtLive = q?.rt_price != null;
-    const price = rtLive ? q!.rt_price! : last.close;
-    const chgPct = q?.pct_chg ?? (prev ? (last.close - prev) / prev * 100 : 0);
-    const chgBase = rtLive && q?.rt_prev_close != null ? q!.rt_prev_close! : prev;
-    const chgAbs = chgBase ? price - chgBase : 0;
+    const view = quoteView(q, bars);
+    const price = view.price ?? last.close;
+    const chgPct = view.pct ?? 0;
+    const chgAbs = view.chgAbs ?? 0;
     const cls = chgPct >= 0 ? "up" : "down";
     const val = q?.valuation;
     const fmtCap = (v?: number | null): string | null =>

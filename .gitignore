@@ -33,3 +33,10 @@ data/scratch_*/
 # 本地工作记忆（AI 助手产物，不入开源仓库）
 .workbuddy/
 .trae/
+
+# 浏览器自动化产物（playwright-cli 截图/快照）
+.playwright-cli/
+.artifacts/
+
+# 逆向调查产物（客户端二进制与反汇编中间件，体积大且不入库）
+docs/investigations/

@@ -15,14 +15,14 @@ fn 用「模块:函数」字符串延迟解析——API 进程只读这份元数
 """
 
 TASKS: tuple[dict, ...] = (
-    {"kind": "market_snapshot", "label": "盘中快照",
+    {"kind": "market_snapshot", "label": "盘中行情",
      "fn": "app.updater.collectors.market_snapshot:update_market_snapshot",
      "min_rows": 3000,
      "cooldown_s": 0,     # interval 自带 5min 节律，冷却会拦掉一半轮次
      "description": "盘中每 5 分钟 qt 全字段快照（价/涨跌停/量额/换手/量比/"
                     "振幅/买卖一/内外盘/市值 + 10 指数）→ market_snapshot；"
                     "非交易时段幂等秒跳，全景大页/指数条/市场总貌数据源"},
-    {"kind": "sector_index", "label": "板块快照",
+    {"kind": "sector_index", "label": "板块行情",
      "fn": "app.updater.collectors.sector_index:update_sector_index",
      "freshness": {"table": "sector_index", "col": "trade_date"},
      "min_rows": 300,
@@ -39,7 +39,7 @@ TASKS: tuple[dict, ...] = (
      "freshness": {"table": "fund_universe", "col": "sync_date"},
      "description": "09:05 场内基金清单（ETF/LOF/REIT，新浪节点 + 东财 fallback）"
                     " → fund_universe；盘中快照任务读此表 kind='fund' 落 market_snapshot"},
-    {"kind": "quotes", "label": "行情快照",
+    {"kind": "quotes", "label": "实时行情",
      "fn": "app.updater.collectors.quotes:update_quotes",
      "freshness": {"log": True},
      "description": "16:00 腾讯 qt 批量报价：换手率补写 + 证券简称刷新"},
@@ -67,7 +67,7 @@ TASKS: tuple[dict, ...] = (
      "freshness": {"log": True},
      "min_rows": 500,
      "description": "17:30 东财财务三表按报告期 → financials（覆盖近两期）"},
-    {"kind": "backup", "label": "库快照备份",
+    {"kind": "backup", "label": "数据备份",
      "fn": "app.updater.collectors.backup:run_backup",
      "description": "18:10 CHECKPOINT → 整库快照（滚动 7 份，副本可读校验）"},
     {"kind": "adjust_factor", "label": "复权因子",

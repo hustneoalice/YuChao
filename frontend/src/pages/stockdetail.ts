@@ -88,7 +88,7 @@ function drawQuote(snap: BoardRow | null, quote: Quote | null): void {
   const cls = pct == null ? "" : pct > 0 ? "up" : pct < 0 ? "down" : "";
   const lim = snap?.up_limit ? `<span class="tag p1">涨停 <b class="num">${fmt(snap.up_limit)}</b></span>` : "";
   const dlim = snap?.down_limit ? `<span class="tag flat">跌停 <b class="num">${fmt(snap.down_limit)}</b></span>` : "";
-  const time = snap?.updated_at ? `快照 ${snap.updated_at.slice(11, 19)}` : "";
+  const time = snap?.updated_at ? `数据时间 ${snap.updated_at.slice(11, 19)}` : "";
   el.innerHTML =
     `<b class="sd-price num ${cls}">${price == null ? "—" : fmt(price)}</b>` +
     `<span class="num ${cls}">${chg == null ? "—" : fmtChg(chg)}</span>` +
@@ -133,7 +133,7 @@ function drawGrid(snap: BoardRow | null, quote: Quote | null): void {
   }
   el.innerHTML = g.join("");
   document.getElementById("sd-snaptime")!.textContent =
-    snap ? "盘中快照" : "无盘中快照 · 日线口径";
+    snap ? "盘中实时" : "无盘中数据 · 日线口径";
 }
 
 /* ── 入口 ── */

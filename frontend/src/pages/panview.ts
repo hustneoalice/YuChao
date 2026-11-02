@@ -9,7 +9,11 @@ import { esc, fmt, fmtChg, fmtVol, fmtYi } from "../fmt";
 import { createPager, type Pager } from "../pager";
 import { createDataTable, type DataTable, type DataTableCol } from "../table";
 import { createIntraday, type IntradayHandle } from "../intraday";
-import { mountKline, type KlineChartHandle } from "./kline";
+import { createChartPanel, type ChartPanelHandle } from "../chartpanel";
+import { ic } from "../icons";
+import { addWatch, isWatched, subscribe } from "../store";
+import { toast } from "../ui";
+import { openWatchPanel } from "../watch";
 
 /* 表头 label → 服务端排序白名单键（dir 由点击时 sortState 决定） */
 const SORT_KEYS: Record<string, string> = {
@@ -108,19 +112,113 @@ const memberSortParam = () => sortOf(memTbl as DataTable<unknown> | null, SORT_K
 
 /* ── 右栏联动：分时（独立 canvas 画法）+ 日K（klinecharts） ── */
 let intra: IntradayHandle | null = null;
-let klD: KlineChartHandle | null = null;
+let klD: ChartPanelHandle | null = null;
 let linkSymbol: string | null = null;    // 当前联动标的（同标的点击不重拉）
+let linkStock: { symbol: string; name: string } | null = null;  // 分时图头「加自选」用的当前标的
 let linkToken = 0;                       // 竞态守卫：快速连点只认最后一次
+let autoLink = true;                     // 首次进页 / 切 tab：自动联动第一行，右栏不留空
+let navRows: { symbol: string; name: string }[] = [];   // 左表当前行（顺序同 tbody），上下键/双击用
+let selIdx = -1;                         // 左表选中行下标（键盘翻阅 + 行高亮）
+let listKey = "";                        // 列表身份（tab/页码/排序/搜索）：换列表时清选中
+let pendingSel: "first" | "last" | null = null;  // 键盘翻页续选：新一页渲染后选中首/末行
+
+const rowIndexOf = (tr: HTMLElement): number =>
+  Array.prototype.indexOf.call(tr.parentElement?.children ?? [], tr);
+
+/** 按 selIdx 重画左表行高亮（30s 轮询重渲染后也要保住选中行） */
+function paintSelection(): void {
+  document.querySelectorAll<HTMLElement>("#pan-wrap tbody tr").forEach((tr, i) =>
+    tr.classList.toggle("sel", i === selIdx));
+}
+
+/** 键盘翻页后补选新一页的首/末行（触发行点击，联动右栏） */
+function applyPending(): void {
+  if (!pendingSel) return;
+  const rows = document.querySelectorAll<HTMLElement>("#pan-wrap tbody tr");
+  const idx = pendingSel === "first" ? 0 : rows.length - 1;
+  pendingSel = null;
+  if (idx < 0 || !rows[idx]) return;
+  rows[idx].click();
+  rows[idx].scrollIntoView({ block: "nearest" });
+}
 
 function ensureCharts(): void {
   if (!intra) intra = createIntraday(document.getElementById("pan-kl-t")!);
-  if (!klD) klD = mountKline(document.getElementById("pan-kl-d")!);
+  if (!klD) {
+    // 与行情页 K 线同一个 chartpanel 控件：这里用紧凑配置 ——
+    // 只留「日K」标题 + 主图/副图指标开关，头部信息条不渲染（名称代码已在上方分时图头）。
+    klD = createChartPanel(document.getElementById("pan-kl-d")!, {
+      title: "日K",
+      toolbar: { main: ["ma", "mid", "short"], sub: ["vol", "trendhistogram", "macd", "kdj"] },
+      initial: { period: "d", main: ["ma", "mid"], sub: ["vol", "trendhistogram"] },
+      emptyText: "点击左侧股票查看日K",
+    });
+  }
+}
+
+/* 分时 / 日K 高度：比例存本地，拖动中间分隔条调整（默认分时矮一些） */
+const SPLIT_KEY = "yc_pan_split";
+let splitRatio = 0.38;
+try {
+  const v = Number(localStorage.getItem(SPLIT_KEY));
+  if (v > 0.15 && v < 0.85) splitRatio = v;
+} catch { /* 忽略 */ }
+
+function applySplit(): void {
+  const t = document.getElementById("pan-box-t");
+  const d = document.getElementById("pan-box-d");
+  if (!t || !d) return;
+  t.style.flex = `${splitRatio} 1 0`;
+  d.style.flex = `${1 - splitRatio} 1 0`;
+}
+
+let splitBound = false;
+function setupSplit(): void {
+  applySplit();
+  if (splitBound) return;
+  splitBound = true;
+  const grip = document.getElementById("pan-hsplit")!;
+  grip.addEventListener("pointerdown", (e) => {
+    e.preventDefault();
+    const t = document.getElementById("pan-box-t")!;
+    const d = document.getElementById("pan-box-d")!;
+    const h0 = t.getBoundingClientRect().height;
+    const total = h0 + d.getBoundingClientRect().height;
+    const y0 = e.clientY;
+    grip.setPointerCapture(e.pointerId);
+    const onMove = (ev: PointerEvent) => {
+      const px = Math.min(total - 100, Math.max(100, h0 + ev.clientY - y0));
+      splitRatio = px / total;
+      applySplit();
+      intra?.resize();
+      klD?.resize();
+    };
+    const onUp = () => {
+      grip.removeEventListener("pointermove", onMove);
+      grip.removeEventListener("pointerup", onUp);
+      localStorage.setItem(SPLIT_KEY, splitRatio.toFixed(3));
+    };
+    grip.addEventListener("pointermove", onMove);
+    grip.addEventListener("pointerup", onUp);
+  });
+}
+
+/* 分时图头右上角「加自选」：空心=未收藏，实心=已收藏（点开分组面板） */
+function updatePanWatch(): void {
+  const b = document.getElementById("pan-watch");
+  if (!b) return;
+  const on = !!linkStock && isWatched(linkStock.symbol);
+  b.classList.toggle("on", on);
+  b.title = on ? "已自选 · 点击管理分组" : "加入自选";
+  b.innerHTML = ic(on ? "heart-filled" : "heart", 13);
 }
 
 /** 行点击 → 右侧分时+日K 联动（页内，不跳详情页） */
 async function setLink(symbol: string, name: string,
                        row?: { current?: number | null; change_rate?: number | null }): Promise<void> {
   ensureCharts();
+  linkStock = { symbol, name: name || symbol };
+  updatePanWatch();
   const head = document.getElementById("pan-link-name")!;
   const code = document.getElementById("pan-link-code")!;
   const quote = document.getElementById("pan-link-quote")!;
@@ -139,10 +237,9 @@ async function setLink(symbol: string, name: string,
   ]);
   if (token !== linkToken) return;      // 已切别的标的：丢弃过期响应
   if (klRes.status === "fulfilled") {
-    // 日K：默认 MA 主图 + 量副图
-    klD!.setPeriod("d");
-    klD!.setMain(["ma"]);
-    klD!.setSub(["vol"]);
+    // 日K：默认 MA + 中线操盘通道（MA35/45）主图；量 + 趋势柱线副图。
+    // 趋势柱线公式只依赖 OHLC，个股/指数/基金 K 线都有，故三类标的均显示。
+    // 指标开关由面板控制条管理，换标的只重灌数据，不重置用户选择。
     klD!.setData(klRes.value.bars ?? []);
   }
   if (miRes.status === "fulfilled") {
@@ -169,13 +266,17 @@ function ensureTable(): void {
         const t = tbl as unknown as DataTable<IndexBarItem>;
         t.render(t.sort(indexQuery()), 0);
       },
-      onRow: (it) => { if (it.current != null) void setLink(it.symbol, it.name, it); },
+      onRow: (it, _ev, tr) => {
+        selIdx = rowIndexOf(tr);
+        paintSelection();
+        if (it.current != null) void setLink(it.symbol, it.name, it);
+      },
     });
   } else if (want === "blocks") {
     tbl = createDataTable<ZyBlockRow>(wrap, BLOCK_COLS, {
       defaultSort: { label: "均涨%", dir: -1 },
       onChange: () => { blkPager!.reset(); void loadBlocks(); },
-      onRow: (r) => selectBlock(r.block_code, r.block_name),
+      onRow: (r, _ev, tr) => { selIdx = rowIndexOf(tr); selectBlock(r.block_code, r.block_name); },
       rowKey: (r) => r.block_code,
     });
     ensureMemberTable();
@@ -183,7 +284,8 @@ function ensureTable(): void {
     tbl = createDataTable<BoardRow>(wrap, BOARD_COLS, {
       defaultSort: { label: "涨跌幅", dir: -1 },
       onChange: () => { pager!.reset(); void load(); },
-      onRow: (r) => void setLink(r.symbol, r.name || r.symbol, r),
+      onRow: (r, _ev, tr) => { selIdx = rowIndexOf(tr); paintSelection(); void setLink(r.symbol, r.name || r.symbol, r); },
+      rowKey: (r) => r.symbol,
     });
   }
 }
@@ -211,8 +313,12 @@ function selectBlock(code: string, name: string): void {
 
 /** 上方列表中把当前选中板块行标出来 */
 function markSelectedBlock(): void {
-  document.querySelectorAll<HTMLElement>("#pan-wrap tbody tr").forEach((tr) =>
-    tr.classList.toggle("sel", tr.dataset.key === curBlock?.code));
+  let idx = -1;
+  document.querySelectorAll<HTMLElement>("#pan-wrap tbody tr").forEach((tr, i) => {
+    if (tr.dataset.key === curBlock?.code) idx = i;
+  });
+  selIdx = idx;
+  paintSelection();
 }
 
 /** 页头控件可见性随模式切换（类型 seg / 成分区） */
@@ -236,10 +342,21 @@ async function load(): Promise<void> {
     const r = await marketApi.board({
       tab, sort: sortParam(), page: pager.page, size: pager.size, q,
     });
+    const key = `${tab}|${pager.page}|${sortParam()}|${q ?? ""}`;
+    if (key !== listKey) { listKey = key; selIdx = -1; }
     pager.update(r.total);
     (tbl as DataTable<BoardRow>).render(r.items, (pager.page - 1) * pager.size);
+    navRows = r.items.map((it) => ({ symbol: it.symbol, name: it.name || it.symbol }));
+    // 首次进页 / 切 tab：自动联动第一行，右栏分时+日K 不留空
+    if (autoLink && r.items.length) {
+      autoLink = false;
+      selIdx = 0;
+      void setLink(r.items[0].symbol, r.items[0].name || r.items[0].symbol, r.items[0]);
+    }
+    paintSelection();                     // 轮询重渲染 / 从行情页返回：保住选中行
+    applyPending();                       // 键盘翻到页尾：新一页首行自动接上
     count.textContent = `共 ${r.total} 只`;
-    document.getElementById("pan-asof")!.textContent = r.as_of ? `快照 ${r.as_of}` : "";
+    document.getElementById("pan-asof")!.textContent = r.as_of ? `数据时间 ${r.as_of}` : "";
     document.getElementById("pan-empty")!.style.display = r.total ? "none" : "grid";
   } catch {
     count.textContent = "加载失败";
@@ -258,8 +375,9 @@ async function loadBlocks(): Promise<void> {
     });
     blkPager.update(r.total);
     (tbl as DataTable<ZyBlockRow>).render(r.items, (blkPager.page - 1) * blkPager.size);
+    navRows = [];                             // 板块行不是个股：双击不跳详情
     count.textContent = `共 ${r.total} 个板块`;
-    document.getElementById("pan-asof")!.textContent = r.as_of ? `快照 ${r.as_of}` : "";
+    document.getElementById("pan-asof")!.textContent = r.as_of ? `数据时间 ${r.as_of}` : "";
     document.getElementById("pan-empty")!.style.display = r.total ? "none" : "grid";
     if (!curBlock && r.items.length) {        // 进板块页/切类型：默认选中首条，下方不空
       selectBlock(r.items[0].block_code, r.items[0].block_name);
@@ -271,6 +389,7 @@ async function loadBlocks(): Promise<void> {
       memPager?.update(0);
     }
     markSelectedBlock();
+    applyPending();                           // 键盘翻到页尾：新一页首行自动接上
   } catch {
     count.textContent = "加载失败";
   }
@@ -325,7 +444,18 @@ async function loadIndices(): Promise<void> {
     indexItems = await marketApi.indexBar();
     const shown = indexQuery();
     const t = tbl as unknown as DataTable<IndexBarItem>;
-    t.render(t.sort(shown), 0);
+    const rows = t.sort(shown);
+    const key = `index|${(document.getElementById("pan-q") as HTMLInputElement).value.trim()}`;
+    if (key !== listKey) { listKey = key; selIdx = -1; }
+    t.render(rows, 0);
+    navRows = rows.map((it) => ({ symbol: it.symbol, name: it.name }));
+    if (autoLink && rows.length) {          // 切到指数 tab：联动第一个指数
+      autoLink = false;
+      selIdx = 0;
+      void setLink(rows[0].symbol, rows[0].name, rows[0]);
+    }
+    paintSelection();
+    applyPending();
     count.textContent = `共 ${shown.length} 个指数`;
     document.getElementById("pan-asof")!.textContent = "";
     document.getElementById("pan-empty")!.style.display = shown.length ? "none" : "grid";
@@ -361,6 +491,7 @@ function loadAll(): void {
 
 export function loadPanorama(): void {
   ensureCharts();
+  setupSplit();
   loadAll();
   intra?.resize();
   klD?.resize();
@@ -373,6 +504,16 @@ export function loadPanorama(): void {
 
 export function initPanorama(): void {
   document.getElementById("pan-refresh")!.addEventListener("click", loadAll);
+  // 分时图头右上角「加自选」：未收藏→加默认分组；已收藏→打开分组面板（改组/移出）
+  document.getElementById("pan-watch")!.addEventListener("click", () => {
+    const s = linkStock;
+    if (!s) return;
+    if (isWatched(s.symbol)) { openWatchPanel(s.symbol, s.name); return; }
+    addWatch(s.symbol, s.name, "默认");
+    toast("已加入自选 · 默认");
+    updatePanWatch();
+  });
+  subscribe(updatePanWatch);              // 其它页面增删自选后同步星标
   document.getElementById("pan-tabs")!.addEventListener("click", (e) => {
     const b = (e.target as HTMLElement).closest<HTMLElement>("button[data-t]");
     if (!b) return;
@@ -381,6 +522,10 @@ export function initPanorama(): void {
       x.classList.toggle("on", x === b));
     pager?.reset();
     blkPager?.reset();
+    autoLink = true;                      // 切 tab 后右栏跟随新 tab 第一行
+    selIdx = -1;
+    listKey = "";
+    navRows = [];
     tbl = null; tblKind = null;           // 切 tab 重建表（板块/股票列不同）
     syncHead();
     void load();
@@ -402,5 +547,51 @@ export function initPanorama(): void {
       if (tab === "block") { blkPager?.reset(); void loadBlocks(); }
       else { pager?.reset(); void load(); }
     }, 300);
+  });
+
+  // 上下键翻阅左表 → 行选中 + 右栏联动（输入框内不抢键；到页尾翻页续选）
+  document.addEventListener("keydown", (e) => {
+    if (e.key !== "ArrowDown" && e.key !== "ArrowUp") return;
+    if (!document.getElementById("page-panorama")?.classList.contains("on")) return;
+    const t = e.target as HTMLElement | null;
+    if (t && (/^(INPUT|TEXTAREA|SELECT)$/.test(t.tagName) || t.isContentEditable)) return;
+    const rows = document.querySelectorAll<HTMLElement>("#pan-wrap tbody tr");
+    if (!rows.length) return;
+    e.preventDefault();
+    const dir = e.key === "ArrowDown" ? 1 : -1;
+    const cur = selIdx >= 0 && selIdx < rows.length ? selIdx : -1;
+    if (cur < 0) {
+      const i = dir > 0 ? 0 : rows.length - 1;
+      rows[i].click();
+      rows[i].scrollIntoView({ block: "nearest" });
+      return;
+    }
+    const next = cur + dir;
+    if (next < 0 || next >= rows.length) {
+      // 页尾/页首：翻页并在新页渲染后自动选中接续行
+      const pagerEl = document.getElementById("pan-pager")!;
+      if (pagerEl.style.display === "none") return;      // 指数 tab 无分页
+      const btn = pagerEl.querySelector<HTMLButtonElement>(
+        `button[data-a="${dir > 0 ? "next" : "prev"}"]:not([disabled])`);
+      if (!btn) return;
+      pendingSel = dir > 0 ? "first" : "last";
+      btn.click();
+      return;
+    }
+    rows[next].click();                    // 复用行点击：选中高亮 + setLink / selectBlock
+    rows[next].scrollIntoView({ block: "nearest" });
+  });
+
+  // 双击个股行 → 进行情页（第一个菜单）；带来源标记，行情页「返回」可回全景
+  document.getElementById("pan-wrap")!.addEventListener("dblclick", (e) => {
+    const tr = (e.target as HTMLElement).closest<HTMLElement>("tbody tr");
+    if (!tr) return;
+    const row = navRows[rowIndexOf(tr)];
+    if (!row) return;                      // 板块/空态行：无个股可跳
+    selIdx = rowIndexOf(tr);
+    paintSelection();
+    document.dispatchEvent(new CustomEvent("yc:open-stock", {
+      detail: { symbol: row.symbol, name: row.name, from: { page: "panorama", label: "全景" } },
+    }));
   });
 }

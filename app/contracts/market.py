@@ -106,6 +106,8 @@ class Quote(BaseModel):
     # 盘中实时兜底（东财 push2 快照，非盘中/拉取失败时为 None，价格仍为日线收盘）
     rt_price: Optional[float] = None
     rt_time: Optional[str] = None          # "YYYY-MM-DD HH:MM" 快照时间（东财 f86）
+    rt_date: Optional[str] = None          # 行情归属日（腾讯 p[30]）：盘前/周末为上一交易日
+    rt_live: Optional[bool] = None         # 今日是否已有真实成交（盘前 qdate 已切今天但 open=0 → False）
     rt_prev_close: Optional[float] = None  # 东财昨收：实时涨跌额的跨源基准
 
 

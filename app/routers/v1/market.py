@@ -117,6 +117,10 @@ def minute(symbol: str = Query(description="6 位代码，兼容 sh.600519 形�
                 "avg": avg if avg is not None else price,
                 "has_avg": avg is not None,
             })
+        # 盘前腾讯只给一个 09:30、累计量额全 0 的占位点：不是真实分时，
+        # 丢掉（否则开盘前分时图/分时K就多出一根今天的柱）
+        if len(bars) == 1 and not (bars[0].get("volume") or 0) and not (bars[0].get("amount") or 0):
+            bars = []
         return {"symbol": symbol, "date": day, "prev_close": prev_close, "bars": bars}
     return _cached(f"m|{symbol}", 30, fetch)
 
@@ -193,6 +197,11 @@ def _merge_live_bar(bars: list, symbol: str, adjust: Adjust) -> list:
     if rt_date != today:
         return bars
     if date.today().weekday() >= 5:                     # 周末双保险：无交易不可能有今日 bar
+        return bars
+    # 守卫 0 · 未开盘：腾讯在 09:00 左右就把 qdate 切到当天，但集合竞价前
+    # open/high/low 全是 0、price 仍是昨收。没有成交量能就不可能有今日 bar
+    # （2026-11-02 09:11 实测：上证指数被补出 low=0 的假今日线，主图 Y 轴被拉到 0）
+    if not rt.get("open"):
         return bars
     last = bars[-1]
     last_date = (last.get("date") or "")[:10]
@@ -288,14 +297,28 @@ def kline(
 def _apply_rt(q: dict, rt: dict) -> None:
     """实时快照就地叠加进库内快照（单只 /market/quote 与批量 /market/quotes 共用）。
 
-    总是带 rt_price/rt_time/rt_prev_close；盘中（快照日==今天）时价格字段改用实时值，
+    总是带 rt_price/rt_time/rt_date/rt_prev_close/rt_live；rt_live=True（归属日==今天
+    且已有开盘价）时价格字段改用实时值，
     基本信息卡兜底：daily_valuation 未落库时用腾讯扩展位
     （38=换手% 39=PE(TTM) 44/45=流通/总市值(亿) 46=PB）。"""
     q["rt_price"] = rt["price"]
     q["rt_time"] = rt.get("ts")
+    q["rt_date"] = rt.get("qdate")          # 行情归属日：盘前/周末仍是上一交易日
+    # 今日是否已有真实成交（开盘前腾讯 qdate 已切到今天，但 open 还是 0）
+    q["rt_live"] = bool(rt.get("qdate") == date.today().isoformat() and rt.get("open"))
     if rt.get("prev_close") is not None:
         q["rt_prev_close"] = rt["prev_close"]   # 东财昨收：指数等跨源时防错位
-    if rt.get("ts") and rt["ts"][:10] == date.today().isoformat():
+    # 盘前/周末：快照属于上一交易日（qdate == 库内最新日线日），价格字段保持库内值，
+    # 但库内缺失的成交额/量可由同一天的快照补齐（不能丢当日成交额）
+    if rt.get("qdate") and rt["qdate"] == (q.get("date") or "")[:10]:
+        if not q.get("amount") and rt.get("amount"):
+            q["amount"] = rt["amount"]
+        if not q.get("volume") and rt.get("volume"):
+            q["volume"] = rt["volume"]
+    # 只有「归属日==今天 且 已有开盘价」才把快照叠加进库内快照。
+    # 盘前/周末腾讯返回上一交易日或零开盘的占位快照，若按 ts 判定，
+    # 会把昨收数据标成今天（2026-11-02 盘前实测：K 线多出一根假今日 bar）
+    if q["rt_live"]:
         q["date"] = rt["ts"]
         if rt.get("open") is not None: q["open"] = rt["open"]
         if rt.get("high") is not None: q["high"] = rt["high"]

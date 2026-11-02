@@ -82,13 +82,15 @@ def test_quotes_batch_rt_overlay(client: TestClient, monkeypatch):
     """盘中批量实时覆盖：一次腾讯 HTTP 后价格字段改用实时值（与单只同规约）。"""
     import app.foundation.live as _live
     _live._RTS_CACHE.clear()        # 隔离其他用例/真实网络留下的实时缓存（flaky 源）
-    # ts 必须是动态「今天」：_apply_rt 以快照日==今天判定盘中覆盖（写死日期跨天即挂）
-    today = date.today().isoformat() + " 10:30"
+    # ts/qdate 必须是动态「今天」：_apply_rt 以 qdate==今天 且已有开盘价判定盘中覆盖
+    d = date.today().isoformat()
+    today = d + " 10:30"
     monkeypatch.setattr("app.foundation.live.realtime_quotes", lambda syms: {
         s: {"price": 888.0, "open": 880.0, "high": 890.0, "low": 875.0,
             "prev_close": 870.0, "pct": 2.07, "volume": 12300.0, "amount": 1.1e9,
             "turnover": 3.3, "pe_ttm": 30.0, "pb": 8.0,
-            "total_mv_yi": 9000.0, "circ_mv_yi": 9000.0, "ts": today}
+            "total_mv_yi": 9000.0, "circ_mv_yi": 9000.0,
+            "qdate": d, "ts": today}
         for s in syms})
     r = client.get("/api/v1/market/quotes", params={"symbols": "600519,000858"})
     assert r.status_code == 200

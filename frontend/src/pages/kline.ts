@@ -783,6 +783,8 @@ export interface KlineChartHandle {
  * 副图夹在 44~132px；主图硬约束 ≥ 3×副图且 ≥160px，空间不足时副图退让。 */
 const X_AXIS_H = 24, MAIN_SUB_RATIO = 3.6,
   SUB_MIN = 44, SUB_MAX = 132, MAIN_MIN = 160, MAIN_MIN_RATIO = 3;
+/** 默认视图末根与价格轴之间的留白（px）：一根半柱宽，末根完整可见但不显得离轴太远 */
+const RIGHT_GAP_PX = 14;
 
 function smartHeights(total: number, n: number): { main: number; sub: number } {
   const avail = Math.max(160, Math.round(total - X_AXIS_H));
@@ -919,9 +921,9 @@ export function mountKline(el: HTMLElement): KlineChartHandle {
       },
     },
   }) as Chart;
-  // 最新 K 线右侧留 12px 小空隙：0 时紧贴 Y 轴边界被轴线/刻度盖住，
-  // 太大则最新一根离轴太远（12px ≈ 一根半柱宽，贴轴但完整可见）
-  try { chart.setOffsetRightDistance(12); } catch { /* 忽略 */ }
+  // 最新 K 线右侧留 14px 空隙：0 时末根实体压在价格轴上（klinecharts 的
+  // scrollToDataIndex 就会把它顶到 diff=0），太大则末根离轴太远像数据缺失。
+  try { chart.setOffsetRightDistance(RIGHT_GAP_PX); } catch { /* 忽略 */ }
   // v10 门控：symbol/period 无效时 getBars 永远不触发（canvas 空白无报错），
   // 数据虽由外部回填，仍需设置合法 symbol/period 才能打开加载开关
   chart.setSymbol({ ticker: "YUCHAO", pricePrecision: 2, volumePrecision: 0 });
@@ -1102,9 +1104,15 @@ export function mountKline(el: HTMLElement): KlineChartHandle {
     if (notify) document.dispatchEvent(new CustomEvent("yc:kl-range", { detail: null }));
   };
 
+  /** 图表面板上叠着齿轮 / 指标 / 导航等按钮：点在它们身上不算「点 K 线」，
+   *  否则打开成交量设置就会把已选中的那根清掉，右侧资金卡也跟着变空 */
+  const onWidget = (event: MouseEvent): boolean =>
+    event.target instanceof Element
+    && !!event.target.closest("button, .kl-nav, .kl-ipanel, .kl-more");
+
   const onSelDown = (e: MouseEvent) => {
     // 只认左键；框选模式或 Shift 手势才进入拖拽，否则视为"点空白关卡片"
-    if (e.button !== 0) return;
+    if (e.button !== 0 || onWidget(e)) return;
     downX = e.clientX;
     if (!rangeMode && !e.shiftKey) {
       // 非框选模式：只在这里关区间卡；单根选中交给 mouseup 的 pickAtIndex 统一裁决
@@ -1128,6 +1136,7 @@ export function mountKline(el: HTMLElement): KlineChartHandle {
   };
   const onSelUp = (e: MouseEvent) => {
     if (selX0 == null) {
+      if (onWidget(e)) return;                 // 落在按钮上：不参与单根命中
       // 点击（非拖拽）→ 按 x 列命中单根：点在这根 K 线所在的列上就算选中，
       // 不像原生 onCandleBarClick 那样要求精确落在实体矩形里（间隙/空白高度点不中）
       // 落在未来空白区（无对应 bar）则撤掉选中
@@ -1455,6 +1464,15 @@ export function mountKline(el: HTMLElement): KlineChartHandle {
 
   let dataLen = 0;                     // 上一次灌入的 bar 数（判断「增量刷新」还是「换数据源」）
 
+  /** 默认视图锚点：末根完整落在价格轴左侧，中间留一道窄缝。
+   *  先写死 offset 再 scrollToRealTime —— scrollToRealTime 的目标位移就是
+   *  initialOffsetRightDistance / barSpace，等于把这道缝还原成「设计值」，
+   *  不受上一次 scrollToDataIndex 留下的 diff=0 影响。 */
+  const snapLatest = (): void => {
+    try { chart.setOffsetRightDistance(RIGHT_GAP_PX); } catch { /* 忽略 */ }
+    try { chart.scrollToRealTime(0); } catch { /* 忽略 */ }
+  };
+
   const handle: KlineChartHandle = {
     chart,
     setData: (bars: Bar[], keepView = false, floatShares: number | null = null, focusDate?: string) => {
@@ -1481,23 +1499,33 @@ export function mountKline(el: HTMLElement): KlineChartHandle {
       const focusIndex = focusDate ? list.findIndex(bar => bar.date === focusDate) : -1;
       const keepIdx = focusIndex >= 0 ? Math.min(list.length - 1, focusIndex + 8)
         : recoverable ? Math.max(0, Math.round(vis!.to) - 1) : null;
+      /* 默认视图（换标的 / 刷新 / 切周期 / 旧视图已贴最新）一律「末根 + 右侧留白」：
+       * scrollToDataIndex(n-1) 会把末根槽位右缘顶到主图右边界（diff → 0），
+       * 蜡烛实体一半压在价格轴上 —— 这就是「最后一根看不到 / 超出 Y 轴」的来源。
+       * 只有用户自己平移出的历史窗口才用 scrollToDataIndex 原样恢复。 */
+      const keepLatest = focusIndex >= 0
+        ? keepIdx === list.length - 1
+        : !keepView || (recoverable && dataLen > 0 && vis!.to >= dataLen);
       dataLen = list.length;
       tip.style.display = "none";                          // 数据重载时收起旧卡片
       // v10 无 applyNewData，经 DataLoader 一次性回填（策影同款）
       chart.setDataLoader({ getBars: (params) => { params.callback(list, false); } });
       // 重灌数据后索引会变，选中带按日期重新定位（盘中轮询 12s 一次，必须跟着走）
+      const restoreView = (): void => {
+        try {
+          if (keepLatest) snapLatest();
+          else if (keepIdx != null) chart.scrollToDataIndex(keepIdx, 0);
+        } catch { /* 忽略 */ }
+      };
       requestAnimationFrame(() => {
         navDraw();
-        try {
-          if (keepIdx != null) chart.scrollToDataIndex(keepIdx, 0);
-          else chart.scrollToRealTime(0);
-        } catch { /* 忽略 */ }
+        restoreView();
         drawPick();
       });
       // setDataLoader 的首次回填是异步的：等数据真正就绪后再校一次视图，
       // 否则恢复动作会被后续的加载回调覆盖（视图又跳回默认位置）
-      if (keepIdx != null) window.setTimeout(() => {
-        try { chart.scrollToDataIndex(keepIdx, 0); } catch { /* 忽略 */ }
+      window.setTimeout(() => {
+        restoreView();
         if (focusIndex >= 0) pickAtIndex(focusIndex);
         else drawPick();
       }, 160);

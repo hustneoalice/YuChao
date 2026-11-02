@@ -78,11 +78,7 @@
           <div class="chartbox" style="flex:1;min-height:0">
             <!-- 个股信息条（最上）：名称/代码/行业 + 现价/涨跌幅/开高低昨收 + 收藏 -->
             <div class="kl-symbar" id="kl-symbar" hidden>
-              <b class="ksy-name"></b>
-              <span class="ksy-code num"></span>
-              <span class="ksy-ind"></span>
-              <span class="ksy-q"></span>
-              <span class="sp"></span>
+              <span class="ksy-head" id="kl-head"></span>
               <button class="cbtn" id="kl-watch" title="收藏 / 分组设置"><span data-ic="heart" data-sz="13"></span></button>
             </div>
             <div class="chartbar">
@@ -124,7 +120,7 @@
                 <span>在顶栏搜索代码或名称，或从自选 / 板块 / 核心标页进入。</span>
               </div>
             </div>
-            <div class="kl-vgrip" id="kl-vgrip" title="上下拖拽调整图表高度 · 双击恢复默认"></div>
+            <div class="kl-vgrip" id="kl-vgrip" title="上下拖拽调整资讯 / 研报面板高度 · 双击恢复默认"></div>
             <div class="kl-ipanel" id="kl-ipanel" hidden>
               <div class="iprow ip-presets" id="ip-presets"></div>
               <div class="iprow"><span class="ipk">通道配色</span>
@@ -157,7 +153,7 @@
     <section class="page" id="page-panorama">
       <div class="phead">
         <span class="crumb">全景 /</span><h1>A股全景</h1>
-        <span class="sub" style="font-size:12px;color:var(--faint)">盘中快照 5 分钟一轮</span>
+        <span class="sub" style="font-size:12px;color:var(--faint)">盘中每 5 分钟自动更新</span>
         <span class="sp"></span>
         <input id="pan-q" type="search" placeholder="搜代码 / 名称" style="width:130px">
         <button class="hbtn" id="pan-refresh" data-ic="arrows-clockwise" data-sz="13">刷新</button>
@@ -190,27 +186,27 @@
           <div class="pan-breadth" id="pan-breadth"></div>
           <div class="empty" id="pan-empty" style="display:none;padding:44px 20px">
             <span data-ic="trend-up" data-sz="30" style="color:var(--faint)"></span>
-            <b>暂无快照数据</b>
-            <span>快照由 updater 盘中每 5 分钟采集；非交易时段显示最近一轮。</span>
+            <b>暂无当日行情数据</b>
+            <span>盘中每 5 分钟自动采集一次；非交易时段显示最近一轮。</span>
           </div>
         </div>
-        <div class="pan-right">
-          <div class="pan-linkhead">
-            <b id="pan-link-name">点击左侧股票联动</b>
-            <span class="sub num" id="pan-link-code"></span>
-            <span class="sp"></span>
-            <span class="num" id="pan-link-quote"></span>
-          </div>
-          <div class="pan-chartbox" style="flex:1.25">
-            <div class="pan-charttitle"><span>分时走势</span>
+        <div class="pan-right" id="pan-right">
+          <div class="pan-chartbox" id="pan-box-t">
+            <div class="pan-charttitle">
+              <b id="pan-link-name">点击左侧股票联动</b>
+              <span class="sub num" id="pan-link-code"></span>
               <span class="pan-lg"><i class="p"></i>价格</span>
               <span class="pan-lg"><i class="a"></i>均价</span>
               <span class="pan-lg"><i class="b"></i>昨收</span>
+              <span class="sp"></span>
+              <span class="num pan-quote" id="pan-link-quote"></span>
+              <button class="cbtn" id="pan-watch" title="加入自选"><span data-ic="heart" data-sz="13"></span></button>
             </div>
             <div class="pan-kl" id="pan-kl-t"></div>
           </div>
-          <div class="pan-chartbox" style="flex:1">
-            <div class="pan-charttitle">日K</div>
+          <div class="pan-hsplit" id="pan-hsplit" title="拖动调节分时 / 日K 高度"></div>
+          <div class="pan-chartbox" id="pan-box-d">
+            <!-- 日K 与行情页 K 线共用 chartpanel 控件：紧凑头（只留标题+指标开关） -->
             <div class="pan-kl" id="pan-kl-d"></div>
           </div>
         </div>
@@ -231,7 +227,7 @@
         <span>从「全景」大表点击任意标的进入，盘口与关键数据一屏尽览。</span>
       </div>
       <div id="sd-body" style="display:none;flex-direction:column;gap:10px;flex:1;min-height:0">
-        <!-- 报价头：现价大字 + 涨跌 + 涨停跌停 + 快照时间 -->
+        <!-- 报价头：现价大字 + 涨跌 + 涨停跌停 + 数据时间 -->
         <div class="sd-quote" id="sd-quote"></div>
         <div style="display:flex;gap:12px;flex:1;min-height:0">
           <div class="panel" style="flex:1.6;min-width:0;display:flex;flex-direction:column">

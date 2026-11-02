@@ -26,7 +26,7 @@ export function openSettingsTab(t: string): void {
 const STAGE_TEXT: Record<string, [string, string]> = {
   uninitialized: ["未初始化", "bad"],
   initializing: ["初始化中", "warn"],
-  ready: ["已就绪", "ok"],
+  ready: ["正常", "ok"],
   updating: ["更新中", "warn"],
   update_failed: ["更新失败", "bad"],
 };
@@ -579,21 +579,61 @@ async function renderLlm(body: HTMLElement): Promise<void> {
   });
 }
 
+/* ── 顶栏数据状态 chip：唯一落笔口 ──
+ * 以前 refreshDatachip 与 refreshUpChip 各自直接写 DOM：SSE 每推一次 data:update
+ * 两个函数各写一遍，正文字符就在「行情底座 · 已就绪」和「更新中 · xx 45%」之间来回跳。
+ * 现在两者只更新各自的字段，由 paintChip 按「更新中 > 排队 > 常态」优先级落笔，
+ * 同一时刻只有一个来源能决定显示什么，不会再抖。 */
+type ChipFace = { text: string; cls: string; title: string };
+/** 任务名在顶栏用日常说法（后端 label 是给数据页/日志看的技术名，含「快照」这类黑话）；
+ *  以 kind 为键，比按字符串替换稳 —— 「行情快照」「库快照备份」替换成「行情」会出洋相。 */
+const PLAIN_KIND: Record<string, string> = {
+  market_snapshot: "盘中行情",
+  quotes: "实时行情",
+  sector_index: "板块行情",
+  kline_update: "日K线",
+  backup: "数据备份",
+  valuation: "全市场估值",
+  capital_flow: "资金流",
+};
+const plainLabel = (kind: string, label: string): string => PLAIN_KIND[kind] ?? label;
+/** 采集阶段名同规范化：「采集行情快照」→「采集行情」、「拉取快照」→「拉取行情」 */
+const plainStage = (s: string): string => s.replace(/行情快照/g, "行情").replace(/快照/g, "行情");
+let chipIdle: ChipFace = { text: "行情数据 · 检测中", cls: "", title: "正在检测行情数据状态" };
+let chipRun: ChipFace | null = null;
+let chipQueue: ChipFace | null = null;
+
+function paintChip(): void {
+  const el = document.getElementById("datachip");
+  const t = document.getElementById("datachip-t");
+  if (!el || !t) return;
+  const f = chipRun ?? chipQueue ?? chipIdle;
+  if (t.textContent !== f.text) t.textContent = f.text;
+  const cls = "datachip" + (f.cls ? " " + f.cls : "");
+  if (el.className !== cls) el.className = cls;
+  if (el.title !== f.title) el.title = f.title;
+}
+
 /** 顶栏数据状态 chip（轮询 /data/status） */
 export async function refreshDatachip(): Promise<void> {
-  const el = document.getElementById("datachip")!;
-  const t = document.getElementById("datachip-t")!;
+  let face: ChipFace;
   try {
     const st = await dataApi.status();
     const latest = st.tables.map((x) => x.latest_date).filter(Boolean).sort().pop();
-    const [label, cls] = STAGE_TEXT[st.stage] ?? ["未知", "bad"];
-    t.textContent = `行情底座 · ${label}${latest ? " · " + latest : ""}`;
-    // i-ok：健康用绿点（--up 是 A 股涨的红，语义是行情不是状态，勿用于健康态）
-    el.className = "datachip" + (cls === "ok" ? " i-ok" : cls === "warn" ? " i-mid" : "");
+    const [label, cls] = STAGE_TEXT[st.stage] ?? ["状态未知", "bad"];
+    face = {
+      text: `行情数据 · ${label}${latest ? " · 更新至 " + latest : ""}`,
+      // i-ok：健康用绿点（--up 是 A 股涨的红，语义是行情不是状态，勿用于健康态）
+      cls: cls === "ok" ? "i-ok" : cls === "warn" ? "i-mid" : "",
+      title: latest
+        ? `本地行情数据${label}，最新交易日 ${latest}。点击查看数据底座`
+        : `本地行情数据${label}。点击查看数据底座`,
+    };
   } catch {
-    t.textContent = "行情底座 · 不可达";
-    el.className = "datachip";
+    face = { text: "行情数据 · 连接失败", cls: "", title: "后端接口不可达，点击查看数据底座" };
   }
+  chipIdle = face;
+  paintChip();
 }
 
 /* ── 顶栏全局进度徽章（策影同款）：更新任务运行/排队时 datachip 变进度胶囊 ──
@@ -604,26 +644,31 @@ let upChipTimer: ReturnType<typeof setTimeout> | null = null;
 
 export async function refreshUpChip(): Promise<void> {
   if (upChipTimer) { clearTimeout(upChipTimer); upChipTimer = null; }
-  const el = document.getElementById("datachip");
-  const t = document.getElementById("datachip-t");
-  if (!el || !t) return;
+  if (!document.getElementById("datachip")) return;
   let snap: UpdateSnapshot | null = null;
   try { snap = await dataApi.state(); } catch { /* 快照不可达保持原样 */ }
   const r = snap?.running;
   const q = snap?.queued?.length ?? 0;
   const active = !!(r || q);
   if (r) {
-    t.textContent = `更新中 · ${r.label} ${(r.percent ?? 0).toFixed(0)}%`;
-    el.className = "datachip i-run";
-    el.title = `${r.stage || r.label}${r.total ? ` · ${r.done}/${r.total}` : ""} · 点击查看详情`;
+    const lb = plainLabel(r.kind, r.label);
+    chipRun = {
+      text: `正在更新 · ${lb} ${(r.percent ?? 0).toFixed(0)}%`,
+      cls: "i-run",
+      title: `${plainStage(r.stage || lb)}${r.total ? ` · ${r.done}/${r.total}` : ""} · 点击查看详情`,
+    };
+    chipQueue = null;
   } else if (q) {
-    t.textContent = `更新排队 · ${q} 项`;
-    el.className = "datachip i-mid";
-    el.title = "任务排队中 · 点击查看详情";
+    chipRun = null;
+    chipQueue = { text: `${q} 个更新任务排队中`, cls: "i-mid", title: "任务排队中 · 点击查看详情" };
+  } else {
+    chipRun = null;
+    chipQueue = null;
   }
+  paintChip();
   if (active !== upActive) {
     upActive = active;
-    if (!active) void refreshDatachip();   // 刚结束：恢复「行情底座 · 健康 · 日期」
+    if (!active) void refreshDatachip();   // 刚结束：刷新回「行情数据 · 正常 · 更新至 …」
   }
   if (active) upChipTimer = setTimeout(() => void refreshUpChip(), 3000);
 }
