@@ -767,6 +767,10 @@ export interface KlineChartHandle {
   setRangeMode: (on: boolean) => void;
   /** 框选模式是否开启（工具栏按钮态与图表实例对账用） */
   isRangeMode: () => boolean;
+  /** 单选 K 线模式开关：开=点击蜡烛选中单根；关=点击不再选中并清空已有选中 */
+  setPickMode: (on: boolean) => void;
+  /** 单选 K 线模式是否开启 */
+  isPickMode: () => boolean;
   /** 区间资金回填（行情页拉到 /market/fundflow 后写回卡片） */
   setRangeFund: (f: RangeFund | null) => void;
   /** 清空选区（切标的 / 切周期 / 关闭模式时调用，notify=true 会同步清右列） */
@@ -932,6 +936,8 @@ export function mountKline(el: HTMLElement): KlineChartHandle {
   /* 框选状态（声明提前：onCross 里要判断"是否已有区间卡"，避免与十字光标卡同屏叠两张） */
   let rangeMode = false;
   let lastSel: RangeStats | null = null;
+  /* 单选 K 线模式：默认关闭（点击只移动十字光标，不选单根）；勾选后点击才选中 */
+  let pickMode = false;
 
   /* ── 浮动信息卡：跟随十字光标，边缘翻转避让 ── */
   const tip = document.createElement("div");
@@ -1152,7 +1158,7 @@ export function mountKline(el: HTMLElement): KlineChartHandle {
     selX0 = null; sel.style.display = "none";
     // 框选模式下 mousedown 被拦截（stopPropagation），原生点击事件收不到：
     // 位移过小视为「点了一根 K 线」，手动补一次单根选中，两种模式手感一致
-    if (x1 - x0 < 6) { pickAtIndex(diOfX(x1)); return; }
+    if (x1 - x0 < 6) { if (pickMode) pickAtIndex(diOfX(x1)); return; }
     const diOf = diOfX;
     const i0 = diOf(x0), i1 = diOf(x1);
     const list = chart.getDataList() as { timestamp: number; open: number; high: number; low: number; close: number; volume?: number; amount?: number }[];
@@ -1372,7 +1378,7 @@ export function mountKline(el: HTMLElement): KlineChartHandle {
   pick.innerHTML = "<b></b>";
   el.appendChild(pick);
   // 操作提示（悬停可见）：激活/取消路径都说清楚
-  el.title = "点击K线选中单根（再点取消 · ESC关闭）· Shift拖拽或框选模式统计区间";
+  el.title = "框选模式下左键拖拽统计区间；开启「单选」后点击 K 线选中单根（再点取消 · ESC 关闭）";
   let pickDate: string | null = null;
 
   const drawPick = (): void => {
@@ -1438,6 +1444,7 @@ export function mountKline(el: HTMLElement): KlineChartHandle {
   });
 
   const onBarClick = (...args: unknown[]) => {
+    if (!pickMode) return;                       // 未开启单选模式：点击不选中单根
     pickAtIndex((args[0] as { dataIndex?: number } | null | undefined)?.dataIndex);
   };
   // 原生精确点击（点在蜡烛实体上）与上面的按列判定互为补充：重复点同一根会被去重
@@ -1526,7 +1533,7 @@ export function mountKline(el: HTMLElement): KlineChartHandle {
       // 否则恢复动作会被后续的加载回调覆盖（视图又跳回默认位置）
       window.setTimeout(() => {
         restoreView();
-        if (focusIndex >= 0) pickAtIndex(focusIndex);
+        if (focusIndex >= 0 && pickMode) pickAtIndex(focusIndex);
         else drawPick();
       }, 160);
     },
@@ -1635,6 +1642,11 @@ export function mountKline(el: HTMLElement): KlineChartHandle {
       if (!on) clearSel(true);
     },
     isRangeMode() { return rangeMode; },
+    setPickMode(on: boolean) {
+      pickMode = on;
+      if (!on) clearPickFn(true);        // 关模式即撤选中，右列资金卡退回当日口径
+    },
+    isPickMode() { return pickMode; },
     setRangeFund(f: RangeFund | null) {
       selFund = f;
       drawSelTip();

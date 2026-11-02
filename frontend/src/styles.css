@@ -231,6 +231,14 @@ svg{display:block}
 .chartbar .seg button{padding:3px 9px;font-size:11.5px}
 /* 工具栏按钮统一不换行：文字按钮（框选）在窄屏也不会被挤成竖排 */
 .chartbar .cbtn{white-space:nowrap;flex:none;width:auto;min-width:24px;padding:0 7px}
+/* 单选 K 线开关：与「框选」并排；圆点单选视觉（勾选后才允许鼠标点击选中 K 线） */
+.chartbar .kl-radio{display:inline-flex;align-items:center;gap:5px;cursor:pointer;user-select:none}
+.chartbar .kl-radio input{position:absolute;opacity:0;width:0;height:0;pointer-events:none}
+.chartbar .kl-radio .rdot{width:8px;height:8px;border-radius:50%;box-sizing:border-box;
+  border:1px solid var(--axis);flex:none;transition:background .15s,border-color .15s,box-shadow .15s}
+.chartbar .kl-radio.on{color:var(--accent)}
+.chartbar .kl-radio.on .rdot{border-color:var(--accent);background:var(--accent);
+  box-shadow:0 0 0 2px color-mix(in srgb,var(--accent) 20%,transparent)}
 .chartbar .cbtn.text{font-size:11.5px}
 /* 工具条挤窄时按钮不许被压成竖排（方案/框选这类双字按钮中招过） */
 .chartbar .hbtn{white-space:nowrap;flex:none}

@@ -576,13 +576,22 @@ export function initMarket(): void {
       document.querySelectorAll("#kl-panels .klp").forEach((x) =>
         x.classList.toggle("active", x === klp));
       syncPeriodSeg(mk.panels[i]);
-      // 框选模式跟着焦点面板走（同一时刻只有一个面板可框选）
+      // 框选/单选模式跟着焦点面板走（同一时刻只有一个面板可操作）
       if (document.getElementById("kl-range")?.classList.contains("on")) setKlRangeMode(true);
+      if (document.getElementById("kl-pick-mode")?.classList.contains("on")) setKlPickMode(true);
     }
   });
   // 框选按钮：开=左键直接拖拽统计（图表平移暂停），关=恢复平移并清空区间
   document.getElementById("kl-range")!.addEventListener("click", () => {
-    setKlRangeMode(!document.getElementById("kl-range")!.classList.contains("on"));
+    const on = !document.getElementById("kl-range")!.classList.contains("on");
+    if (on) setKlPickMode(false);              // 框选与单选互斥
+    setKlRangeMode(on);
+  });
+  // 单选 K 线：勾选后才开启「鼠标点击选中单根」，不勾选时点击只移十字光标
+  document.getElementById("kl-pick-mode-cb")!.addEventListener("change", (e) => {
+    const on = (e.target as HTMLInputElement).checked;
+    if (on) setKlRangeMode(false);             // 单选与框选互斥
+    setKlPickMode(on);
   });
   document.addEventListener("yc:kl-range", onKlRange);
   document.addEventListener("yc:kl-pick", onKlPick);
@@ -1102,6 +1111,14 @@ function setKlRangeMode(on: boolean): void {
   }
 }
 
+/** 单选 K 线模式开关：同样只作用于焦点面板；未勾选时点击不选中单根 */
+function setKlPickMode(on: boolean): void {
+  kls.forEach((k, i) => k?.setPickMode(on && i === mk.active));
+  document.getElementById("kl-pick-mode")?.classList.toggle("on", on);
+  const cb = document.getElementById("kl-pick-mode-cb") as HTMLInputElement | null;
+  if (cb) cb.checked = on;
+}
+
 async function fetchRangeFund(rs: RangeStats): Promise<void> {
   const s = mk.cur;
   if (!s) return;
@@ -1319,8 +1336,10 @@ export function renderKline(): void {
   empty.style.display = "none";
   ensurePanelDom();
   kls.forEach((_, i) => applyPanel(i));
-  // 布局/周期切换可能重建面板实例：框选态跟着按钮态恢复（否则按钮亮着但拖不动）
+  // 布局/周期切换可能重建面板实例：框选/单选态跟着按钮态恢复（否则按钮亮着但鼠标行为没生效）
   if (document.getElementById("kl-range")?.classList.contains("on")) setKlRangeMode(true);
+  const pickCb = document.getElementById("kl-pick-mode-cb") as HTMLInputElement | null;
+  if (pickCb?.checked) setKlPickMode(true);
   renderKlpBar();
   // 分时/60分面板：换标的后缓存已清，按需补拉（策略图面：先空后满）
   const need = mk.panels.find((p) =>
