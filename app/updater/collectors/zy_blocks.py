@@ -40,14 +40,17 @@ def update_zy_blocks(progress=None, ctx=None) -> dict:
         codes = [b["block_code"] for b in blocks]
         members = zy_source.fetch_zy_block_members_all(
             codes, progress=progress, cancel=cancel)
-        conn.execute("DELETE FROM zy_block_member")
         rows = [(code, m["symbol"], m.get("stock_name"))
                 for code, ms in members.items() for m in ms]
         if rows:
+            conn.execute("DELETE FROM zy_block_member")
             conn.executemany(
                 "INSERT OR REPLACE INTO zy_block_member "
                 "(block_code, symbol, stock_name) VALUES (?,?,?)", rows)
-        conn.commit()
+            conn.commit()
+        else:
+            # 非交易日上游返回空数组：保留上一版映射，避免把本地成分清空
+            logger.warning("[ZyBlocks] 上游成分全为空（非交易日？），保留上一版成分映射")
         n_by_type: dict[int, int] = {}
         for b in blocks:
             n_by_type[b["type_code"]] = n_by_type.get(b["type_code"], 0) + 1
