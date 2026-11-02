@@ -121,7 +121,11 @@ export interface Quote {
   valuation?: { date: string; pe_ttm?: number; pb?: number; ps_ttm?: number; total_mv?: number; circ_mv?: number } | null;
   capital_flow?: { date: string; net_main?: number; net_super?: number; net_large?: number; net_medium?: number; net_small?: number } | null;
 }
-export interface SearchHit { symbol: string; name?: string; market?: string; industry?: string; status?: string }
+export interface SearchHit {
+  symbol: string; name?: string; market?: string; industry?: string; status?: string;
+  kind?: "stock" | "fund" | "index" | "sector";
+  sub?: string | null;                    // 板块子类 industry | concept
+}
 
 export interface IndexQuote {
   symbol: string; name: string; price?: number | null; chg?: number | null;
@@ -253,7 +257,10 @@ export const marketApi = {
     req<BoardRow | null>(`/market/snapshot_one?symbol=${encodeURIComponent(symbol)}`),
   sparks: (symbols: string[]) =>
     req<{ items: { symbol: string; prev_close: number | null; points: number[] }[]; missing: string[] }>(`/market/sparks?symbols=${encodeURIComponent(symbols.join(","))}`),
-  search: (q: string, limit = 10) => req<{ items: SearchHit[]; total: number }>(`/market/search?q=${encodeURIComponent(q)}&limit=${limit}`),
+  search: (q: string, limit = 10, kinds?: string[]) =>
+    req<{ items: SearchHit[]; total: number }>(
+      `/market/search?q=${encodeURIComponent(q)}&limit=${limit}` +
+      (kinds?.length ? `&kinds=${encodeURIComponent(kinds.join(","))}` : "")),
   indices: () => req<{ items: IndexQuote[]; total_amount?: number }>("/market/indices"),
   /* 实时资讯/研报（后端东财直连 + TTL 缓存，失败降级空列表） */
   news: (symbol: string, limit = 12) => req<{ items: NewsItem[] }>(`/market/news?symbol=${encodeURIComponent(symbol)}&limit=${limit}`),

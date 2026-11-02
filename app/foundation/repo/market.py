@@ -304,44 +304,98 @@ def get_quotes(conn, symbols: list[str]) -> tuple[list[dict], list[str]]:
     return list(items.values()), missing
 
 
-def search(conn, q: str, limit: int = 10) -> list[dict]:
-    """代码 / 名称 / 拼音检索（代码与名称 SQL LIKE；纯字母查询叠加拼音缩写/全拼匹配）。"""
-    like = f"%{q.upper()}%"
-    rows = conn.execute(
-        f"""
-        SELECT {_UNIVERSE_COLS} FROM stock_universe
-        WHERE UPPER(symbol) LIKE ? OR UPPER(name) LIKE ?
-        ORDER BY CASE WHEN UPPER(symbol) = ? THEN 0
-                       WHEN UPPER(name) = ? THEN 1
-                       ELSE 2 END, symbol
-        LIMIT ?
-        """,
-        [like, like, q.upper(), q.upper(), limit],
-    ).fetchall()
-    keys = _UNIVERSE_COLS.replace(", ", ",").split(",")
-    hits = [dict(zip(keys, r)) for r in rows]
-    if len(hits) >= limit or not q.isascii():
-        return _bj_scoped(hits)
-
-    # 纯字母且 SQL 未取满：叠加拼音缩写（东山精密→dsjm）与全拼（dongshan）匹配。
-    # 全表 ~5千行，进程内一次性构建缓存，universe 变更由重启/更新任务兜底。
-    seen = {h["symbol"] for h in hits}
-    for row in conn.execute(f"SELECT {_UNIVERSE_COLS} FROM stock_universe").fetchall():
-        item = dict(zip(keys, row))
-        if item["symbol"] in seen:
-            continue
-        py = _pinyin_variants(item["name"])
-        if q.lower() in py["abbr"] or q.lower() in py["full"]:
-            hits.append(item)
-            seen.add(item["symbol"])
-            if len(hits) >= limit:
-                break
-    return _bj_scoped(hits)
+_SEARCH_KINDS = ("stock", "fund", "index", "sector")
+_KIND_ORDER = {"stock": 0, "index": 1, "fund": 2, "sector": 3}
 
 
-def _bj_scoped(rows: list[dict]) -> list[dict]:
-    """北交所开关（YUCHAO_BJ_ENABLED，默认关）：关闭时全系统不考虑北交所标的。"""
-    return rows if settings.bj_enabled else [r for r in rows if not is_bj(r["symbol"])]
+def search(conn, q: str, limit: int = 10,
+           kinds: Optional[set[str]] = None) -> list[dict]:
+    """代码 / 名称 / 拼音检索：个股 + 场内基金 + 指数 + 板块（kind 区分）。
+
+    顶部全局搜索用：一次查询覆盖四类标的，按同一套打分排序（精确代码 0 /
+    精确名称 1 / 前缀 2 / 包含 3 / 拼音 4），同级按 个股→指数→基金→板块。
+    纯字母查询在原始命中不足时再叠拼音缩写（东山精密→dsjm）与全拼。
+    """
+    kinds = kinds or set(_SEARCH_KINDS)
+    qs = q.strip()
+    qu, ql = qs.upper(), qs.lower()
+    want_pinyin = qs.isascii() and qs.isalpha()   # 纯字母才走拼音（代码查询不拼表）
+    cand: list[tuple[int, int, dict]] = []
+    seen: set[tuple[str, str]] = set()
+
+    # 各类原始行：stock 走池内档案，fund 走场内基金清单，index 取静态目录，
+    # sector 取最新交易日的板块清单（id 用板块名，前端据此跳板块页）。
+    rows: dict[str, list[tuple]] = {}
+    if "stock" in kinds:
+        rows["stock"] = [
+            (r[0], r[1], r[2], r[3], r[4])
+            for r in conn.execute(
+                "SELECT symbol, name, market, industry, status FROM stock_universe"
+            ).fetchall()
+            if settings.bj_enabled or not is_bj(r[0])
+        ]
+    if "fund" in kinds:
+        rows["fund"] = [
+            (r[0], r[1], r[2], None, None)
+            for r in conn.execute(
+                "SELECT symbol, name, market FROM fund_universe"
+            ).fetchall()
+        ]
+    if "index" in kinds:
+        rows["index"] = [(s, n, s.split(".")[1].lower(), None, None)
+                         for s, n in INDEX_CATALOG]
+    if "sector" in kinds:
+        rows["sector"] = [
+            # symbol=板块名（即板块页 id）；row[5]=kind（industry|concept）
+            (r[0], r[0], None, None, None, r[1] or "industry")
+            for r in conn.execute(
+                "SELECT industry, kind FROM sector_index"
+                " WHERE trade_date = (SELECT MAX(trade_date) FROM sector_index)"
+            ).fetchall()
+        ]
+
+    def grade(symbol: str, name: Optional[str]) -> Optional[int]:
+        s = (symbol or "").upper()
+        n = name or ""
+        if s == qu:
+            return 0
+        if n == qs:
+            return 1
+        if s.startswith(qu) or n.startswith(qs):
+            return 2
+        if qu in s or qs in n:
+            return 3
+        return None
+
+    def put(kind: str, row: tuple, sc: int) -> None:
+        key = (kind, row[0])
+        if key in seen:
+            return
+        seen.add(key)
+        cand.append((sc, _KIND_ORDER[kind], {
+            "symbol": row[0], "name": row[1], "market": row[2],
+            "industry": row[3], "status": row[4], "kind": kind,
+            "sub": (row[5] if len(row) > 5 else None),
+        }))
+
+    for kind, items in rows.items():
+        for row in items:
+            sc = grade(row[0], row[1])
+            if sc is not None:
+                put(kind, row, sc)
+
+    # 拼音兜底：原始命中不足时才展开（避免每次请求都拼全表）；板块/指数同享。
+    if want_pinyin and len(cand) < limit:
+        for kind, items in rows.items():
+            for row in items:
+                if (kind, row[0]) in seen or not row[1]:
+                    continue
+                py = _pinyin_variants(row[1])
+                if ql in py["abbr"] or ql in py["full"]:
+                    put(kind, row, 4)
+
+    cand.sort(key=lambda x: (x[0], x[1]))
+    return [c[2] for c in cand[:limit]]
 
 
 _TGT_SEGNAME = ("", "超卖", "低位", "弱势", "回升", "强势", "超买")

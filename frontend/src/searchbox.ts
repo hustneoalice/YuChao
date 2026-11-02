@@ -4,7 +4,7 @@
 import { marketApi, type SearchHit } from "./api";
 import { fmtChg } from "./fmt";
 
-export interface PickHit { symbol: string; name?: string }
+export interface PickHit { symbol: string; name?: string; kind?: SearchHit["kind"]; sub?: string | null }
 
 const HKEY = "yc_search_history";   // 顶栏历史沿用同一键：所有入口共享最近搜索
 
@@ -13,7 +13,7 @@ export function loadHist(): PickHit[] {
 }
 export function saveHist(u: PickHit): void {
   const list = loadHist().filter((x) => x.symbol !== u.symbol);
-  list.unshift({ symbol: u.symbol, name: u.name });
+  list.unshift({ symbol: u.symbol, name: u.name, kind: u.kind, sub: u.sub });
   localStorage.setItem(HKEY, JSON.stringify(list.slice(0, 10)));
 }
 export function clearHist(): void {
@@ -28,6 +28,8 @@ export interface StockSearchOpts {
   list: HTMLElement;                          // 结果容器
   onPick: (u: PickHit) => void;               // 点击行（保存历史后回调）
   limit?: number;
+  /* 限定类别（顶栏缺省全类；加自选入口只搜个股） */
+  kinds?: string[];
   /* 行尾自定义区（如「+ 加入」按钮）；返回 HTML 插入行尾，点击经 onTail 委托 */
   tail?: (u: SearchHit) => string;
   onTail?: (u: PickHit, btn: HTMLElement) => void;
@@ -44,18 +46,22 @@ export function stockSearch(o: StockSearchOpts): StockSearchHandle {
   let seq = 0;
   let hits: SearchHit[] = [];
 
-  const itemHtml = (u: { symbol: string; name?: string }, tailHtml = ""): string => {
+  const itemHtml = (u: PickHit, tailHtml = ""): string => {
     const chg = chgCache.get(u.symbol);
     const chgHtml = chg == null ? "" :
       `<span class="chg num ${chg >= 0 ? "up" : "down"}">${fmtChg(chg)}%</span>`;
-    return `<div class="sitem" data-c="${u.symbol}" data-n="${u.name || ""}">` +
-      `<b>${u.name || u.symbol}</b><span class="num">${u.symbol}</span>` +
+    // 板块结果 symbol 与 name 相同（id 即板块名），不重复展示
+    const codeHtml = u.symbol && u.symbol !== u.name ? `<span class="num">${u.symbol}</span>` : "";
+    return `<div class="sitem" data-c="${u.symbol}" data-n="${u.name || ""}"` +
+      ` data-k="${u.kind || "stock"}" data-sub="${u.sub || ""}">` +
+      `<b>${u.name || u.symbol}</b>` + codeHtml +
       (tailHtml ? `<span class="s-tail">${tailHtml}</span>` : "") + chgHtml + `</div>`;
   };
 
-  /* 就地回填涨跌幅：绝不整体重绘——mousedown/up 之间 DOM 被替换会让 click 被吞 */
-  const backfill = (mySeq: number, rows: { symbol: string }[]): void => {
-    void Promise.allSettled(rows.map(async (u) => {
+  /* 就地回填涨跌幅：绝不整体重绘——mousedown/up 之间 DOM 被替换会让 click 被吞。
+     板块（sector）无个股快照，跳过，避免每行一次 404。 */
+  const backfill = (mySeq: number, rows: PickHit[]): void => {
+    void Promise.allSettled(rows.filter((u) => u.kind !== "sector").map(async (u) => {
       if (chgCache.has(u.symbol)) return;
       try {
         const qt = await marketApi.quote(u.symbol);
@@ -87,7 +93,7 @@ export function stockSearch(o: StockSearchOpts): StockSearchHandle {
   };
 
   /* 缓存命中的涨跌幅随绘制同步带上，未命中的异步补（mySeq 传当前序号，不推进） */
-  const drawWithChg = (html: string, rows: { symbol: string }[], mySeq = seq): void => {
+  const drawWithChg = (html: string, rows: PickHit[], mySeq = seq): void => {
     draw(html);
     backfill(mySeq, rows);
   };
@@ -98,7 +104,7 @@ export function stockSearch(o: StockSearchOpts): StockSearchHandle {
     const q = o.input.value.trim();
     if (!q) { drawHist(); return; }
     const mySeq = ++seq;
-    void marketApi.search(q, limit).then((r) => {
+    void marketApi.search(q, limit, o.kinds).then((r) => {
       if (mySeq !== seq) return;
       hits = r.items;
       if (!hits.length) {
@@ -141,7 +147,10 @@ export function stockSearch(o: StockSearchOpts): StockSearchHandle {
     }
     const it = t.closest<HTMLElement>(".sitem[data-c]");
     if (!it) return;
-    const u = { symbol: it.dataset.c!, name: it.dataset.n || it.dataset.c! };
+    const u: PickHit = {
+      symbol: it.dataset.c!, name: it.dataset.n || it.dataset.c!,
+      kind: (it.dataset.k || "stock") as PickHit["kind"], sub: it.dataset.sub || null,
+    };
     saveHist(u);
     o.onPick(u);
   });

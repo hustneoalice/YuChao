@@ -125,6 +125,8 @@ class SearchHit(BaseModel):
     market: Optional[str] = None
     industry: Optional[str] = None
     status: Optional[str] = None
+    kind: str = Field(default="stock", description="stock | fund | index | sector")
+    sub: Optional[str] = Field(default=None, description="板块子类：industry | concept")
 
 
 class TargetItem(BaseModel):

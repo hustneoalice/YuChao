@@ -157,6 +157,7 @@ export function initWatchlist(): void {
     input: document.getElementById("add-search") as HTMLInputElement,
     list: document.getElementById("add-list")!,
     limit: 12,
+    kinds: ["stock"],                 // 加自选只搜个股（指数/板块/基金不进自选池）
     tail: (u) => {
       const has = getState().watchlist.some((w) => w.symbol === u.symbol);
       return has ? `<span class="tag flat" style="flex:none">已添加</span>` :

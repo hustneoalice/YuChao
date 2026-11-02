@@ -1453,6 +1453,7 @@ function mountWatchSearch(): void {
   if (!box || !input || !drop) return;
   wlSearch = stockSearch({
     input, list: drop, limit: 8,
+    kinds: ["stock"],                 // 自选卡搜索只收个股
     scope: '.rcard[data-cid="watch"]',
     setVisible: (v) => box.classList.toggle("open", v),
     tail: (u) => isWatched(u.symbol)

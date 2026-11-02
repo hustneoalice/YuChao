@@ -11,7 +11,7 @@ import { initPanorama, loadPanorama } from "./pages/panview";
 import { initStockDetail, ensureStockPage, openStockDetail } from "./pages/stockdetail";
 import { initWatchlist, renderWatchlist } from "./pages/watchlist";
 import { initTargets, loadTargets } from "./pages/targets";
-import { initSectors, loadSectors } from "./pages/sectors";
+import { initSectors, jumpSector, loadSectors } from "./pages/sectors";
 import { initCorepicks, renderCorepicks } from "./pages/corepicks";
 import { initCards, renderCards } from "./pages/cards";
 import { initSettings, refreshDatachip, refreshUpChip, openSettingsTab } from "./pages/settings";
@@ -48,6 +48,12 @@ function initSearch(): void {
       input.value = "";
       input.blur();
       drop.classList.remove("on");
+      if (u.kind === "sector") {
+        document.dispatchEvent(new CustomEvent("yc:open-sector", {
+          detail: { id: u.symbol, sub: u.sub } }));
+        toast(`已切换至板块 ${u.name || u.symbol}`);
+        return;
+      }
       void openStock({ symbol: u.symbol, name: u.name || u.symbol });
       toast(`已切换至 ${u.name || u.symbol}`);
     },
@@ -175,6 +181,13 @@ function boot(): void {
   document.addEventListener("yc:open-stock", (e) => {
     const d = (e as CustomEvent).detail;
     void openStock(d, d.from);
+  });
+  // 顶部搜索选中板块 → 板块页，并切到对应行业/概念分类
+  document.addEventListener("yc:open-sector", (e) => {
+    const d = (e as CustomEvent).detail as { id: string; sub?: string };
+    loaded.sectors = true;                 // 由 jumpSector 统一加载，避免 goPage 再拉一次
+    goPage("sectors");
+    void jumpSector(d.id, d.sub === "concept" ? "concept" : "industry");
   });
   // 全景大表行点击 → 个股详情页（众赢 A股全景→个股详情 同链路）
   document.addEventListener("yc:open-stock-detail", (e) => {

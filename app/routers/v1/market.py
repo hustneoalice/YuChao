@@ -376,13 +376,15 @@ def quotes(symbols: str = Query(
     return TypeAdapter(QuotesOut).validate_python({"items": items, "missing": missing})
 
 
-@router.get("/market/search", response_model=Page[SearchHit], summary="代码/名称搜索")
+@router.get("/market/search", response_model=Page[SearchHit], summary="代码/名称搜索（个股+基金+指数+板块）")
 def search(
     q: str = Query(min_length=1, max_length=20),
     limit: int = Query(default=10, ge=1, le=50),
+    kinds: Optional[str] = Query(default=None, description="限定类别：stock,fund,index,sector（缺省全部）"),
     conn=Depends(get_conn),
 ):
-    hits = repo.market.search(conn, q, limit)
+    want = {k.strip() for k in kinds.split(",") if k.strip()} if kinds else None
+    hits = repo.market.search(conn, q, limit, want)
     return Page(items=[SearchHit(**h) for h in hits], total=len(hits))
 
 

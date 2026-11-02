@@ -125,6 +125,19 @@ function renderRank(): void {
   rankTbl.render(slicePage(rankPager, rows), start);
 }
 
+/* 顶部搜索选中板块：切分类 → 重新拉清单 → 打开目标板块成分。
+   curSector 先占位，loadSectors 就不会自动打开排行第一的板块。 */
+export async function jumpSector(id: string, t: "industry" | "concept" = "industry"): Promise<void> {
+  if (t !== type) {
+    type = t;
+    document.querySelectorAll<HTMLElement>("#sec-type button").forEach((x) =>
+      x.classList.toggle("on", x.dataset.t === t));
+  }
+  curSector = id;
+  await loadSectors();
+  await openSector(id);
+}
+
 export async function openSector(id: string): Promise<void> {
   curSector = id;
   const meta = sectors.find((s) => s.id === id);
