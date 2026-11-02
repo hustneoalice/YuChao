@@ -1880,7 +1880,7 @@ function cardBody(cid: string, mode: string): string {
 function cardHead(def: { id: string; name: string; icon: string }): string {
   const p = getState().cards[def.id];
   const wlN = getState().watchlist.filter(inWlFilter).length;
-  const mono = def.id === "moneyflow" ? (mk.cur?.symbol || "") : def.id === "corepick" ? "池档案" : def.id === "watch" ? `${wlN}只` : "OPEN";
+  const mono = def.id === "moneyflow" ? (mk.cur?.symbol || "") : def.id === "corepick" ? "池档案" : def.id === "watch" ? `${wlN}只` : "";
   // 模式切换收成单颗按钮（图标指示点击后进入的模式）；整组控制钮悬停卡片才浮现
   const nextIcon = p.mode === "simple" ? "faders-horizontal" : "list";
   const nextTitle = p.mode === "simple" ? "切换为详细模式" : "切换为简单模式";
