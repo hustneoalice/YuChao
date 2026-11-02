@@ -472,7 +472,8 @@ def targets(conds: str = Query(default="vol,short,mid,up20",
         if "trend" in want else (-t['seg'], -(t['vol_ratio'] or 0)))
     return TargetScanOut(items=items[:limit], total_hits=len(items), values=vals,
                          provisional=provisional,
-                         scanned=meta["scanned"], as_of=meta["as_of"])
+                         scanned=meta["scanned"], as_of=meta["as_of"],
+                         computed_at=meta.get("computed_at", ""))
 
 
 # -- 2.2 全景大页 ----------------------------------------------------------

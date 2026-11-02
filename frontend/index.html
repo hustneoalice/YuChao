@@ -54,7 +54,6 @@
   <nav class="rail" id="rail">
     <a class="on" data-page="market" data-ic="chart-line-up" data-t="行情" data-sz="21"></a>
     <a data-page="panorama" data-ic="trend-up" data-t="全景" data-sz="21"></a>
-    <a data-page="stock" data-ic="chart-line" data-t="个股" data-sz="21"></a>
     <a data-page="watchlist" data-ic="star" data-t="自选" data-sz="21"></a>
     <a data-page="targets" data-ic="funnel-simple" data-t="目标" data-sz="21"></a>
     <a data-page="sectors" data-ic="squares-four" data-t="板块" data-sz="21"></a>
@@ -211,40 +210,6 @@
           <div class="pan-chartbox" id="pan-box-d">
             <!-- 日K 与行情页 K 线共用 chartpanel 控件：紧凑头（只留标题+指标开关） -->
             <div class="pan-kl" id="pan-kl-d"></div>
-          </div>
-        </div>
-      </div>
-    </section>
-
-    <!-- ═══════════ 个股详情 ═══════════ -->
-    <section class="page" id="page-stock">
-      <div class="phead">
-        <span class="crumb">个股 /</span><h1 id="sd-title">个股详情</h1>
-        <span class="sub num" id="sd-code" style="font-size:12px;color:var(--faint)"></span>
-        <span class="sp"></span>
-        <button class="cbtn" id="sd-watch" title="加自选 / 管理分组"><span data-ic="star" data-sz="13"></span></button>
-      </div>
-      <div class="empty" id="sd-empty" style="display:none;flex:1">
-        <span data-ic="chart-line" data-sz="30" style="color:var(--faint)"></span>
-        <b>选择一个标的查看详情</b>
-        <span>从「全景」大表点击任意标的进入，盘口与关键数据一屏尽览。</span>
-      </div>
-      <div id="sd-body" style="display:none;flex-direction:column;gap:10px;flex:1;min-height:0">
-        <!-- 报价头：现价大字 + 涨跌 + 涨停跌停 + 数据时间 -->
-        <div class="sd-quote" id="sd-quote"></div>
-        <div style="display:flex;gap:12px;flex:1;min-height:0">
-          <div class="panel" style="flex:1.6;min-width:0;display:flex;flex-direction:column">
-            <div class="phead2">
-              <span class="seg" id="sd-period">
-                <button data-p="60">60分</button><button class="on" data-p="d">日K</button><button data-p="w">周K</button><button data-p="m">月K</button>
-              </span>
-              <span class="sub" id="sd-asof"></span>
-            </div>
-            <div class="sd-chart" id="sd-chart"></div>
-          </div>
-          <div class="panel" style="flex:1;min-width:0;display:flex;flex-direction:column">
-            <div class="phead2"><h3>盘口 · 关键数据</h3><span class="sub" id="sd-snaptime"></span></div>
-            <div class="sd-grid" id="sd-grid"></div>
           </div>
         </div>
       </div>
@@ -411,7 +376,6 @@
 <nav class="mtabs" id="mtabs">
   <a class="on" data-page="market"><span data-ic="chart-line-up" data-sz="19"></span><span>行情</span></a>
   <a data-page="panorama"><span data-ic="trend-up" data-sz="19"></span><span>全景</span></a>
-  <a data-page="stock"><span data-ic="chart-line" data-sz="19"></span><span>个股</span></a>
   <a data-page="watchlist"><span data-ic="star" data-sz="19"></span><span>自选</span></a>
   <a data-page="targets"><span data-ic="funnel-simple" data-sz="19"></span><span>目标</span></a>
   <a data-page="sectors"><span data-ic="squares-four" data-sz="19"></span><span>板块</span></a>

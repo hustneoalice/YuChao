@@ -8,7 +8,6 @@ import { stockSearch } from "./searchbox";
 import { initAuth, refreshVipUI } from "./auth";
 import { initMarket, klResize, openStock, renderKline, renderRight } from "./pages/market";
 import { initPanorama, loadPanorama } from "./pages/panview";
-import { initStockDetail, ensureStockPage, openStockDetail } from "./pages/stockdetail";
 import { initWatchlist, renderWatchlist } from "./pages/watchlist";
 import { initTargets, loadTargets } from "./pages/targets";
 import { initSectors, jumpSector, loadSectors } from "./pages/sectors";
@@ -27,7 +26,6 @@ function goPage(p: string): void {
   document.querySelectorAll("#mtabs a").forEach((a) => a.classList.toggle("on", (a as HTMLElement).dataset.page === p));
   if (p === "market") renderKline();
   if (p === "panorama") loadPanorama();
-  if (p === "stock") ensureStockPage();                        // 菜单直达：无标的时空态引导
   if (p === "watchlist") renderWatchlist();   // 每次进入重画：与其他入口（收藏浮层/卡片）的分组选择保持同步
   if (p === "targets") loadTargets();
   if (p === "sectors" && !loaded.sectors) { loaded.sectors = true; void loadSectors(); }
@@ -151,7 +149,6 @@ function boot(): void {
   initAuth();
   initMarket();
   initPanorama();
-  initStockDetail();
   initWatchlist();
   initTargets();
   initSectors();
@@ -188,12 +185,6 @@ function boot(): void {
     loaded.sectors = true;                 // 由 jumpSector 统一加载，避免 goPage 再拉一次
     goPage("sectors");
     void jumpSector(d.id, d.sub === "concept" ? "concept" : "industry");
-  });
-  // 全景大表行点击 → 个股详情页（众赢 A股全景→个股详情 同链路）
-  document.addEventListener("yc:open-stock-detail", (e) => {
-    const d = (e as CustomEvent).detail;
-    goPage("stock");
-    openStockDetail(d);
   });
   document.addEventListener("yc:goto-settings", (e) => { goPage("settings"); openSettingsTab((e as CustomEvent).detail); });
   document.addEventListener("yc:patch-theme", (e) => {

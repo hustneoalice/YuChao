@@ -156,6 +156,7 @@ export interface TargetItem {
 
 export interface TargetScanOut {
   scanned: number; total_hits: number; as_of: string; provisional?: boolean;
+  computed_at?: string;
   values?: Record<string, number>; items: TargetItem[];
 }
 

@@ -103,7 +103,10 @@ async function load(resetPage = false): Promise<void> {
     scanned = r.scanned;
     if (resetPage) pager?.reset();
     drawPage();
-    st.textContent = r.as_of ? `数据截至 ${r.as_of}${r.provisional ? "（今日 K 线未落库，按实时快照暂定）" : ""}` : "";
+    const at = r.computed_at || "";
+    st.textContent = at
+      ? `计算于 ${at}｜数据截至 ${r.as_of}${r.provisional ? "（含实时快照）" : ""}`
+      : (r.as_of ? `数据截至 ${r.as_of}${r.provisional ? "（今日 K 线未落库，按实时快照暂定）" : ""}` : "");
   } catch {
     if (request !== revision) return;
     st.textContent = "计算失败，稍后自动重试";

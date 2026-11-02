@@ -1,6 +1,7 @@
 """行情读取：K 线（复权派生视图）/ 快照 / 搜索。"""
 from typing import Optional
 from threading import Lock
+from datetime import datetime
 
 from .. import db
 from ..symbol import INDEX_CATALOG, INDEX_NAMES, index_form, is_bj, normalize_symbol
@@ -476,6 +477,18 @@ def _tgt_sql(live_date: Optional[str]) -> str:
     return _TGT_SQL.replace("FROM daily_ohlcv),", f"FROM {live}),", 1)
 
 
+def _scan_computed_at(conn) -> str:
+    """target_scan 最近一次预计算完成时间（update_log 成功账，YYYY-MM-DD HH:MM）。"""
+    try:
+        ts = conn.execute(
+            "SELECT MAX(created_at) FROM update_log"
+            " WHERE data_type = 'target_scan' AND status = 'completed'"
+        ).fetchone()[0]
+    except Exception:
+        return ""
+    return str(ts)[:16] if ts else ""
+
+
 def target_scan_snapshot(conn) -> Optional[tuple[list[dict], dict]]:
     """后台预计算的指标层（target_scan 表）；None = 表缺失/数据日已过期。
 
@@ -494,6 +507,7 @@ def target_scan_snapshot(conn) -> Optional[tuple[list[dict], dict]]:
         db_as_of = str(latest[0]) if latest and latest[0] else str(head[0])
         return rows, {"as_of": str(head[0]), "scanned": len(rows),
                       "trend_as_of": db_as_of,
+                      "computed_at": _scan_computed_at(conn),
                       "provisional": str(head[0]) != db_as_of}
     except Exception:                               # 旧库未建表 / 只读模式：兜底直算
         return None
@@ -550,7 +564,8 @@ def compute_target_scan(conn) -> tuple[list[dict], dict]:
     db_as_of = str(fp[0])
     as_of = live["date"] if live else db_as_of
     meta = {"as_of": as_of, "scanned": len(out),
-            "trend_as_of": db_as_of, "provisional": as_of != db_as_of}
+            "trend_as_of": db_as_of, "provisional": as_of != db_as_of,
+            "computed_at": datetime.now().strftime("%Y-%m-%d %H:%M")}
     _TGT_CACHE["key"], _TGT_CACHE["rows"], _TGT_CACHE["meta"] = key, out, meta
     return out, meta
 

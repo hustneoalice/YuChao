@@ -183,6 +183,7 @@ class TargetScanOut(BaseModel):
     scanned: int = Field(description="实际进入判定的标的数（ST/北交剔除后）")
     total_hits: int = Field(description="命中当前勾选条件的总数")
     as_of: str = Field(default="", description="数据截至（今日 K 线未落库时取实时快照日）")
+    computed_at: str = Field(default="", description="本次结果的计算时间（YYYY-MM-DD HH:MM）")
     provisional: bool = Field(default=False, description="是否拼入今日实时快照（K 线未落库）")
     values: dict[str, float] = Field(default_factory=dict, description="本次生效的数值条件阈值")
     items: list[TargetItem] = Field(default_factory=list, description="命中列表（强势段在前，截断至 limit）")
