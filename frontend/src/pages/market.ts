@@ -1501,6 +1501,23 @@ function bindWlGroupChips(scope: HTMLElement): void {
     }));
 }
 
+/** 自选列表行的点击绑定：打开个股 / 移出自选。
+   refreshWlQuotes 会原地替换 .wl-list（不重绘整卡），此处必须重放绑定，
+   否则刷新后快照一回来，新行就点不动。 */
+function bindWatchRows(scope: HTMLElement): void {
+  scope.querySelectorAll<HTMLElement>("[data-go-stock]").forEach((r) =>
+    r.addEventListener("click", () => {
+      const sym = r.dataset.goStock!;
+      void openStock({ symbol: sym, name: r.dataset.goName || sym });
+    }));
+  scope.querySelectorAll<HTMLElement>("[data-wl-del]").forEach((b) =>
+    b.addEventListener("click", (e) => {
+      e.stopPropagation();                     // 不触发行的打开个股
+      removeWatch(b.dataset.wlDel!);
+      toast("已移出自选");
+    }));
+}
+
 function redrawWatchBody(): void {
   const el = document.querySelector<HTMLElement>('#rightcol .rcard[data-cid="watch"] .fbody');
   if (!el) return;
@@ -1517,7 +1534,7 @@ function redrawWatchBody(): void {
     mountWatchSearch();
   }
   const list = el.querySelector<HTMLElement>(".wl-list");
-  if (list) { bindWlGroupChips(list); void refreshSparksIn(list); }
+  if (list) { bindWlGroupChips(list); bindWatchRows(list); void refreshSparksIn(list); }
 }
 
 async function refreshWlQuotes(): Promise<void> {
@@ -2006,12 +2023,6 @@ export function renderRight(): void {
       // 新增入口：打开「添加自选」弹窗（共享搜索 + 分组选择）
       openModal("modal-add");
     }));
-  el.querySelectorAll<HTMLElement>("[data-wl-del]").forEach((b) =>
-    b.addEventListener("click", (e) => {
-      e.stopPropagation();                     // 不触发行的打开个股
-      removeWatch(b.dataset.wlDel!);
-      toast("已移出自选");
-    }));
   el.querySelectorAll<HTMLElement>("[data-mode-toggle]").forEach((b) =>
     b.addEventListener("click", () => {
       const cid = b.closest(".rcard")!.getAttribute("data-cid")!;
@@ -2062,11 +2073,7 @@ export function renderRight(): void {
     });
     card.addEventListener("dragleave", () => card.classList.remove("drop-before", "drop-after"));
   });
-  el.querySelectorAll<HTMLElement>("[data-go-stock]").forEach((r) =>
-    r.addEventListener("click", () => {
-      const sym = r.dataset.goStock!;
-      void openStock({ symbol: sym, name: r.dataset.goName || sym });
-    }));
+  bindWatchRows(el);   // 自选行：打开个股 / 移出自选（redrawWatchBody 重绘后也会重放）
   // 自选卡：挂搜索（保留输入态）+ 行内走势就绪缓存即画；行情快照按需拉取（节流 + 自选变更即刷）
   mountWatchSearch();
   restoreWatchSearch(kept);
