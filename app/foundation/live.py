@@ -171,13 +171,18 @@ def _tx_quotes(symbols: List[str]) -> Dict[str, Dict[str, Any]]:
             raw_ts = p[30] if len(p) > 30 else ""
             qdate = (f"{raw_ts[:4]}-{raw_ts[4:6]}-{raw_ts[6:8]}"
                      if len(raw_ts) >= 8 and raw_ts[:8].isdigit() else None)
+            # 成交量单位：全系统口径为股。腾讯科创板（sh688/689）p[36] 原始即股，
+            # 其余板块为手（normalize.py 同款先验；2026-11-02 实测 688420
+            # 「1213715 / 2400万元 / 20.12元」自证即股，×100 会让末根量柱高 100 倍）
+            star = tx_key.startswith("sh") and str(p[2] or "")[:3] in ("688", "689")
+            vol = num(36)
             out[sym] = {
                 "name": p[1], "price": num(3), "prev_close": num(4),
                 "open": num(5), "high": num(33), "low": num(34),
                 "chg": num(31), "pct": num(32),
                 "qdate": qdate,
                 "amount": num(37) * 1e4 if num(37) is not None else None,   # 万元 → 元
-                "volume": num(36) * 100 if num(36) is not None else None,   # 手 → 股
+                "volume": (int(vol) if star else int(vol * 100)) if vol is not None else None,
                 # 扩展位（基本信息卡用；指数行这些位为空 → None）
                 "turnover": num(38) if ext else None,      # 换手率%
                 "pe_ttm": num(39) if ext else None,        # 市盈率 TTM
