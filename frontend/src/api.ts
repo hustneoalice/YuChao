@@ -96,13 +96,20 @@ export const meApi = {
   testLlm: () => req<TestResult>("/me/llm/test", { method: "POST", body: {} }),
   /* F10 · 飞书推送（webhook/secret 永不回显） */
   feishu: () => req<FeishuCfg>("/me/feishu"),
-  putFeishu: (p: { webhook_url?: string; secret?: string; enabled?: boolean }) =>
-    req<FeishuCfg>("/me/feishu", { method: "PUT", body: p }),
+  putFeishu: (p: {
+    webhook_url?: string; secret?: string; enabled?: boolean;
+    push_enabled?: boolean; push_times?: string[];
+  }) => req<FeishuCfg>("/me/feishu", { method: "PUT", body: p }),
   testFeishu: () => req<TestResult>("/me/feishu/test", { method: "POST", body: {} }),
+  pushFeishuTargets: () =>
+    req<TestResult>("/me/feishu/targets/push", { method: "POST", body: {} }),
 };
 
 export interface LlmCfg { base_url: string; model: string; enabled: boolean; key_set: boolean }
-export interface FeishuCfg { enabled: boolean; webhook_set: boolean; has_secret: boolean }
+export interface FeishuCfg {
+  enabled: boolean; webhook_set: boolean; has_secret: boolean;
+  push_enabled: boolean; push_times: string[];
+}
 export interface TestResult { ok: boolean; message: string }
 
 /* ── market ── */

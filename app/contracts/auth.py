@@ -120,13 +120,17 @@ class LlmOut(BaseModel):
 class FeishuIn(BaseModel):
     webhook_url: Optional[str] = None        # 自定义机器人 webhook（None=不改）
     secret: Optional[str] = None             # 加签密钥（可选；None=不改，""=清除）
-    enabled: Optional[bool] = None
+    enabled: Optional[bool] = None           # 08:35 核心标早报
+    push_enabled: Optional[bool] = None      # 两点乾坤定时推送
+    push_times: Optional[list[str]] = None   # 每天多个时间点 HH:MM（最多 12 个）
 
 
 class FeishuOut(BaseModel):
     enabled: bool = False
     webhook_set: bool = False                # 只回是否已配置，不回 webhook 本体
     has_secret: bool = False
+    push_enabled: bool = False
+    push_times: list[str] = Field(default_factory=list)
 
 
 class TestOut(BaseModel):

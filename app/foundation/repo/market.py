@@ -803,3 +803,66 @@ def compute_target_trends(conn):
             finally:
                 cursor.close()
         return {symbol: row for symbol, row in _TGT_TREND_CACHE['rows'].items() if symbol in keys}
+
+
+def live_trend_summaries(conn, symbols, bars: int = 2000) -> dict:
+    """盘中用快照合成当日临时日线，重算指定标的 STICKV（识别「今日上穿零轴」）。
+
+    只给「中线橙 + 昨日负柱」候选集用——全市场盘中重算会撞 DuckDB 1.5GiB
+    内存上限（与 compute_target_trends 同一教训）。快照缺价、快照落后于日线
+    或当日已落库时返回 {}，调用方退回日线口径。"""
+    wanted = {str(s) for s in symbols if s}
+    if not wanted:
+        return {}
+    try:
+        head = conn.execute("SELECT MAX(trade_date) FROM market_snapshot").fetchone()
+        latest = conn.execute("SELECT MAX(date) FROM daily_ohlcv").fetchone()
+        if not head or not head[0] or (latest and latest[0] and str(head[0]) < str(latest[0])):
+            return {}
+        live_date = str(head[0])
+        live = {r[0]: (r[1], r[2], r[3]) for r in conn.execute(
+            "SELECT symbol, high, low, current FROM market_snapshot"
+            " WHERE trade_date = ? AND kind = 'stock' AND current IS NOT NULL"
+            " AND high IS NOT NULL AND low IS NOT NULL AND volume > 0",
+            [live_date]).fetchall() if r[0] in wanted}
+        if not live:
+            return {}
+        calendar = {str(r[0]): i for i, r in enumerate(
+            conn.execute("SELECT DISTINCT date FROM daily_ohlcv ORDER BY date").fetchall())}
+        if live_date in calendar:            # 当日已落库：调用方本不该走这里
+            return {}
+        calendar[live_date] = len(calendar)
+        from itertools import groupby
+        from ..target_trend import trend_histogram, trend_summary
+        out: dict = {}
+        symbols = sorted(wanted & set(live))
+        cursor = conn.cursor()
+        try:
+            for i in range(0, len(symbols), 200):
+                part = symbols[i:i + 200]
+                placeholders = ",".join("?" for _ in part)
+                cursor.execute(
+                    "SELECT symbol, date, high, low, close FROM v_daily_ohlcv_qfq"
+                    f" WHERE symbol IN ({placeholders})"
+                    f" QUALIFY ROW_NUMBER() OVER (PARTITION BY symbol ORDER BY date DESC)"
+                    f" <= {int(bars)} ORDER BY symbol, date", part)
+
+                def records():
+                    while batch := cursor.fetchmany(8192):
+                        yield from batch
+
+                for symbol, group in groupby(records(), key=lambda r: r[0]):
+                    rows_ = list(group)
+                    if not rows_ or any(any(v is None for v in r[2:]) for r in rows_):
+                        continue
+                    h, l, c = live[symbol]
+                    hist = [dict(high=r[2], low=r[3], close=r[4]) for r in rows_]
+                    hist.append(dict(high=h, low=l, close=c))
+                    out[symbol] = trend_summary(
+                        [str(r[1]) for r in rows_] + [live_date],
+                        trend_histogram(hist), calendar)
+        finally:
+            cursor.close()
+        return out
+    except Exception:
+        return {}

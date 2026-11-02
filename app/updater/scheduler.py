@@ -12,6 +12,7 @@ import logging
 
 from apscheduler.schedulers.background import BackgroundScheduler
 
+from .. import integrations
 from .registry import CRON_CHAIN, WEEKLY
 from .trading_calendar import is_trading_day
 from .util import now_cst
@@ -32,6 +33,10 @@ def build_scheduler(orchestrator, control: ControlRequests | None = None):
         sched.add_job(_cron_submit_weekly, "cron", day_of_week="sat",
                       hour=h, minute=m, args=[orchestrator, kind],
                       id=f"cron:{kind}", replace_existing=True)
+    # 两点乾坤：用户可配任意多个 HH:MM，故按分钟探测（到期才提交，平时只读 prefs）
+    sched.add_job(_minute_tick, "cron", day_of_week="mon-fri", minute="*",
+                  args=[orchestrator], id="cron:target_push",
+                  replace_existing=True)
     return sched
 
 
@@ -48,8 +53,24 @@ def _cron_submit_weekly(orchestrator, kind: str):
     _submit(orchestrator, kind)
 
 
-def _submit(orchestrator, kind: str):
-    r = orchestrator.submit(kind, trigger="cron")
+def _minute_tick(orchestrator):
+    """两点乾坤：每分钟探测用户配置的 HH:MM 是否到期（只读 SQLite，无到期即返回）。"""
+    now = now_cst()
+    if not is_trading_day(now):
+        return
+    day, slot = now.strftime("%Y-%m-%d"), now.strftime("%H:%M")
+    try:
+        due = integrations.due_push_users(slot, day)
+    except Exception:
+        logger.exception("[Scheduler] 两点乾坤到期探测失败")
+        return
+    if not due:
+        return
+    _submit(orchestrator, "target_push", params={"slot": slot, "day": day})
+
+
+def _submit(orchestrator, kind: str, params: dict | None = None):
+    r = orchestrator.submit(kind, trigger="cron", params=params)
     if r.get("ok"):
         logger.info("[Scheduler] 已触发 %s → task=%s", kind, r["task"]["id"])
     elif r.get("deduped"):

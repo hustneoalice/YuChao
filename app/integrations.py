@@ -13,6 +13,7 @@ from __future__ import annotations
 import base64
 import hashlib
 import hmac
+import re
 import time
 
 import httpx
@@ -21,6 +22,8 @@ from .auth import service
 
 _LLM_TIMEOUT = 15.0
 _FEISHU_TIMEOUT = 10.0
+MAX_PUSH_TIMES = 12          # 每天最多推送时段数（防误配 + prefs 体积）
+_TIME_RE = re.compile(r"^(\d{1,2}):(\d{2})$")
 
 
 # -- 配置读写（prefs 子树） ---------------------------------------------------
@@ -50,6 +53,24 @@ def get_feishu(user_id: str) -> dict:
     return dict(service.get_prefs(user_id).get("feishu") or {})
 
 
+def normalize_times(raw) -> list[str]:
+    """时间点规整：接受列表或逗号/分号/空白分隔的字符串，去重升序，最多 12 个。
+
+    非法项静默丢弃（前端已提示，后端仍兜底——prefs 可被其他端直接写入）。
+    """
+    if isinstance(raw, str):
+        raw = re.split(r"[,，;；\s]+", raw)
+    out = set()
+    for item in raw or ():
+        m = _TIME_RE.match(str(item).strip())
+        if not m:
+            continue
+        h, mi = int(m.group(1)), int(m.group(2))
+        if 0 <= h <= 23 and 0 <= mi <= 59:
+            out.add(f"{h:02d}:{mi:02d}")
+    return sorted(out)[:MAX_PUSH_TIMES]
+
+
 def put_feishu(user_id: str, patch: dict) -> dict:
     cur = service.get_prefs(user_id).get("feishu") or {}
     new = dict(cur)
@@ -59,8 +80,37 @@ def put_feishu(user_id: str, patch: dict) -> dict:
         new["secret"] = str(patch["secret"]).strip()
     if patch.get("enabled") is not None:
         new["enabled"] = bool(patch["enabled"])
+    if patch.get("push_enabled") is not None:
+        new["push_enabled"] = bool(patch["push_enabled"])
+    if patch.get("push_times") is not None:
+        new["push_times"] = normalize_times(patch["push_times"])
     service.put_prefs(user_id, {"feishu": new})
     return new
+
+
+def mark_feishu_pushed(user_id: str, marker: str) -> None:
+    """记一个「YYYY-MM-DD HH:MM」时段标记：同一时段重复 tick 不再推送。"""
+    cfg = get_feishu(user_id)
+    cfg["push_last"] = marker
+    service.put_prefs(user_id, {"feishu": cfg})
+
+
+def due_push_users(slot: str, day: str) -> list[dict]:
+    """该分钟到期、且当日该时段尚未推送过的用户（webhook + 开关 + 时间点）。
+
+    只读 SQLite prefs：调度器每分钟轻量探测，不碰 DuckDB / 不发网络请求。
+    """
+    out = []
+    for u in service.list_users():
+        cfg = get_feishu(u["id"])
+        if not cfg.get("push_enabled") or not cfg.get("webhook_url"):
+            continue
+        if slot not in normalize_times(cfg.get("push_times")):
+            continue
+        if str(cfg.get("push_last") or "") == f"{day} {slot}":
+            continue
+        out.append({"id": u["id"], "email": u.get("email") or "", **cfg})
+    return out
 
 
 # -- 飞书发送 -----------------------------------------------------------------
@@ -94,7 +144,8 @@ def feishu_text(text: str) -> dict:
     return {"msg_type": "text", "content": {"text": text}}
 
 
-def feishu_card(title: str, lines: list[tuple[str, str]]) -> dict:
+def feishu_card(title: str, lines: list[tuple[str, str]],
+                template: str = "blue") -> dict:
     """简单卡片：header + 多行 (label, value) markdown 字段。"""
     elements = [[
         {"tag": "div", "text": {
@@ -107,7 +158,7 @@ def feishu_card(title: str, lines: list[tuple[str, str]]) -> dict:
         "card": {
             "header": {
                 "title": {"tag": "plain_text", "content": title},
-                "template": "blue",
+                "template": template,
             },
             "elements": elements,
         },
@@ -162,3 +213,70 @@ def corepicks_message(conn, date: str | None = None) -> dict | None:
         lines.append((pool_names.get(pool, pool), seg or "—"))
     title = f"驭潮核心标 · {result.get('date') or ''}"
     return feishu_card(title, lines)
+
+
+# -- 两点乾坤推送内容 ----------------------------------------------------------
+
+_LD_MAX = 20            # 卡片最多逐只展示 20 条（超出只报数量）
+
+
+def _fmt(v, pattern: str) -> str:
+    try:
+        return pattern % float(v)
+    except (TypeError, ValueError):
+        return "—"
+
+
+def liangdian_message(conn, slot: str = "") -> dict | None:
+    """两点乾坤：趋势柱线当日上穿零轴（STICKV 负转正）+ 中线趋势橙（站上 MA45）。
+
+    盘中（当日 K 线尚未落库）时，用 market_snapshot 合成当日临时日线，只对
+    「中线橙 + 昨日负柱」候选重算 STICKV，才能识别「今日上穿」；收盘后直接
+    读 target_trend 预计算表。无命中返回 None（不发空消息打扰用户）。
+    """
+    from .foundation.repo import market as repo
+
+    rows, meta = repo.stock_targets_universe(conn)
+    trends = repo.stock_target_trends(conn)
+    trend_as_of = str(meta.get("trend_as_of") or meta.get("as_of") or "")
+    live = bool(meta.get("provisional"))            # 快照日比日线新 = 盘中口径
+    target_date = str(meta.get("as_of") or "") if live else trend_as_of
+    if live:
+        cand = [r["symbol"] for r in rows if r.get("mid_orange")
+                and (trends.get(r["symbol"]) or {}).get("trend_value") is not None
+                and (trends.get(r["symbol"]) or {}).get("trend_value") <= 0]
+        live_trends = repo.market.live_trend_summaries(conn, cand)
+        if live_trends:
+            trends = {**trends, **live_trends}
+        else:                                       # 快照不可用：退回日线口径
+            live, target_date = False, trend_as_of
+    hits = []
+    for row in rows:
+        if not row.get("mid_orange"):
+            continue
+        t = trends.get(row["symbol"]) or {}
+        if t.get("trend_data_date") != target_date:
+            continue
+        if t.get("trend_cross_ago") != 0 or (t.get("trend_value") or 0) <= 0:
+            continue                           # 只认「当日刚刚上穿零轴」
+        hits.append({**row, **t})
+    if not hits:
+        return None
+    hits.sort(key=lambda x: (-(x.get("seg") or 0), -(x.get("pct_chg") or 0)))
+
+    lines: list[tuple[str, str]] = [(
+        f"命中 {len(hits)} 只 · 数据截至 {target_date}"
+        + ("（盘中实时口径）" if live else ""),
+        "趋势柱线当日上穿零轴 + 中线趋势橙（站上 MA45）",
+    )]
+    for i, t in enumerate(hits[:_LD_MAX], start=1):
+        seg = f"第{t.get('seg')}段·{t.get('seg_name') or ''}"
+        lines.append((
+            f"{i}. {t.get('name') or ''} {t.get('symbol') or ''}",
+            f"{seg} ｜ {_fmt(t.get('close'), '%.2f')} · {_fmt(t.get('pct_chg'), '%+.2f%%')}"
+            f" ｜ STICKV {_fmt(t.get('trend_value'), '%+.1f')}",
+        ))
+    if len(hits) > _LD_MAX:
+        lines.append(("…", f"另有 {len(hits) - _LD_MAX} 只未展示"))
+    title = "驭潮 · 两点乾坤" + (f" · {slot}" if slot else "")
+    return feishu_card(title, lines, template="orange")

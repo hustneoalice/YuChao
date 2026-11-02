@@ -89,6 +89,12 @@ TASKS: tuple[dict, ...] = (
      "fn": "app.updater.collectors.feishu_push:push_corepicks",
      "notify": True,
      "description": "08:35 核心标名单 → 飞书（按用户配置，名单为空/无人启用则跳过）"},
+    {"kind": "target_push", "label": "两点乾坤推送",
+     "fn": "app.updater.collectors.target_push:push_target_signals",
+     "notify": True,
+     "cooldown_s": 0,     # 每分钟探测：冷却会拦掉相邻时段
+     "description": "按用户设置的时间点（每天可多个，HH:MM）计算趋势柱线当日"
+                    "上穿零轴 + 中线趋势橙的标的 → 飞书；无命中不发空消息"},
     {"kind": "package_export", "label": "导出数据包",
      "fn": "app.updater.packaging:run_export",
      "description": "底座全量快照 → 离线数据包 + SHA256 manifest（F14，与更新互斥）"},

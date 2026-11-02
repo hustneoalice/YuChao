@@ -490,25 +490,45 @@ async function renderFeishu(body: HTMLElement): Promise<void> {
     `<input class="field" id="fs-url" style="flex:1;min-width:260px" placeholder="${cfg.webhook_set ? "已配置 · 留空保持不变" : "https://open.feishu.cn/open-apis/bot/v2/hook/…"}"></div></div>` +
     `<div class="setrow"><span class="lab">签名密钥</span><div class="ctl">` +
     `<input class="field" id="fs-secret" type="password" style="flex:1;min-width:260px" placeholder="${cfg.has_secret ? "已配置 · 留空保持不变" : "机器人开启「加签」时才填"}"></div></div>` +
-    `<div class="setrow"><span class="lab">启用</span><div class="ctl">` +
+    `<div class="setrow"><span class="lab">核心标早报</span><div class="ctl">` +
     `<span class="switch${cfg.enabled ? " on" : ""}" id="fs-sw"><i></i></span>` +
-    `<span style="font-size:11px;color:var(--faint)">每个交易日 08:35 推送核心标早报</span></div></div>` +
+    `<span style="font-size:11px;color:var(--faint)">每个交易日 08:35 推送核心标名单</span></div></div>` +
+    `<div class="setrow"><span class="lab">两点乾坤</span><div class="ctl">` +
+    `<span class="switch${cfg.push_enabled ? " on" : ""}" id="fs-push-sw"><i></i></span>` +
+    `<input class="field" id="fs-times" style="flex:1;min-width:220px" value="${esc(cfg.push_times.join(", "))}" ` +
+    `placeholder="09:45, 10:30, 14:30（逗号分隔，最多 12 个）"></div></div>` +
+    `<div class="setrow"><span class="lab"></span><div class="ctl">` +
+    `<span style="font-size:11px;color:var(--faint)">趋势柱线当日上穿零轴 + 中线趋势橙（站上 MA45）：交易日到点计算并推送，无命中不发消息</span></div></div>` +
     `<div class="setrow"><span class="lab"></span><div class="ctl">` +
     `<button class="hbtn primary" id="fs-save">保存</button>` +
-    `<button class="hbtn" id="fs-test">发送测试消息</button></div></div>` +
+    `<button class="hbtn" id="fs-test">发送测试消息</button>` +
+    `<button class="hbtn" id="fs-push-now">立即推送两点乾坤</button></div></div>` +
     `<div style="font-size:10.5px;color:var(--faint);line-height:1.7">获取方式：飞书群 → 设置 → 群机器人 → 添加自定义机器人 → 复制 Webhook 地址。<br>` +
-    `推送内容：核心标早报（追涨池 / 低吸池，含六分段与排名）；名单为空不打扰。</div></div>`;
+    `推送内容：核心标早报（追涨池 / 低吸池，含六分段与排名）+ 两点乾坤信号（盘中按实时快照判定）；无命中不打扰。</div></div>`;
   let enabled = cfg.enabled;
+  let pushEnabled = cfg.push_enabled;
   document.getElementById("fs-sw")!.addEventListener("click", (e) => {
     enabled = !enabled;
     (e.currentTarget as HTMLElement).classList.toggle("on", enabled);
   });
+  document.getElementById("fs-push-sw")!.addEventListener("click", (e) => {
+    pushEnabled = !pushEnabled;
+    (e.currentTarget as HTMLElement).classList.toggle("on", pushEnabled);
+  });
   document.getElementById("fs-save")!.addEventListener("click", async () => {
+    const rawTimes = (document.getElementById("fs-times") as HTMLInputElement).value;
+    const times = parsePushTimes(rawTimes);
+    if (times === null) {
+      toast("时间格式需为 HH:MM，例如 09:45, 10:30, 14:30");
+      return;
+    }
     try {
       await meApi.putFeishu({
         webhook_url: (document.getElementById("fs-url") as HTMLInputElement).value.trim() || undefined,
         secret: (document.getElementById("fs-secret") as HTMLInputElement).value.trim() || undefined,
         enabled,
+        push_enabled: pushEnabled,
+        push_times: times,
       });
       toast("飞书推送配置已保存");
       void render();
@@ -520,6 +540,28 @@ async function renderFeishu(body: HTMLElement): Promise<void> {
       toast(`${r.ok ? "✓" : "✗"} ${r.message}`);
     } catch (e) { toast((e as Error).message || "测试请求失败"); }
   });
+  document.getElementById("fs-push-now")!.addEventListener("click", async (e) => {
+    const btn = e.currentTarget as HTMLButtonElement;
+    btn.disabled = true;
+    try {
+      const r = await meApi.pushFeishuTargets();
+      toast(`${r.ok ? "✓" : "✗"} ${r.message}`);
+    } catch (err) { toast((err as Error).message || "推送请求失败"); }
+    finally { btn.disabled = false; }
+  });
+}
+
+/** 解析时间点输入：逗号/分号/空白分隔，校验 HH:MM，去重升序，最多 12 个；非法返回 null */
+function parsePushTimes(raw: string): string[] | null {
+  const out = new Set<string>();
+  for (const part of raw.split(/[,，;；\s]+/).filter(Boolean)) {
+    const m = /^(\d{1,2}):(\d{2})$/.exec(part);
+    if (!m) return null;
+    const h = Number(m[1]), mi = Number(m[2]);
+    if (h > 23 || mi > 59) return null;
+    out.add(`${String(h).padStart(2, "0")}:${String(mi).padStart(2, "0")}`);
+  }
+  return [...out].sort().slice(0, 12);
 }
 
 /* ── F11 · 大模型 BYOK（key 不回显，留空 = 保持不变；"" = 清除由后端支持，前端不暴露防误触） ── */
