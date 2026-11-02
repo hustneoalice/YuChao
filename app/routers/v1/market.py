@@ -447,23 +447,21 @@ def targets(conds: str = Query(default="vol,short,mid,up20",
     所有勾选条件同时满足（AND 叠加）；未勾选的不参与判定。
     flag 条件看布尔字段，value 条件按阈值比较（op 默认 >=），trend 走
     trend_matches 参数化判定；命中列表按六分段强势在前。"""
-    from datetime import datetime
-    from zoneinfo import ZoneInfo
     from ...foundation.target_trend import trend_matches
 
     want = screening.enabled_keys(conds)
     vals = screening.parse_values(values, want)
     rows, meta = repo.market.stock_targets_universe(conn)
+    trend_as_of = meta.get("trend_as_of") or meta["as_of"]
+    provisional = bool(meta.get("provisional"))
     if "trend" in want:
         trends = repo.market.stock_target_trends(conn)
-        now = datetime.now(ZoneInfo("Asia/Shanghai"))
-        provisional = now.weekday() < 5 and now.hour < 15
         rows = [{**row, **trends.get(row['symbol'], {}),
-                 "trend_provisional": provisional and trends.get(row['symbol'], {}).get('trend_data_date') == now.date().isoformat()}
+                 "trend_provisional": provisional}
                 for row in rows]
 
     def trend_hit(t: dict) -> bool:
-        return (t.get('trend_data_date') == meta['as_of'] and
+        return (t.get('trend_data_date') == trend_as_of and
                 trend_matches(t, trend_mode, trend_recent, trend_still_above, trend_above_days))
 
     items = [t for t in rows if screening.matches(t, want, vals, trend_hit(t) if "trend" in want else None)]
@@ -471,6 +469,7 @@ def targets(conds: str = Query(default="vol,short,mid,up20",
         ((t.get('trend_cross_ago') if t.get('trend_cross_ago') is not None else 100000), -t['seg'])
         if "trend" in want else (-t['seg'], -(t['vol_ratio'] or 0)))
     return TargetScanOut(items=items[:limit], total_hits=len(items), values=vals,
+                         provisional=provisional,
                          scanned=meta["scanned"], as_of=meta["as_of"])
 
 

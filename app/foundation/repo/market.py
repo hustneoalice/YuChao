@@ -345,7 +345,7 @@ def _bj_scoped(rows: list[dict]) -> list[dict]:
 
 
 _TGT_SEGNAME = ("", "超卖", "低位", "弱势", "回升", "强势", "超买")
-_TGT_CACHE: dict = {"key": None, "rows": []}
+_TGT_CACHE: dict = {"key": None, "rows": [], "meta": {}}
 _TGT_COLS = ("symbol, name, close, pct_chg, vol_ma40, vol_ratio, vol_hit,"
              " short_orange, mid_orange, limit_up_20d, limit_up_cnt,"
              " seg, seg_name, pullback")
@@ -375,21 +375,72 @@ _TGT_SQL = (
     " FROM u GROUP BY symbol")
 
 
+def _live_overlay(conn) -> Optional[dict]:
+    """今日尚未落库（或 K 线增量跑到一半）时的实时截面 → 目标页最新口径。
+
+    K 线增量 17:00 才落库且逐只写入，期间若只读日线，会出现「目标页涨 3 个点、
+    点进行情却跌 6 个点」的口径错位（2026-11-02 实测）。这里把快照当日行
+    （current/change_rate/volume）当作临时日线拼进指标层，条件判定、涨跌幅、
+    量比立刻与行情页一致；预计算表追上当日（target_scan.as_of >= 快照日）后退出。
+
+    守卫：快照行数 < 3000 视为不足全市场覆盖（旧残留），不拼接；快照日早于
+    日线最新日也视为过期。volume > 0 过滤停牌零量行，避免污染 MA40。"""
+    try:
+        head = conn.execute("""
+            SELECT MAX(trade_date), COUNT(*), MAX(updated_at) FROM market_snapshot
+            WHERE kind = 'stock' AND current IS NOT NULL AND volume > 0
+        """).fetchone()
+        if not head or not head[0] or int(head[1] or 0) < 3000:
+            return None
+        latest = conn.execute("SELECT MAX(date) FROM daily_ohlcv").fetchone()
+        if latest and latest[0] and str(head[0]) < str(latest[0]):
+            return None                            # 快照落后于日线：无当日缺口
+        try:
+            table_as_of = conn.execute("SELECT MAX(as_of) FROM target_scan").fetchone()[0]
+        except Exception:
+            table_as_of = None
+        if table_as_of and str(table_as_of) >= str(head[0]):
+            return None                            # 预计算已含当日：直接读表更快
+        return {"date": str(head[0]), "updated_at": str(head[2]), "rows": int(head[1])}
+    except Exception:                               # 旧库无快照表：退化纯日线口径
+        return None
+
+
+def _tgt_sql(live_date: Optional[str]) -> str:
+    """指标层 SQL：live_date 非空时用快照当日行替换当日日线（避免部分落库重复）。"""
+    if not live_date:
+        return _TGT_SQL
+    live = (
+        "(SELECT symbol, date, close, volume, pct_chg FROM daily_ohlcv"
+        f" WHERE date < DATE '{live_date}'"
+        " UNION ALL"
+        " SELECT symbol, trade_date AS date, current AS close,"
+        " volume * 100 AS volume, change_rate AS pct_chg FROM market_snapshot"
+        f" WHERE kind = 'stock' AND trade_date = DATE '{live_date}'"
+        " AND current IS NOT NULL AND volume > 0)"
+    )
+    return _TGT_SQL.replace("FROM daily_ohlcv),", f"FROM {live}),", 1)
+
+
 def target_scan_snapshot(conn) -> Optional[tuple[list[dict], dict]]:
     """后台预计算的指标层（target_scan 表）；None = 表缺失/数据日已过期。
 
     定时任务在 K 线增量落库后重算落表，端点只读现成结果——
-    打开目标页不再触发全市场窗口 SQL。"""
+    打开目标页不再触发全市场窗口 SQL。
+    as_of 允许比日线新（预计算时用了实时快照），只有落后日线才算过期。"""
     try:
         head = conn.execute("SELECT MAX(as_of), COUNT(*) FROM target_scan").fetchone()
         if not head or not head[0] or int(head[1] or 0) < 500:
             return None
         latest = conn.execute("SELECT MAX(date) FROM daily_ohlcv").fetchone()
-        if not latest or str(latest[0]) != str(head[0]):
+        if latest and latest[0] and str(head[0]) < str(latest[0]):
             return None                            # 预计算落后于最新数据：走即时兜底
         rows = [dict(zip(_TGT_COLS.replace(", ", ",").split(","), r))
                 for r in conn.execute(f"SELECT {_TGT_COLS} FROM target_scan").fetchall()]
-        return rows, {"as_of": str(head[0]), "scanned": len(rows)}
+        db_as_of = str(latest[0]) if latest and latest[0] else str(head[0])
+        return rows, {"as_of": str(head[0]), "scanned": len(rows),
+                      "trend_as_of": db_as_of,
+                      "provisional": str(head[0]) != db_as_of}
     except Exception:                               # 旧库未建表 / 只读模式：兜底直算
         return None
 
@@ -398,10 +449,12 @@ def stock_targets_universe(conn) -> tuple[list[dict], dict]:
     """目标页全市场扫描：优先读后台定时预计算表，冷启动/过期时才即时算。
 
     六分段/均线/量比/涨停次数一次算好；条件过滤与排序由端点即时完成——
-    用户改条件即刻重筛，与是否预计算无关。"""
-    snap = target_scan_snapshot(conn)
-    if snap is not None:
-        return snap
+    用户改条件即刻重筛，与是否预计算无关。
+    快照比日线新（今日 K 线未落库）时先走实时拼接，避免与行情页口径错位。"""
+    if _live_overlay(conn) is None:
+        snap = target_scan_snapshot(conn)
+        if snap is not None:
+            return snap
     return compute_target_scan(conn)
 
 
@@ -410,14 +463,16 @@ def compute_target_scan(conn) -> tuple[list[dict], dict]:
     fp = conn.execute(
         "SELECT MAX(date), COUNT(*), COUNT(DISTINCT symbol), SUM(pct_chg)"
         " FROM daily_ohlcv").fetchone()
+    live = _live_overlay(conn)
     bj = settings.bj_enabled
-    key = (str(fp[0]), int(fp[1] or 0), int(fp[2] or 0), round(float(fp[3] or 0), 4), bj)
+    key = (str(fp[0]), int(fp[1] or 0), int(fp[2] or 0), round(float(fp[3] or 0), 4), bj,
+           live["date"] if live else None, live["updated_at"] if live else None)
     if _TGT_CACHE["key"] == key:
-        return _TGT_CACHE["rows"], {"as_of": str(fp[0]), "scanned": len(_TGT_CACHE["rows"])}
+        return _TGT_CACHE["rows"], _TGT_CACHE["meta"]
 
     names = dict(conn.execute("SELECT symbol, name FROM stock_universe").fetchall())
     out: list[dict] = []
-    for r in conn.execute(_TGT_SQL).fetchall():
+    for r in conn.execute(_tgt_sql(live["date"] if live else None)).fetchall():
         sym, name = r[0], names.get(r[0])
         if name and "ST" in str(name).upper():          # ST 直接剔除
             continue
@@ -438,8 +493,12 @@ def compute_target_scan(conn) -> tuple[list[dict], dict]:
             "seg": seg, "seg_name": _TGT_SEGNAME[seg],
             "pullback": bool(ma7 and close < ma7),
         })
-    _TGT_CACHE["key"], _TGT_CACHE["rows"] = key, out
-    return out, {"as_of": str(fp[0]), "scanned": len(out)}
+    db_as_of = str(fp[0])
+    as_of = live["date"] if live else db_as_of
+    meta = {"as_of": as_of, "scanned": len(out),
+            "trend_as_of": db_as_of, "provisional": as_of != db_as_of}
+    _TGT_CACHE["key"], _TGT_CACHE["rows"], _TGT_CACHE["meta"] = key, out, meta
+    return out, meta
 
 
 _PY_CACHE: dict[str, dict[str, str]] = {}

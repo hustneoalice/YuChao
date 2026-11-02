@@ -151,7 +151,8 @@ export interface TargetItem {
 }
 
 export interface TargetScanOut {
-  scanned: number; total_hits: number; as_of: string; values?: Record<string, number>; items: TargetItem[];
+  scanned: number; total_hits: number; as_of: string; provisional?: boolean;
+  values?: Record<string, number>; items: TargetItem[];
 }
 
 /* 选股条件元数据（后端 foundation/screening.CONDITIONS 下发，条件栏据此渲染） */
