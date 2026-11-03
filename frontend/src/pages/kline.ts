@@ -258,6 +258,98 @@ function ensureRegistered(): void {
       return false;   // 继续默认绘制 DIF/DEA 两条折线
     },
   });
+  // 九转序列（TD Sequential）：主图数字叠加。
+  // Setup：收盘对 4 根前收盘，连续计数 1..9（相等双向归零，中途断掉整段作废）；
+  // 低9 画在 K 线下方、高9 上方。九转成立后进入 Countdown：收盘 ≤2 根前最低
+  // （或 ≥2 根前最高）累计（非连续，不满足只跳过），尾段 10..13 续在同一行；
+  // 第 13 个有效 bar 做「完美」检验（低向最低需 ≤ 第 8 个有效 bar 收盘），否则停在 12。
+  registerIndicator({
+    name: "ZY_TD_SEQ",
+    shortName: "九转序列",
+    calc: (list) => {
+      const n = list.length;
+      const out = Array.from({ length: n }, () => ({
+        td: null as null, lo: 0, hi: 0,
+        sl: 0, sh: 0, cl: 0, ch: 0,   // Setup 低/高计数、Countdown 低/高累计
+      }));
+      let d = 0, u = 0;                   // Setup 连续计数
+      let cdL = 0, cdH = 0;               // Countdown 累计
+      let pendL = false, pendH = false;   // 九转成立，等待倒计时
+      let i8L = -1, i8H = -1;             // 倒计时第 8 个有效 bar
+      for (let i = 0; i < n; i++) {
+        const b = list[i];
+        out[i].lo = b.low; out[i].hi = b.high;
+        if (i >= 4) {
+          const ref = list[i - 4].close;
+          if (b.close < ref) { d++; u = 0; }
+          else if (b.close > ref) { u++; d = 0; }
+          else { d = 0; u = 0; }
+          // 反向九转成立 → 取消另一方向的未完成倒计时
+          if (u === 9) { pendH = true; cdH = 0; i8H = -1; pendL = false; cdL = 0; }
+          if (d === 9) { pendL = true; cdL = 0; i8L = -1; pendH = false; cdH = 0; }
+          out[i].sl = d; out[i].sh = u;
+          if (d >= 9) d = 0;   // 九转走完，下一根重新从 1 起算
+          if (u >= 9) u = 0;
+        }
+        // Countdown 低向：不连续，满足才 +1
+        if (pendL && i >= 2 && b.close <= list[i - 2].low) {
+          cdL++;
+          if (cdL === 8) i8L = i;
+          if (cdL >= 13) {
+            if (i8L >= 0 && b.low <= list[i8L].close) out[i].cl = 13;  // 完美 → 13
+            else { cdL = 12; out[i].cl = 12; }                         // 不完美 → 停 12
+            pendL = false;
+          } else out[i].cl = cdL;
+        }
+        // Countdown 高向
+        if (pendH && i >= 2 && b.close >= list[i - 2].high) {
+          cdH++;
+          if (cdH === 8) i8H = i;
+          if (cdH >= 13) {
+            if (i8H >= 0 && b.high >= list[i8H].close) out[i].ch = 13;
+            else { cdH = 12; out[i].ch = 12; }
+            pendH = false;
+          } else out[i].ch = cdH;
+        }
+      }
+      return out;
+    },
+    figures: [
+      { key: "td", title: "九转", type: "line", styles: () => ({ color: "transparent" }) },
+    ],
+    draw: ({ ctx, chart, indicator }) => {
+      const data = (indicator.result || []) as ({ lo: number; hi: number; sl: number; sh: number; cl: number; ch: number } | null)[];
+      const barSpace = chart.getBarSpace?.() || { bar: 8 };
+      const bw = barSpace.bar || 8;
+      if (bw < 3) return false;           // 太密：不标，避免糊成一片
+      const onlyKey = bw < 6;             // 窄柱只留 9 / 13
+      const font = bw >= 8 ? 10 : 9;
+      ctx.save();
+      ctx.textAlign = "center";
+      data.forEach((it, i) => {
+        if (!it) return;
+        const x = (chart.convertToPixel({ dataIndex: i, value: 0 }) as { x?: number })?.x;
+        if (x == null) return;
+        const low = it.cl >= 10 ? it.cl : it.sl;   // 倒计时尾段优先（10..13 接在 9 后面）
+        const high = it.ch >= 10 ? it.ch : it.sh;
+        const put = (v: number, y: number, dir: "low" | "high") => {
+          if (!v) return;
+          if (onlyKey && v !== 9 && v !== 13) return;
+          const strong = v === 9 || v === 13;
+          ctx.font = `${strong ? 600 : 400} ${strong ? font + 1 : font}px ui-monospace,SFMono-Regular,Menlo,monospace`;
+          ctx.fillStyle = dir === "low" ? chartDown() : chartUp();
+          ctx.textBaseline = dir === "low" ? "top" : "bottom";
+          ctx.fillText(String(v), x, y);
+        };
+        const loPix = (chart.convertToPixel({ dataIndex: i, value: it.lo }) as { y?: number })?.y;
+        const hiPix = (chart.convertToPixel({ dataIndex: i, value: it.hi }) as { y?: number })?.y;
+        if (loPix != null) put(low, loPix + 3, "low");
+        if (hiPix != null) put(high, hiPix - 3, "high");
+      });
+      ctx.restore();
+      return false;
+    },
+  });
   registerTrendChannel("SHORT_TREND_CHANNEL", "短线趋势", 7, 10, 0.82);
   registerTrendChannel("MID_TREND_CHANNEL", "中线趋势", 35, 45, 0.86);
   // 分时均价线（VWAP）+ 昨收虚线基准（通达信分时同款）：后端 /market/minute 已算好，
@@ -740,6 +832,7 @@ export const IND_DEFS: IndDef[] = [
   // 主图叠加
   { key: "strongpullback", kc: "ZY_STRONG_PULLBACK", label: "强势调整", cat: "main", where: "main", desc: "用户约定规则：次日量比(50%,200%)、后续>50%、收盘≥MA45；破保护位/低量结束；同组眼睛连线；非众赢原公式" },
   { key: "ma", kc: "MA", label: "MA", cat: "main", where: "main", desc: "移动平均线 5/10/20" },
+  { key: "td", kc: "ZY_TD_SEQ", label: "九转序列", cat: "main", where: "main", desc: "TD Sequential：低9/高9 连续数字（收盘对 4 根前），随后倒计时 10–13（收盘对 2 根前高低），13 需完美检验" },
   { key: "ema", kc: "EMA", label: "EMA", cat: "main", where: "main", desc: "指数移动平均线" },
   { key: "boll", kc: "BOLLX", label: "BOLL", cat: "main", where: "main", desc: "布林带（虚线三轨+淡填充）" },
   { key: "sar", kc: "SAR", label: "SAR", cat: "main", where: "main", desc: "抛物线转向（停损点）" },
