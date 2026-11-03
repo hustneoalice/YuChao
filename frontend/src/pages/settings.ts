@@ -669,14 +669,22 @@ export async function refreshDatachip(): Promise<void> {
   let face: ChipFace;
   try {
     const st = await dataApi.status();
-    const latest = st.tables.map((x) => x.latest_date).filter(Boolean).sort().pop();
+    // 「更新至」只认已收盘的日级数据（YYYY-MM-DD）。盘中快照那列是带时刻的
+    // （如 2026-11-02 15:12），直接取 max 会把它排到最后，看起来像「盘后没更新、
+    // 卡在 15 点」——快照本身收盘后就该停，日线要等 17:00 链位。
+    const daily = st.tables.map((x) => x.latest_date)
+      .filter((x): x is string => !!x && /^\d{4}-\d{2}-\d{2}$/.test(x)).sort();
+    const latest = daily[daily.length - 1];
+    const snap = st.tables.find((x) => x.table === "market_snapshot")?.latest_date ?? null;
     const [label, cls] = STAGE_TEXT[st.stage] ?? ["状态未知", "bad"];
     face = {
       text: `行情数据 · ${label}${latest ? " · 更新至 " + latest : ""}`,
       // i-ok：健康用绿点（--up 是 A 股涨的红，语义是行情不是状态，勿用于健康态）
       cls: cls === "ok" ? "i-ok" : cls === "warn" ? "i-mid" : "",
       title: latest
-        ? `本地行情数据${label}，最新数据 ${latest}。点击查看数据底座`
+        ? `本地行情数据${label}，收盘数据更新至 ${latest}` +
+          (snap ? `；盘中快照最后 ${snap}（收盘后停止轮询属正常）` : "") +
+          `。点击查看数据底座与体检`
         : `本地行情数据${label}。点击查看数据底座`,
     };
   } catch {
