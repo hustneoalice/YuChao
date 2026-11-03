@@ -13,6 +13,7 @@ from datetime import datetime
 from ..util import expected_asof
 from ..writer import writer
 from . import sources
+from .http import market_prefix
 
 logger = logging.getLogger("yuchao.updater")
 
@@ -26,7 +27,7 @@ def update_valuation(progress=None, ctx=None) -> dict:
         day = expected_asof()
         d0 = datetime.strptime(day, "%Y-%m-%d").date()
         try:
-            snap, listed, industries = sources.fetch_valuation_snapshot(
+            snap, listed, industries, names = sources.fetch_valuation_snapshot(
                 progress=progress, cancel=cancel)
             src = "东财 clist"
         except RuntimeError as e:
@@ -40,6 +41,7 @@ def update_valuation(progress=None, ctx=None) -> dict:
             raw = sources.fetch_qt_batch(syms, progress=progress, cancel=cancel)
             snap = {s: (v[2], v[3], v[4], v[5], v[6]) for s, v in raw.items()}
             listed, industries = {}, {}
+            names = {}
             src = "腾讯 qt（备用车道）"
             if not snap:
                 raise RuntimeError("腾讯备用车道也为空（可能是网络整体故障）") from e
@@ -98,6 +100,29 @@ def update_valuation(progress=None, ctx=None) -> dict:
                 ind_fixed = len(industries)
         except Exception as e:
             logger.warning("[Valuation] 补行业分类失败: %s", e)
+
+        # 新股入池：stock_universe 是慢变量，东财全市场快照里出现、库里没有的
+        # 代码补齐（简称/上市日/行业一次拿齐）——否则新股搜不到、也进不了
+        # K线/资金流等以 universe 为目标的采集车道。
+        added = 0
+        try:
+            if names:
+                have = {str(r[0]) for r in conn.execute(
+                    "SELECT symbol FROM stock_universe").fetchall()}
+                fresh = [
+                    (sym, nm, market_prefix(sym), industries.get(sym), "traded",
+                     datetime.strptime(listed[sym], "%Y-%m-%d").date()
+                     if listed.get(sym) else None)
+                    for sym, nm in names.items() if sym not in have
+                ]
+                if fresh:
+                    conn.executemany(
+                        "INSERT OR IGNORE INTO stock_universe "
+                        "(symbol,name,market,industry,status,list_date,updated_at) "
+                        "VALUES (?,?,?,?,?,?,CURRENT_TIMESTAMP)", fresh)
+                    added = len(fresh)
+        except Exception as e:
+            logger.warning("[Valuation] 新股入池失败: %s", e)
         conn.commit()
         writer.reset()          # 写完立即释放锁
 
@@ -106,7 +131,8 @@ def update_valuation(progress=None, ctx=None) -> dict:
                       detail=f"{day} 写入 {len(rows)} 个标的估值（其中 {with_pe} 个有 PE，"
                              f"{len(suspended)} 个当日无成交/停牌，来源 {src}）"
                              + (f"，补 {fixed} 个上市日期" if fixed else "")
-                             + (f"，刷新 {ind_fixed} 个行业分类" if ind_fixed else ""))
+                             + (f"，刷新 {ind_fixed} 个行业分类" if ind_fixed else "")
+                             + (f"，新股入池 {added} 只" if added else ""))
     except Exception as e:
         result.update(status="failed", error=f"{type(e).__name__}: {str(e)[:200]}")
         logger.exception("[Valuation] 估值采集失败")

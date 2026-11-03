@@ -295,6 +295,7 @@ def test_valuation_task(updater_env, tmp_path, monkeypatch):
              "000858": (18.0, 4.0, 5.6e11, 5.6e11, None)},        # 无成交 → 停牌旁表
             {"600519": "2001-08-27"},
             {"600519": "酿酒行业"},
+            {"600519": "贵州茅台"},
         ))
 
     res = vmod.update_valuation(progress=None, ctx={"cancel_check": lambda: False})

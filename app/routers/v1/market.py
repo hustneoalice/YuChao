@@ -386,6 +386,21 @@ def search(
 ):
     want = {k.strip() for k in kinds.split(",") if k.strip()} if kinds else None
     hits = repo.market.search(conn, q, limit, want)
+    # 新股兜底：stock_universe 是慢变量（当天 16:20 估值任务才入池），本地命中
+    # 不足时补腾讯联想，避免刚上市的票搜不到；命中重复的以本地行为准。
+    if len(hits) < limit and (want is None or "stock" in want):
+        try:
+            from ...updater.collectors import sources as up_sources   # 延迟导入，避免 API 启动耦合采集层
+            remote = up_sources.search_suggest(q, min(limit - len(hits), 8))
+        except Exception:
+            remote = []
+        have = {h["symbol"] for h in hits}
+        for r in remote:
+            if r["symbol"] in have:
+                continue
+            hits.append({"symbol": r["symbol"], "name": r["name"],
+                         "market": r["market"].lower(), "industry": None,
+                         "status": None, "kind": "stock", "sub": None})
     return Page(items=[SearchHit(**h) for h in hits], total=len(hits))
 
 

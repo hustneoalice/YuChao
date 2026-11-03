@@ -65,6 +65,15 @@ def get_json(url: str, params: Dict[str, Any], referer: str,
     raise last
 
 
+def get_text(url: str, params: Dict[str, Any], referer: str,
+             timeout: float = 8.0) -> str:
+    """纯文本接口（腾讯 smartbox 之类 js 片段，不走 json 解析）。"""
+    r = client.get(url, params=params, timeout=timeout,
+                   headers={"User-Agent": random.choice(_UA_POOL), "Referer": referer})
+    r.raise_for_status()
+    return r.text
+
+
 def get_json_hosts(path: str, params: Dict[str, Any], hosts: Iterable[str],
                    referer: str, timeout: float = 15.0) -> Any:
     """多域名轮换重试：全部失败才抛（1.0 _get_json 语义）。"""

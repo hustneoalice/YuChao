@@ -16,7 +16,7 @@ import re
 import time
 from typing import Any, Dict, List, Optional, Tuple
 
-from .http import get_json, get_json_hosts, sina_symbol, tx_symbol
+from .http import get_json, get_json_hosts, get_text, sina_symbol, tx_symbol
 from .normalize import normalize_rows
 
 _CLIST_HOSTS = ("https://push2.eastmoney.com", "https://push2delay.eastmoney.com")
@@ -24,7 +24,7 @@ _DATACENTER_HOSTS = ("https://datacenter-web.eastmoney.com", "https://data.eastm
 
 # 全市场 A 股（沪深主板/创业板/科创板/北交所）
 _FS_SCOPE = "m:0+t:6,m:0+t:80,m:1+t:2,m:1+t:23,m:0+t:81+s:2048"
-_VAL_FIELDS = "f12,f115,f23,f20,f21,f6,f26,f100"
+_VAL_FIELDS = "f12,f14,f115,f23,f20,f21,f6,f26,f100"
 _PAGE_SIZE = 200
 _MAX_PAGES = 60
 
@@ -58,15 +58,17 @@ def _parse_f26(v: Any) -> Optional[str]:
 # ---------------------------------------------------------------------------
 
 def fetch_valuation_snapshot(progress=None, cancel=None) -> Tuple[
-        Dict[str, Tuple], Dict[str, str], Dict[str, str]]:
-    """全市场快照 → ({sym: (pe,pb,total_mv,circ_mv,amount)}, {sym: 上市日}, {sym: 行业})。
+        Dict[str, Tuple], Dict[str, str], Dict[str, str], Dict[str, str]]:
+    """全市场快照 → ({sym: (pe,pb,total_mv,circ_mv,amount)}, {sym: 上市日},
+    {sym: 行业}, {sym: 名称})。
 
-    顺带取回上市日期（新股 list_date 缺失补齐用）与 f100 行业（回填
-    stock_universe.industry）——同一分页请求，零额外开销（1.0 语义）。
+    顺带取回上市日期（新股 list_date 缺失补齐用）、f100 行业与简称
+    （新股入池 = 名称+上市日+行业一次拿齐）——同一分页请求，零额外开销。
     """
     out: Dict[str, Tuple] = {}
     listed: Dict[str, str] = {}
     industries: Dict[str, str] = {}
+    names: Dict[str, str] = {}
     page, total = 1, None
     while page <= _MAX_PAGES and (total is None or len(out) < total):
         params = {"pn": page, "pz": _PAGE_SIZE, "po": 0, "np": 1, "fltt": 2, "invt": 2,
@@ -93,13 +95,52 @@ def fetch_valuation_snapshot(progress=None, cancel=None) -> Tuple[
             ind = str(r.get("f100") or "").strip()
             if ind and ind != "-":            # 退市/无分类返回 '-'，不写
                 industries[sym] = ind
+            nm = str(r.get("f14") or "").strip()
+            if nm:
+                names[sym] = nm
         _emit(progress, done=len(out), total=total,
               log=f"估值快照 [{len(out)}/{total}] 第 {page} 页")
         if cancel and cancel():
             break
         page += 1
         time.sleep(0.12)                       # 限流礼貌间隔
-    return out, listed, industries
+    return out, listed, industries, names
+
+
+# ---------------------------------------------------------------------------
+# 腾讯 smartbox：联想兜底（新股未入池也能被搜到）
+# ---------------------------------------------------------------------------
+
+def search_suggest(q: str, limit: int = 8) -> List[Dict[str, str]]:
+    """腾讯 smartbox 联想词 → [{symbol, name, market}]，只保留 A 股。
+
+    本地 stock_universe 是慢变量（新股要等当天估值任务入池），搜索时用它
+    兜底：命中的新股能立刻打开，晚上入池后再由本地库接管。
+    """
+    text = get_text("https://smartbox.gtimg.cn/s3/",
+                    {"q": q, "t": "all", "c": "1"}, "https://gu.qq.com/",
+                    timeout=3.0)
+    m = re.search(r'v_hint="(.*)"', text)
+    if not m or not m.group(1) or m.group(1) in ("N", ""):
+        return []
+    out: List[Dict[str, str]] = []
+    for item in m.group(1).split("^"):
+        parts = item.split("~")
+        if len(parts) < 5:
+            continue
+        mkt, code, name, _py, cls = parts[0], parts[1], parts[2], parts[3], parts[4]
+        if mkt not in ("sh", "sz", "bj") or not re.fullmatch(r"\d{6}", code):
+            continue
+        if not cls.startswith("GP-A"):        # GP-A / GP-A-KCB / GP-A-CYB
+            continue
+        try:                                   # 名称是 \uXXXX 转义（js 片段）
+            nm = json.loads(f'"{name}"')
+        except Exception:
+            nm = name
+        out.append({"symbol": code, "name": nm, "market": mkt.upper()})
+        if len(out) >= limit:
+            break
+    return out
 
 
 # ---------------------------------------------------------------------------
