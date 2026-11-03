@@ -8,7 +8,7 @@
 import { init, dispose, registerIndicator, registerYAxis, type Chart, type CandleType } from "klinecharts";
 import type { Bar } from "../api";
 import { cssv, fmt, fmtYi, fmtVol } from "../fmt";
-import { sixSegmentSeries } from "../indicators";
+import { ema, sixSegmentSeries } from "../indicators";
 import { accumulationSeries } from "../accumulation";
 import { volumeActivitySeries } from "../volume-activity";
 import { trendHistogramSeries } from "../trend-histogram";
@@ -195,6 +195,50 @@ function ensureRegistered(): void {
       });
       return false;   // 继续默认绘制 figures（三条虚线轨道）
     },
+  });
+  // MACD 自研线条版：DIF/DEA 两条线 + MACD 值一条按正负着色的线。
+  // 内置 MACD 画柱，和「趋势柱线」同形，放同一个副图区容易看混，改线条区分。
+  registerIndicator({
+    name: "MACDX",
+    shortName: "MACD",
+    precision: 2,
+    calcParams: [12, 26, 9],
+    calc: (list, indicator) => {
+      const bars = list as unknown as Bar[];   // 只读 close，无需完整 Bar 字段
+      const [fast, slow, sig] = ((indicator?.calcParams as number[] | undefined) ?? [12, 26, 9]);
+      const ef = ema(bars, fast), es = ema(bars, slow);
+      const dif = ef.map((v, i) => (v == null || es[i] == null ? null : v - es[i]!));
+      // DEA = DIF 的 EMA(sig)：用首个 sig 个有效值做 SMA 种，再递推
+      const dea: (number | null)[] = [];
+      const k = 2 / (sig + 1);
+      let seed = 0, cnt = 0, prev: number | null = null;
+      for (const v of dif) {
+        if (v == null) { dea.push(null); continue; }
+        if (prev == null) {
+          seed += v; cnt++;
+          if (cnt >= sig) prev = seed / sig;
+          dea.push(prev);
+          continue;
+        }
+        prev = v * k + prev * (1 - k);
+        dea.push(prev);
+      }
+      return dif.map((v, i) => ({
+        dif: v, dea: dea[i],
+        macd: v == null || dea[i] == null ? null : 2 * (v - dea[i]!),
+      }));
+    },
+    figures: [
+      { key: "dif", title: "DIF", type: "line", styles: () => ({ color: "#FF9F43", lineWidth: 1 }) },
+      { key: "dea", title: "DEA", type: "line", styles: () => ({ color: "#4DD0E1", lineWidth: 1 }) },
+      {
+        key: "macd", title: "MACD", type: "line",
+        styles: (raw: unknown) => {
+          const v = (raw as { data?: { current?: { macd?: number | null } } })?.data?.current?.macd;
+          return { color: typeof v === "number" && v < 0 ? chartDown() : chartUp(), lineWidth: 1 };
+        },
+      },
+    ],
   });
   registerTrendChannel("SHORT_TREND_CHANNEL", "短线趋势", 7, 10, 0.82);
   registerTrendChannel("MID_TREND_CHANNEL", "中线趋势", 35, 45, 0.86);
@@ -688,7 +732,7 @@ export const IND_DEFS: IndDef[] = [
   { key: "bbiboll", kc: "BBIBOLL", label: "BBIBOLL", cat: "main", where: "main", desc: "BBI 布林变异带（多均线布林）" },
   // 趋势类
   { key: "trendhistogram", kc: "ZY_TREND_HISTOGRAM", label: "趋势柱线", cat: "trend", where: "sub", desc: "众赢安装包公式移植：零轴至中期值、短期至中期值的红绿实心柱；个股与指数可用，尚未与原软件逐点核对" },
-  { key: "macd", kc: "MACD", label: "MACD", cat: "trend", where: "sub", desc: "指数平滑异同移动平均" },
+  { key: "macd", kc: "MACDX", label: "MACD", cat: "trend", where: "sub", desc: "指数平滑异同移动平均（DIF/DEA/MACD 三线，MACD 值按正负着色，不画柱）" },
   { key: "dmi", kc: "DMI", label: "DMI", cat: "trend", where: "sub", desc: "趋向指标（ADX 强弱方向）" },
   { key: "trix", kc: "TRIX", label: "TRIX", cat: "trend", where: "sub", desc: "三重指数平滑平均线" },
   { key: "emv", kc: "EMV", label: "EMV", cat: "trend", where: "sub", desc: "简易波动指标（量价趋势）" },
@@ -1633,10 +1677,7 @@ export function mountKline(el: HTMLElement): KlineChartHandle {
             styles: { bars: [{ upColor: up, downColor: dn, noChangeColor: NEUTRAL }] },
           } as never, false);
         } else if (d.key === "macd") {
-          chart.createIndicator({
-            name: "MACD",
-            styles: { bars: [{ upColor: up, downColor: dn, noChangeColor: NEUTRAL }] },
-          } as never, false);
+          chart.createIndicator({ name: "MACDX", shouldFormatBigNumber: false } as never, false);
         } else if (d.key === "volfs") {
           // 通达信 VOLFS：逐分钟量柱红绿按分钟涨跌（figure styles 内着色），轴文本万/亿
           chart.createIndicator({ name: "VOLFS", shouldFormatBigNumber: false } as never, false);
