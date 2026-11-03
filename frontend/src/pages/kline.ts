@@ -1608,12 +1608,6 @@ export function mountKline(el: HTMLElement): KlineChartHandle {
             name: "MA", paneId: "candle_pane", calcParams: [5, 10, 20], isStack: true,
             styles: { lines: [{ color: cssv("--accent") || "#FF9F43" }, { color: "#0A84FF" }, { color: cssv("--vip") || "#FFD60A" }] },
           } as never, true);
-        } else if (d.key === "boll") {
-          const dim = cssv("--dim") || "#A1A1A6";
-          chart.createIndicator({
-            name: "BOLL", paneId: "candle_pane", isStack: true,
-            styles: { lines: [{ color: dim }, { color: dim }, { color: dim }] },
-          } as never, true);
         } else if (d.key === "avg") {
           chart.createIndicator({ name: "TIME_AVG", paneId: "candle_pane", isStack: true } as never, true);
         } else {
