@@ -430,13 +430,16 @@ _TGT_SQL = (
     " FROM u GROUP BY symbol")
 
 
-def _live_overlay(conn) -> Optional[dict]:
+def _live_overlay(conn, force: bool = False) -> Optional[dict]:
     """今日尚未落库（或 K 线增量跑到一半）时的实时截面 → 目标页最新口径。
 
     K 线增量 17:00 才落库且逐只写入，期间若只读日线，会出现「目标页涨 3 个点、
     点进行情却跌 6 个点」的口径错位（2026-11-02 实测）。这里把快照当日行
     （current/change_rate/volume）当作临时日线拼进指标层，条件判定、涨跌幅、
     量比立刻与行情页一致；预计算表追上当日（target_scan.as_of >= 快照日）后退出。
+
+    force=True 供盘中定时任务用：表里已有当日行也要拿最新快照重算（每轮快照
+    更新后指标层跟着刷新），不因「表已覆盖当日」而提前返回。
 
     守卫：快照行数 < 3000 视为不足全市场覆盖（旧残留），不拼接；快照日早于
     日线最新日也视为过期。volume > 0 过滤停牌零量行，避免污染 MA40。"""
@@ -454,9 +457,13 @@ def _live_overlay(conn) -> Optional[dict]:
             table_as_of = conn.execute("SELECT MAX(as_of) FROM target_scan").fetchone()[0]
         except Exception:
             table_as_of = None
-        if table_as_of and str(table_as_of) >= str(head[0]):
+        if not force and table_as_of and str(table_as_of) >= str(head[0]):
             return None                            # 预计算已含当日：直接读表更快
-        return {"date": str(head[0]), "updated_at": str(head[2]), "rows": int(head[1])}
+        # date = 拼接进指标层的日线槽位（快照 trade_date，收盘前是上一交易日）；
+        # as_of = 快照实际抓取日（盘中即今天；非交易日则是上一交易日），
+        # 用于展示与「含实时快照」标记
+        return {"date": str(head[0]), "updated_at": str(head[2]), "rows": int(head[1]),
+                "as_of": str(head[2])[:10]}
     except Exception:                               # 旧库无快照表：退化纯日线口径
         return None
 
@@ -482,7 +489,8 @@ def _scan_computed_at(conn) -> str:
     try:
         ts = conn.execute(
             "SELECT MAX(created_at) FROM update_log"
-            " WHERE data_type = 'target_scan' AND status = 'completed'"
+            " WHERE data_type IN ('target_scan', 'target_scan_live')"
+            " AND status = 'completed'"
         ).fetchone()[0]
     except Exception:
         return ""
@@ -519,19 +527,24 @@ def stock_targets_universe(conn) -> tuple[list[dict], dict]:
     六分段/均线/量比/涨停次数一次算好；条件过滤与排序由端点即时完成——
     用户改条件即刻重筛，与是否预计算无关。
     快照比日线新（今日 K 线未落库）时先走实时拼接，避免与行情页口径错位。"""
-    if _live_overlay(conn) is None:
+    live = _live_overlay(conn)
+    if live is None:
         snap = target_scan_snapshot(conn)
         if snap is not None:
             return snap
     return compute_target_scan(conn)
 
 
-def compute_target_scan(conn) -> tuple[list[dict], dict]:
-    """即时计算指标层（定时任务写表 / 预计算缺失时的兜底），按数据指纹进缓存。"""
+def compute_target_scan(conn, live: Optional[dict] = None) -> tuple[list[dict], dict]:
+    """即时计算指标层（定时任务写表 / 预计算缺失时的兜底），按数据指纹进缓存。
+
+    live 显式传入时（盘中定时任务）不再自行探测：任务先拿最新快照，再算，
+    避免「写表后 overlay 提前退出」导致下一轮拿不到实时价格。"""
     fp = conn.execute(
         "SELECT MAX(date), COUNT(*), COUNT(DISTINCT symbol), SUM(pct_chg)"
         " FROM daily_ohlcv").fetchone()
-    live = _live_overlay(conn)
+    if live is None:
+        live = _live_overlay(conn)
     bj = settings.bj_enabled
     key = (str(fp[0]), int(fp[1] or 0), int(fp[2] or 0), round(float(fp[3] or 0), 4), bj,
            live["date"] if live else None, live["updated_at"] if live else None)
@@ -542,7 +555,9 @@ def compute_target_scan(conn) -> tuple[list[dict], dict]:
     out: list[dict] = []
     for r in conn.execute(_tgt_sql(live["date"] if live else None)).fetchall():
         sym, name = r[0], names.get(r[0])
-        if name and "ST" in str(name).upper():          # ST 直接剔除
+        if name is None:                                # 基金/指数等池外品种不进目标页
+            continue
+        if "ST" in str(name).upper():                   # ST 直接剔除
             continue
         if not bj and is_bj(sym):                       # 北交所开关（默认关）
             continue
@@ -562,7 +577,7 @@ def compute_target_scan(conn) -> tuple[list[dict], dict]:
             "pullback": bool(ma7 and close < ma7),
         })
     db_as_of = str(fp[0])
-    as_of = live["date"] if live else db_as_of
+    as_of = live["as_of"] if live else db_as_of
     meta = {"as_of": as_of, "scanned": len(out),
             "trend_as_of": db_as_of, "provisional": as_of != db_as_of,
             "computed_at": datetime.now().strftime("%Y-%m-%d %H:%M")}

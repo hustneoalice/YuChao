@@ -61,10 +61,17 @@ TASKS: tuple[dict, ...] = (
     {"kind": "target_scan", "label": "目标监控预计算",
      "fn": "app.updater.collectors.targets:update_target_scan",
      "needs": ["kline_update"],
-     "freshness": {"table": "target_scan", "col": "as_of"},
+     # 新鲜度看趋势柱线（盘中重算只写 target_scan 且 as_of=当日，用 as_of 会把
+     # 收盘后的正式预计算误判为「今日已完成」而秒跳，趋势柱线就永远停在昨天）
+     "freshness": {"table": "target_trend", "col": "data_date"},
      "min_rows": 3000,
      "description": "收盘后预先算好目标监控要用的指标（均线/量比/六分段/涨停"
                     "次数/趋势柱线）；打开页面即用，改条件立刻重筛"},
+    {"kind": "target_scan_live", "label": "目标监控盘中重算",
+     "fn": "app.updater.collectors.targets:update_target_scan_live",
+     "cooldown_s": 0,     # interval 自带 5min 节律；新鲜度秒跳也会拦掉盘中刷新
+     "description": "交易时段每 5 分钟用最新快照重算目标指标层（页面直接读表，"
+                    "现价/涨跌幅/量比跟行情页一致）；非交易时段自动跳过"},
     {"kind": "financials", "label": "财务数据",
      "fn": "app.updater.collectors.financials:update_financials",
      "freshness": {"log": True},

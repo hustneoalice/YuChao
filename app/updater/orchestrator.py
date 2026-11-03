@@ -66,12 +66,14 @@ KIND_DATASETS: Dict[str, List[str]] = {
     "backup": [],                            # 快照写库外文件，不触发前端失效
     "backfill": ["daily_ohlcv", "daily_valuation", "capital_flow"],
     "market_snapshot": ["market_snapshot"],
+    "target_scan_live": [],                  # 只刷新 target_scan，页面自行轮询取数
 }
 
 # 间隔型任务（秒）：start() 时起独立轮询线程到点 submit；与 CRON（固定时刻）
 # 互补——盘中快照这类「交易时段内每 N 分钟」的节奏用 interval 表达。
 INTERVAL_TASKS: Dict[str, int] = {
     "market_snapshot": 300,   # 5 分钟一轮（交易时段门控在任务内部）
+    "target_scan_live": 300,  # 快照落库后再算目标指标层（页面读表即出，≤5 分钟新鲜）
 }
 
 
