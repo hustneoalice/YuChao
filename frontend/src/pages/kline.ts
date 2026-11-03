@@ -231,14 +231,32 @@ function ensureRegistered(): void {
     figures: [
       { key: "dif", title: "DIF", type: "line", styles: () => ({ color: "#FF9F43", lineWidth: 1 }) },
       { key: "dea", title: "DEA", type: "line", styles: () => ({ color: "#4DD0E1", lineWidth: 1 }) },
+      // 只为让纵轴把 MACD 值纳入取值范围（透明绘制，不显示这条折线）
       {
         key: "macd", title: "MACD", type: "line",
-        styles: (raw: unknown) => {
-          const v = (raw as { data?: { current?: { macd?: number | null } } })?.data?.current?.macd;
-          return { color: typeof v === "number" && v < 0 ? chartDown() : chartUp(), lineWidth: 1 };
-        },
+        styles: () => ({ color: "rgba(0,0,0,0)", lineWidth: 1 }),
       },
     ],
+    // MACD 柱改「竖线段」：零轴到值画 1px 竖线，无空心无填充；红绿沿用 K 线口径
+    draw: (params: { ctx?: CanvasRenderingContext2D; chart?: Chart; indicator?: { result?: unknown[] } }) => {
+      const { ctx, chart, indicator } = params;
+      const data = (indicator?.result || []) as ({ macd: number | null } | null)[];
+      if (!ctx || !chart) return false;
+      const up = chartUp(), dn = chartDown();
+      ctx.lineWidth = 1;
+      data.forEach((item, i) => {
+        if (!item || item.macd == null) return;
+        const p = chart.convertToPixel({ dataIndex: i, value: item.macd }) as { x?: number; y?: number };
+        const z = chart.convertToPixel({ dataIndex: i, value: 0 }) as { y?: number };
+        if (p.x == null || p.y == null || z.y == null) return;
+        ctx.strokeStyle = item.macd < 0 ? dn : up;
+        ctx.beginPath();
+        ctx.moveTo(p.x + 0.5, z.y);   // +0.5 让 1px 竖线落在像素中心，不发虚
+        ctx.lineTo(p.x + 0.5, p.y);
+        ctx.stroke();
+      });
+      return false;   // 继续默认绘制 DIF/DEA 两条折线
+    },
   });
   registerTrendChannel("SHORT_TREND_CHANNEL", "短线趋势", 7, 10, 0.82);
   registerTrendChannel("MID_TREND_CHANNEL", "中线趋势", 35, 45, 0.86);
@@ -732,7 +750,7 @@ export const IND_DEFS: IndDef[] = [
   { key: "bbiboll", kc: "BBIBOLL", label: "BBIBOLL", cat: "main", where: "main", desc: "BBI 布林变异带（多均线布林）" },
   // 趋势类
   { key: "trendhistogram", kc: "ZY_TREND_HISTOGRAM", label: "趋势柱线", cat: "trend", where: "sub", desc: "众赢安装包公式移植：零轴至中期值、短期至中期值的红绿实心柱；个股与指数可用，尚未与原软件逐点核对" },
-  { key: "macd", kc: "MACDX", label: "MACD", cat: "trend", where: "sub", desc: "指数平滑异同移动平均（DIF/DEA/MACD 三线，MACD 值按正负着色，不画柱）" },
+  { key: "macd", kc: "MACDX", label: "MACD", cat: "trend", where: "sub", desc: "指数平滑异同移动平均（DIF/DEA 折线 + MACD 柱改竖线段，红绿按正负）" },
   { key: "dmi", kc: "DMI", label: "DMI", cat: "trend", where: "sub", desc: "趋向指标（ADX 强弱方向）" },
   { key: "trix", kc: "TRIX", label: "TRIX", cat: "trend", where: "sub", desc: "三重指数平滑平均线" },
   { key: "emv", kc: "EMV", label: "EMV", cat: "trend", where: "sub", desc: "简易波动指标（量价趋势）" },
