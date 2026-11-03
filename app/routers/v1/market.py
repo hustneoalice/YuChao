@@ -14,7 +14,7 @@ from ...foundation import repo, screening
 from ...foundation.db import get_conn
 from ...foundation import live
 from ...foundation.symbol import index_form, normalize_symbol
-from ...updater.collectors.http import _UA, client as tx_client, tx_symbol
+from ...updater.collectors.http import _UA, client as tx_client, get_json_hosts, tx_symbol
 from pydantic import TypeAdapter
 
 router = APIRouter(tags=["market"])
@@ -77,61 +77,148 @@ def fundflow(
     return repo.market.get_capital_flow_range(conn, symbol, start, end, limit)
 
 
-@router.get("/market/minute", summary="当日分时（价格线 + 均价线，腾讯实时，1 分钟粒度）")
+_EM_TRENDS = "/api/qt/stock/trends2/get"
+_EM_HOSTS = ("https://push2.eastmoney.com", "https://push2delay.eastmoney.com")
+_EM_MARKET = {"sh": "1", "sz": "0", "bj": "0"}      # 东财 secid 市场位
+
+
+def _tx_minute(symbol: str) -> dict:
+    """腾讯分时。北交所（92/83/87/43 段）只有 3 字段，按「价×分钟量」近似
+    累计成交额算 VWAP（2026-11-03 实测：原 4 字段切分会把整行丢掉）。"""
+    txc = tx_symbol(symbol)
+    if not txc:
+        raise ValueError(f"非法代码: {symbol}")
+    j = _tx_minute_fetch("/appstock/app/minute/query", params={"code": txc})
+    d = (j.get("data") or {}).get(txc) or {}
+    body = d.get("data") or {}
+    # 昨收按 txc 键精确取（qt dict 混有空的 v_ff_* 键，values()[0] 会拿到空数组）
+    qt = (d.get("qt") or {}).get(txc) or []
+    prev_close = None
+    if len(qt) > 4 and qt[4]:
+        prev_close = float(qt[4])
+    raw_day = body.get("date") or date.today().strftime("%Y%m%d")
+    day = f"{raw_day[:4]}-{raw_day[4:6]}-{raw_day[6:]}"
+    bars, pv, pa = [], 0, 0.0
+    is_index = "." in str(symbol)                    # 000001.SH / 899050.BJ 等指数形态
+    for it in body.get("data") or []:
+        p = str(it).split(" ")
+        if len(p) < 3:
+            continue
+        price = float(p[1])
+        cum_v = int(p[2])
+        if len(p) >= 4:
+            cum_a = float(p[3])
+            dollars = max(0.0, cum_a - pa)
+            if is_index:
+                v, shares = max(0.0, cum_v - pv), cum_v * 100  # 指数量即手，VWAP 由下方守卫置空
+            else:
+                # 腾讯个股量单位不统一：主板=手，科创板/次新股偶为股。
+                # 成交额/量 ≈ 价 → 量是股；≈ 价×100 → 量是手。
+                per = cum_a / cum_v if cum_v else 0
+                hand = per > price * 1.6
+                v = max(0.0, (cum_v - pv) if hand else (cum_v - pv) / 100)
+                shares = cum_v * (100 if hand else 1)
+        else:                                        # 北交所：只有 3 字段，无成交额
+            v = max(0.0, cum_v - pv)                 # 腾讯偶有累计量回退，钳到 ≥0
+            dollars = v * price * 100                # 价×分钟量 近似成交额（量=手）
+            shares = cum_v * 100
+            cum_a = pa + dollars
+        pv, pa = cum_v, cum_a
+        # VWAP：指数分时无 VWAP 概念（量是成分股手数/额是元，比值不在价格量级），
+        # 直接不画均价线；个股异常比值再按 ±60% 守卫兜底置空
+        avg = round(cum_a / shares, 3) if shares > 0 and cum_a > 0 else None
+        if is_index:
+            avg = None
+        if avg is not None and (price * 0.4 > avg or avg > price * 1.6):
+            avg = None
+        bars.append({
+            "date": f"{day} {p[0][:2]}:{p[0][2:]}",
+            "open": price, "high": price, "low": price, "close": price,
+            "volume": v, "amount": dollars,
+            "avg": avg if avg is not None else price,
+            "has_avg": avg is not None,
+        })
+    # 盘前腾讯只给一个 09:30、累计量额全 0 的占位点：不是真实分时，
+    # 丢掉（否则开盘前分时图/分时K就多出一根今天的柱）
+    if len(bars) == 1 and not (bars[0].get("volume") or 0) and not (bars[0].get("amount") or 0):
+        bars = []
+    return {"symbol": symbol, "date": day, "prev_close": prev_close, "bars": bars}
+
+
+def _em_minute(symbol: str) -> dict:
+    """东财分时（trends2，1 分钟）：腾讯无数据/域名故障时的备用源。
+
+    f58 为东财自算均价（成交额加权），无需前端再推 VWAP。
+    """
+    txc = tx_symbol(symbol)
+    if not txc:
+        raise ValueError(f"非法代码: {symbol}")
+    secid = f"{_EM_MARKET.get(txc[:2], '0')}.{txc[2:]}"
+    j = get_json_hosts(_EM_TRENDS, params={
+        "secid": secid, "fields1": "f1,f2,f3,f4,f5,f6,f7,f8",
+        "fields2": "f51,f52,f53,f54,f55,f56,f57,f58", "iscr": "0", "ndays": "1",
+    }, hosts=_EM_HOSTS, referer="https://quote.eastmoney.com/", timeout=6)
+    d = (j or {}).get("data") or {}
+    if not d:
+        raise ValueError(f"东财分时无数据: {symbol}")
+    prev = d.get("preClose")
+    prev_close = float(prev) if prev not in (None, "", "-") else None
+    is_index = "." in str(symbol)                    # 指数不画 VWAP（与腾讯源同口径）
+    bars = []
+    for it in d.get("trends") or []:
+        p = str(it).split(",")
+        if len(p) < 8:
+            continue
+        price = float(p[2])
+        if price <= 0:
+            continue
+        avg = float(p[7]) if p[7] not in ("", "-") else None
+        if avg is not None and (price * 0.4 > avg or avg > price * 1.6):
+            avg = None
+        if is_index:
+            avg = None
+        bars.append({
+            "date": p[0][:16], "open": price, "high": price, "low": price,
+            "close": price, "volume": float(p[5] or 0), "amount": float(p[6] or 0),
+            "avg": avg if avg is not None else price, "has_avg": avg is not None,
+        })
+    day = bars[0]["date"][:10] if bars else date.today().isoformat()
+    return {"symbol": symbol, "date": day, "prev_close": prev_close, "bars": bars}
+
+
+def _minute_series(symbol: str) -> dict:
+    """腾讯为主、东财兜底：主源给不出分钟点（北交所旧格式/停牌/域名故障）才换源。"""
+    tx: Optional[dict] = None
+    try:
+        tx = _tx_minute(symbol)
+    except Exception:                                # noqa: BLE001 换源兜底
+        pass
+    if tx and tx.get("bars"):
+        return tx
+    try:
+        em = _em_minute(symbol)
+    except Exception:                                # noqa: BLE001
+        if tx is None:
+            raise
+        return tx                                    # 主源正常但当日无点：保留 date/昨收
+    return em if em.get("bars") else (tx or em)
+
+
+@router.get("/market/minute", summary="当日分时（价格线 + 均价线，腾讯为主/东财兜底，1 分钟粒度）")
 def minute(symbol: str = Query(description="6 位代码，兼容 sh.600519 形态")):
-    """策影 /api/data/intraday 同源移植：腾讯 minute/query。
+    """策影 /api/data/intraday 同源移植：腾讯 minute/query，东财 trends2 兜底。
 
     返回 bars：date 装到分钟的 datetime，o/h/l/c=分钟价（策影同款假 K 线渲染），
-    avg=累计成交额/累计成交量/100（VWAP 均价线），prev_close 供涨跌幅坐标。
+    avg=成交额加权均价（VWAP 均价线），prev_close 供涨跌幅坐标。
     """
-    def fetch():
-        txc = tx_symbol(symbol)
-        if not txc:
-            raise ValueError(f"非法代码: {symbol}")
-        j = _tx_minute_fetch("/appstock/app/minute/query",
-                             params={"code": txc})
-        d = (j.get("data") or {}).get(txc) or {}
-        body = d.get("data") or {}
-        # 昨收按 txc 键精确取（qt dict 混有空的 v_ff_* 键，values()[0] 会拿到空数组）
-        qt = (d.get("qt") or {}).get(txc) or []
-        prev_close = None
-        if len(qt) > 4 and qt[4]:
-            prev_close = float(qt[4])
-        raw_day = body.get("date") or date.today().strftime("%Y%m%d")
-        day = f"{raw_day[:4]}-{raw_day[4:6]}-{raw_day[6:]}"
-        bars, pv, pa = [], 0, 0.0
-        for it in body.get("data") or []:
-            p = str(it).split(" ")
-            if len(p) < 4:
-                continue
-            price = float(p[1])
-            cum_v, cum_a = int(p[2]), float(p[3])
-            pv, pa, v, a = cum_v, cum_a, cum_v - pv, cum_a - pa
-            # VWAP：腾讯 volume 单位为手（1手=100股）。指数分时无 VWAP 概念，
-            # 算出来会掉到地上 —— 偏离现价 ±60% 直接置空，前端不画均价线。
-            avg = round(cum_a / (cum_v * 100), 3) if cum_v > 0 else None
-            if avg is not None and (price * 0.4 > avg or avg > price * 1.6):
-                avg = None
-            bars.append({
-                "date": f"{day} {p[0][:2]}:{p[0][2:]}",
-                "open": price, "high": price, "low": price, "close": price,
-                "volume": v, "amount": a,
-                "avg": avg if avg is not None else price,
-                "has_avg": avg is not None,
-            })
-        # 盘前腾讯只给一个 09:30、累计量额全 0 的占位点：不是真实分时，
-        # 丢掉（否则开盘前分时图/分时K就多出一根今天的柱）
-        if len(bars) == 1 and not (bars[0].get("volume") or 0) and not (bars[0].get("amount") or 0):
-            bars = []
-        return {"symbol": symbol, "date": day, "prev_close": prev_close, "bars": bars}
-    return _cached(f"m|{symbol}", 30, fetch)
+    return _cached(f"m|{symbol}", 30, lambda: _minute_series(symbol))
 
 
 @router.get("/market/sparks", summary="批量当日走势（自选列表 sparkline：降采样价格点 + 昨收）")
 def sparks(symbols: str = Query(description="逗号分隔代码，≤50 只")):
     """自选列表行内迷你走势：每只降采样 ≈40 点（首尾保留），昨收供涨跌着色与基线。
 
-    腾讯 minute/query 一次一只 → 线程池 8 并发；单只失败归 missing 不拖垮整批。
+    分时同源（腾讯为主/东财兜底）一次一只 → 线程池 8 并发；单只失败归 missing。
     """
     from concurrent.futures import ThreadPoolExecutor
 
@@ -139,17 +226,9 @@ def sparks(symbols: str = Query(description="逗号分隔代码，≤50 只")):
 
     def one(sym: str):
         try:
-            txc = tx_symbol(sym)
-            if not txc:
-                return None
-            j = _tx_minute_fetch("/appstock/app/minute/query",
-                                 params={"code": txc})
-            d = (j.get("data") or {}).get(txc) or {}
-            body = d.get("data") or {}
-            qt = (d.get("qt") or {}).get(txc) or []
-            prev = float(qt[4]) if len(qt) > 4 and qt[4] else None
-            pts = [float(str(it).split(" ")[1])
-                   for it in body.get("data") or [] if len(str(it).split(" ")) >= 2]
+            d = _minute_series(sym)
+            prev = d.get("prev_close")
+            pts = [float(b["close"]) for b in d.get("bars") or [] if b.get("close")]
             if len(pts) < 2:
                 return None
             step = max(1, len(pts) // 40)               # 240 分钟 → ≈40 点
