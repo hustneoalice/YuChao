@@ -322,7 +322,6 @@ function ensureRegistered(): void {
       const barSpace = chart.getBarSpace?.() || { bar: 8 };
       const bw = barSpace.bar || 8;
       if (bw < 3) return false;           // 太密：不标，避免糊成一片
-      const onlyKey = bw < 6;             // 窄柱只留 9 / 13
       const font = bw >= 8 ? 10 : 9;
       ctx.save();
       ctx.textAlign = "center";
@@ -333,10 +332,9 @@ function ensureRegistered(): void {
         const low = it.cl >= 10 ? it.cl : it.sl;   // 倒计时尾段优先（10..13 接在 9 后面）
         const high = it.ch >= 10 ? it.ch : it.sh;
         const put = (v: number, y: number, dir: "low" | "high") => {
-          if (!v) return;
-          if (onlyKey && v !== 9 && v !== 13) return;
-          const strong = v === 9 || v === 13;
-          ctx.font = `${strong ? 600 : 400} ${strong ? font + 1 : font}px ui-monospace,SFMono-Regular,Menlo,monospace`;
+          // 只标成立的 9 / 13：中间计数逐根都标会把 K 线压满（主流软件也只标关键位）
+          if (v !== 9 && v !== 13) return;
+          ctx.font = `600 ${font}px ui-monospace,SFMono-Regular,Menlo,monospace`;
           ctx.fillStyle = dir === "low" ? chartDown() : chartUp();
           ctx.textBaseline = dir === "low" ? "top" : "bottom";
           ctx.fillText(String(v), x, y);
@@ -832,7 +830,7 @@ export const IND_DEFS: IndDef[] = [
   // 主图叠加
   { key: "strongpullback", kc: "ZY_STRONG_PULLBACK", label: "强势调整", cat: "main", where: "main", desc: "用户约定规则：次日量比(50%,200%)、后续>50%、收盘≥MA45；破保护位/低量结束；同组眼睛连线；非众赢原公式" },
   { key: "ma", kc: "MA", label: "MA", cat: "main", where: "main", desc: "移动平均线 5/10/20" },
-  { key: "td", kc: "ZY_TD_SEQ", label: "九转序列", cat: "main", where: "main", desc: "TD Sequential：低9/高9 连续数字（收盘对 4 根前），随后倒计时 10–13（收盘对 2 根前高低），13 需完美检验" },
+  { key: "td", kc: "ZY_TD_SEQ", label: "九转序列", cat: "main", where: "main", desc: "TD Sequential：只在成立的 低9/高9、低13/高13 处标数字（收盘对 4 根前连续 9；随后对 2 根前高低累计 13，需完美检验）" },
   { key: "ema", kc: "EMA", label: "EMA", cat: "main", where: "main", desc: "指数移动平均线" },
   { key: "boll", kc: "BOLLX", label: "BOLL", cat: "main", where: "main", desc: "布林带（虚线三轨+淡填充）" },
   { key: "sar", kc: "SAR", label: "SAR", cat: "main", where: "main", desc: "抛物线转向（停损点）" },
