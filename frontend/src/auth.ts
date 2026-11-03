@@ -149,8 +149,9 @@ export function initAuth(): void {
   });
   document.getElementById("userchip")!.addEventListener("click", () => {
     if (getState().user) {
-      // 已登录：进入设置-账户页
-      window.dispatchEvent(new CustomEvent("yc:goto-settings", { detail: "account" }));
+      // 已登录：进入设置-账户页（监听方在 document 上，必须用 document 派发：
+      // window 上的事件不会向下传到 document，之前点已登录的 chip 完全没反应）
+      document.dispatchEvent(new CustomEvent("yc:goto-settings", { detail: "account" }));
     } else openAuth("login");
   });
   document.getElementById("vipbadge")!.addEventListener("click", () => {
