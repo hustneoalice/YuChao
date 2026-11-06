@@ -107,6 +107,11 @@ TASKS: tuple[dict, ...] = (
     {"kind": "package_import", "label": "导入数据包",
      "fn": "app.updater.packaging:run_import",
      "description": "导入离线数据包（先校验完整性，通过后才替换现有数据）"},
+    {"kind": "stock_profile", "label": "公司资料",
+     "fn": "app.updater.collectors.profile:update_stock_profile",
+     "freshness": {"log": True},
+     "min_rows": 3000,
+     "description": "更新全市场公司主营与行业资料（主营问答与个股资料页共用）"},
     {"kind": "backfill", "label": "历史回补",
      "fn": "app.updater.packaging:run_backfill",
      "description": "补齐历史数据（行情→估值→资金流→日线依次回补）"},
@@ -134,6 +139,7 @@ CRON_CHAIN: tuple[tuple[str, int, int], ...] = (
 )
 WEEKLY: tuple[tuple[str, int, int], ...] = (
     ("adjust_factor", 9, 0),      # 周六
+    ("stock_profile", 9, 15),     # 周六：公司资料变化慢，全量重建足够
 )
 
 

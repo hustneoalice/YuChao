@@ -94,7 +94,7 @@ def update_adjust_factor(progress=None, ctx=None) -> dict:
                         c.commit()
                         writer.reset()
                         buf.clear()
-                    progress(done=done, rows=rows_written,
+                    progress(done=done, rows=rows_written, failed=failed,
                              log=f"复权因子 [{done}/{len(symbols)}] 累计 {rows_written} 行")
                 time.sleep(_BAOSTOCK_SLEEP)
 
@@ -109,6 +109,7 @@ def update_adjust_factor(progress=None, ctx=None) -> dict:
                 buf.clear()
 
             result.update(status="success", rows=rows_written,
+                          total=len(symbols), success=done - failed,
                           detail=f"增量 {rows_written} 条复权因子"
                                  f"（{done}/{len(symbols)} 标的，失败 {failed}）")
         finally:

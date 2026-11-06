@@ -3,6 +3,7 @@
  * 行情页多面板共享一条信息条 → 面板用 head:"none"；全景用 title + 指标开关的紧凑配置。 */
 import type { Bar } from "./api";
 import { esc, fmt } from "./fmt";
+import { ic } from "./icons";
 import { IND_BY_KEY, mountKline, type KlineChartHandle, type MainKey, type SubKey } from "./pages/kline";
 
 export type ChartPeriod = "t" | "60" | "d" | "w" | "m" | "q";
@@ -67,8 +68,10 @@ const labelOf = (k: string): string => SHORT_LABEL[k] ?? IND_BY_KEY[k]?.label ??
 const num = (v?: number | null): string =>
   (v == null || !isFinite(v) ? "—" : fmt(v));
 
-/** 信息条 HTML：行情页共享条与面板头部共用同一套渲染，密度只由 mode 决定 */
-export function quoteHeadHtml(info: ChartInfo | null, mode: Exclude<ChartHeadMode, "none"> = "full"): string {
+/** 信息条 HTML：行情页共享条与面板头部共用同一套渲染，密度只由 mode 决定。
+ *  quickAsk=true 时在「昨收」后挂一个快速问股小飞机（行情页头部用）。 */
+export function quoteHeadHtml(info: ChartInfo | null, mode: Exclude<ChartHeadMode, "none"> = "full",
+                               quickAsk = false): string {
   if (!info) return "";
   const pct = info.pct;
   const cls = (pct ?? 0) >= 0 ? "up" : "down";
@@ -91,6 +94,9 @@ export function quoteHeadHtml(info: ChartInfo | null, mode: Exclude<ChartHeadMod
       (pc == null ? "" : `<span class="dim">昨收 <b class="num">${num(pc)}</b></span>`);
   }
   parts.push(`<span class="ksy-q">${q}</span>`);
+  if (quickAsk) {
+    parts.push(`<button class="qa-inline" type="button" title="快速问股" aria-label="快速问股" aria-expanded="false">${ic("paper-plane-tilt", 13)}</button>`);
+  }
   return parts.join("");
 }
 

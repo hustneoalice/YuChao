@@ -1,6 +1,7 @@
 """运行配置：环境变量 YUCHAO_* / .env，默认 data/stock_research.duckdb。"""
 from pathlib import Path
 
+from pydantic import Field
 from pydantic_settings import BaseSettings
 
 
@@ -28,6 +29,23 @@ class Settings(BaseSettings):
     export_dir: Path = Path(__file__).resolve().parent.parent / "data" / "exports"
     # 北交所开关（参考策影）：关闭时全系统不考虑北交所标的（搜索/行情/K线/目标一概过滤）
     bj_enabled: bool = False
+    neo_signing_key: str = Field(default="", repr=False)
+    neo_issuer: str = ""
+    neo_grants_file: str = ""
+
+    # 内置管理员：首次启动自动创建（库中已有 admin 则跳过）；邮箱/用户名/密码可用环境变量覆盖
+    admin_seed: bool = True
+    admin_email: str = "admin@yuchao.local"
+    admin_username: str = "admin"
+    admin_password: str = Field(default="admin123", repr=False)
+
+    # 智能助手默认模型（可选兜底）：密钥只从环境变量注入，不入库、不入仓
+    llm_base_url: str | None = None
+    llm_model: str | None = None
+    llm_api_key: str = Field(default="", repr=False)
+
+    # K 线采集并发度：线程只做 HTTP，写库仍在主线程串行（1=回退纯串行）
+    kline_workers: int = 8
 
     model_config = {"env_prefix": "YUCHAO_", "env_file": ".env", "extra": "ignore"}
 

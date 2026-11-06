@@ -47,6 +47,7 @@ def update_capital_flow(progress=None, ctx=None) -> dict:
                 items = sources.fetch_fund_flow_sina(sym, days=days) or []
             except Exception:
                 items = []
+                failed += 1              # 单只拉取异常计入失败（空返回仍算无增量）
             new = [x for x in items if (cut is None or str(x["date"]) > cut)]
             if new:
                 buf.extend((sym, x["date"], x["main_net"], x["super_net"],
@@ -64,7 +65,7 @@ def update_capital_flow(progress=None, ctx=None) -> dict:
                     c.commit()
                     writer.reset()
                     buf.clear()
-                progress(done=done, rows=rows_written,
+                progress(done=done, rows=rows_written, failed=failed,
                          log=f"资金流 [{done}/{len(symbols)}] 累计 {rows_written} 行")
             time.sleep(_SINA_SLEEP)
 
@@ -83,7 +84,7 @@ def update_capital_flow(progress=None, ctx=None) -> dict:
             result["detail"] = (f"遍历 {done} 个标的，未取到任何新数据"
                                 "（新浪可能限流）")
         result.update(status="success" if rows_written or not failed else "failed",
-                      rows=rows_written,
+                      rows=rows_written, total=len(symbols), success=done - failed,
                       error=f"{failed} 个标的失败" if failed and not rows_written else "",
                       detail=result.get("detail") or
                       f"增量 {rows_written} 行（{done}/{len(symbols)} 标的，失败 {failed}）")

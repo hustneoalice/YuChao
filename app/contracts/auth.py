@@ -123,6 +123,13 @@ class LlmOut(BaseModel):
     key_set: bool = False                    # 只回「是否已配置」，不回 key 本体
 
 
+class LlmTestIn(BaseModel):
+    """连通测试可用当前表单值（不必先保存）；缺省则用已保存的配置。"""
+    base_url: Optional[str] = None
+    api_key: Optional[str] = None
+    model: Optional[str] = None
+
+
 # ── F10 · 飞书推送 ────────────────────────────────────────────────────────
 
 class FeishuIn(BaseModel):

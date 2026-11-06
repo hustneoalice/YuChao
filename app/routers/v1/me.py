@@ -4,7 +4,7 @@ from fastapi import APIRouter, Depends
 from ...auth import deps, service
 from ...auth.deps import resolve_token
 from ...contracts.auth import (CardsIn, CardsOut, FeishuIn, FeishuOut, LlmIn,
-                               LlmOut, PrefsIn, PrefsOut, TestOut,
+                               LlmOut, LlmTestIn, PrefsIn, PrefsOut, TestOut,
                                WatchlistIn, WatchlistOut)
 from ...errors import ApiError
 from ...foundation.db import get_conn
@@ -80,11 +80,15 @@ def put_llm(body: LlmIn, user: dict = Depends(_user)):
 
 
 @router.post("/me/llm/test", response_model=TestOut, summary="大模型连通测试（chat/completions）")
-def test_llm(user: dict = Depends(_user)):
-    """用已保存配置实测一次（max_tokens=1）。key 不回显 → 修改 key 后请先 PUT 再测试。"""
+def test_llm(body: LlmTestIn | None = None, user: dict = Depends(_user)):
+    """优先测当前表单值（不必先保存）；未传的字段回落到已保存配置。"""
     cfg = integrations.get_llm(user["id"])
-    ok, msg = integrations.llm_test(
-        cfg.get("base_url") or "", cfg.get("api_key") or "", cfg.get("model") or "")
+    base_url = ((body.base_url if body else None) or cfg.get("base_url") or "").strip()
+    model = ((body.model if body else None) or cfg.get("model") or "").strip()
+    api_key = ((body.api_key if body else None) or cfg.get("api_key") or "").strip()
+    if not (base_url and model and api_key):
+        return TestOut(ok=False, message="请填写接口地址、模型和 API Key")
+    ok, msg = integrations.llm_test(base_url, api_key, model)
     return TestOut(ok=ok, message=msg)
 
 

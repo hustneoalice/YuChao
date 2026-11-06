@@ -384,6 +384,10 @@ class UpdateOrchestrator:
                           "rows", "message", "detail"):
                     if k in fields and fields[k] is not None:
                         setattr(t, k, fields[k])
+                # 批次任务的成功数由「已处理 − 失败」推导。采集器历史上只报
+                # done/rows，从不报 succeeded，导致页面「成功 / 失败」恒为 0/0。
+                if t.total and "succeeded" not in fields:
+                    t.succeeded = max(0, min(t.done, t.total) - t.failed)
                 msg = fields.get("log")
                 if msg:
                     t.logs.append({"time": datetime.now().strftime("%H:%M:%S"),
@@ -418,8 +422,12 @@ class UpdateOrchestrator:
                         t.rows = int(res.get("rows", t.rows) or 0)
                         if res.get("total"):
                             t.total = int(res["total"])
+                        if res.get("failed_symbols") is not None:
+                            t.failed = int(res.get("failed_symbols") or 0)
                         if res.get("success") is not None:
                             t.succeeded = int(res.get("success") or 0)
+                        elif res.get("total") and t.total:
+                            t.succeeded = max(0, min(t.done, t.total) - t.failed)
             except Exception as e:
                 status, error = "failed", f"{type(e).__name__}: {e}"
                 logger.exception("[Orchestrator] 任务异常 %s", task.label)

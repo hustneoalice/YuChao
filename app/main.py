@@ -20,7 +20,7 @@ from . import __version__
 from .config import settings
 from .errors import ApiError
 from .foundation.db import DataSourceMissing
-from .routers.v1 import auth, corepicks, data, mainforce, market, me, sectors
+from .routers.v1 import ai, auth, corepicks, data, mainforce, market, me, sectors
 from .stream.sse import router as stream_router
 from .neo.router import router as neo_router
 
@@ -38,6 +38,12 @@ logging.basicConfig(
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     logger.info("YuChao %s · duckdb=%s", __version__, settings.duckdb_path)
+    # 首次启动初始化内置管理员（幂等：已有 admin 则跳过）
+    try:
+        from .auth.service import ensure_admin
+        ensure_admin()
+    except Exception:                      # 用户库异常不拖死行情服务
+        logger.warning("内置管理员初始化失败", exc_info=True)
     core = None
     if settings.api_embedded_updater:
         # 内置更新内核（编排器+调度链+自愈并入 uvicorn）。数据底座缺失时
@@ -108,6 +114,7 @@ app.include_router(mainforce.router, prefix=v1)
 app.include_router(sectors.router, prefix=v1)
 app.include_router(corepicks.router, prefix=v1)
 app.include_router(data.router, prefix=v1)
+app.include_router(ai.router, prefix=v1)
 app.include_router(stream_router, prefix=v1)
 
 # Prometheus 可观测性（1.0 资产原样保留）

@@ -14,6 +14,7 @@ from __future__ import annotations
 import json
 import re
 import time
+from datetime import date, datetime, timedelta
 from typing import Any, Dict, List, Optional, Tuple
 
 from .http import get_json, get_json_hosts, get_text, sina_symbol, tx_symbol
@@ -460,24 +461,79 @@ def fetch_kline_tx(code: str, count: int = 3200) -> List[Dict[str, Any]]:
     单车道内 4 个域名轮换（1.0 kline_lanes 教训：单端点被 WAF 拦会让全市场
     增量「跑得飞快但一个都写不进去」）。v 换算成股：科创板（688/689）腾讯
     原始即股，其余为手 ×100；amount 腾讯不返回，写 None（涨跌幅由写库侧按
-    前收盘补算）。"""
+    前收盘补算）。
+
+    单次请求根数有硬顶：count=2000 正常，2500+ 源站返回
+    `{"code":0,"msg":"param error","data":[]}`（data 此时是 **list 不是 dict**，
+    直接 .get 会抛 AttributeError 被误记成车道故障）。深回补按日期区间
+    **从今天往回翻页**，接口的 end 生效、start 被忽略（实测
+    `sh600519,day,2023-01-01,2024-01-01,800,` 返回截至 2023-12-29 的 800 根）。
+    """
     from .http import pure_of          # 局部导入避免环（fetch_kline_em 同款）
     tx = tx_symbol(code)
     if not tx:
         return []
-    param = {"param": f"{tx},day,,,{count},"}
-    data = None
-    for url, ref in _TX_KLINE_ENDPOINTS:      # 端点轮换：全部失败才抛
-        try:
-            data = get_json(url, param, ref, timeout=10)
-            break
-        except Exception:
-            continue
-    if data is None:
-        raise RuntimeError("腾讯 K 线全部端点不可用")
-    stock = (data.get("data") or {}).get(tx) or {}
-    klines = stock.get("day") or stock.get("qfqday") or []
+    klines: list = []
+    if count <= _TX_MAX_PAGE:
+        klines = _tx_raw_bars(tx, None, count)
+    else:
+        klines = _tx_paged_bars(tx, count)
     return _tx_rows(pure_of(code), klines)
+
+
+#: 腾讯单次请求根数硬顶（实测 2500 起 param error；留 2000 安全边际）
+_TX_MAX_PAGE = 2000
+_TX_MAX_PAGES = 4
+
+
+def _tx_raw_bars(tx: str, end: str | None, count: int) -> list:
+    """打一次腾讯日线，返回原始 bar 列表；end 为空 = 取最近 count 根。
+
+    4 端点轮换（WAF 只拦特定路径），全部失败才抛；param error 的 list 结构
+    显式识别，避免旧代码 .get() 崩成 AttributeError。
+    """
+    param = (f"{tx},day,,{end},{count}," if end else f"{tx},day,,,{count},")
+    failures: list[str] = []
+    for url, ref in _TX_KLINE_ENDPOINTS:
+        try:
+            data = get_json(url, {"param": param}, ref, timeout=10)
+        except Exception as e:
+            failures.append(f"{url.split('/')[2]}:{type(e).__name__}")
+            continue
+        body = data.get("data") if isinstance(data, dict) else None
+        if isinstance(body, list):
+            failures.append(f"{url.split('/')[2]}:param error(count={count})")
+            continue
+        node = (body or {}).get(tx) or {}
+        bars = node.get("day") or node.get("qfqday") or []
+        if bars:
+            return bars
+        failures.append(f"{url.split('/')[2]}:空数据")
+    raise RuntimeError("腾讯 K 线全部端点不可用（" + "；".join(failures) + "）")
+
+
+def _tx_paged_bars(tx: str, count: int) -> list:
+    """按日期区间往回翻页取深度历史（去重后按时间升序）。"""
+    got: list = []
+    seen: set = set()
+    window_end = date.today()
+    for _ in range(_TX_MAX_PAGES):
+        page = _tx_raw_bars(tx, window_end.isoformat(), _TX_MAX_PAGE)
+        for k in page:
+            if isinstance(k, list) and k and str(k[0]) not in seen:
+                seen.add(str(k[0]))
+                got.append(k)
+        if len(got) >= count or not page:
+            break
+        earliest = min(str(k[0])[:10] for k in page)
+        try:
+            window_end = datetime.strptime(earliest, "%Y-%m-%d").date() - timedelta(days=1)
+        except ValueError:
+            break
+        if window_end <= date(2000, 1, 1):
+            break
+    got.sort(key=lambda k: str(k[0]))
+    return got
 
 
 #: 腾讯 K 线端点池（1.0 kline_lanes 同款四个域名；第一个走代理域名优先试）

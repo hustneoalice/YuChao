@@ -43,8 +43,9 @@ NOW = datetime(2026, 10, 30, 12, 0, 0)   # 周五盘中午间（判定不跨链�
 
 @pytest.fixture()
 def health_env(monkeypatch, tmp_path):
-    """体检环境：updater 在线 + 无失败落账 + 隔离文件路径。"""
+    """体检环境：updater 在线 + 无失败落账 + 隔离文件路径；时钟冻结到 NOW。"""
     monkeypatch.setattr("app.foundation.repo.health.updater_alive", lambda: True)
+    monkeypatch.setattr("app.foundation.repo.health._now", lambda: NOW)
     monkeypatch.setattr(settings, "update_snapshot_path", tmp_path / "progress.json")
     monkeypatch.setattr(settings, "selfheal_ledger_path", tmp_path / "ledger.json")
     monkeypatch.setattr(settings, "control_requests_path", tmp_path / "control.jsonl")
@@ -99,6 +100,42 @@ def test_assess_gap_detects_missing_day(duckdb_file, health_env):
     assert len(miss) == 1 and miss[0]["date"] == "2026-10-20"
     assert any(i["code"] == "gap" and i["action"]["kind"] == "backfill"
                for i in r["issues"])
+
+
+def test_freshness_uses_report_cycle_not_calendar_days(duckdb_file, health_env):
+    # 三季报 2026-09-30 在 10-30 看是 30 天前，但并未过 10-31 披露截止 → 仍应绿色
+    _topup(duckdb_file)
+    r = assess(_ro(duckdb_file), now=NOW)
+    fin = next(i for i in r["freshness"]["items"] if i["table"] == "financials")
+    assert fin["state"] == "ok" and fin["score"] == 100
+    assert fin["badge"] == "符合季度周期"
+    assert "季度" in fin["cycle"]
+
+
+def test_freshness_weekly_skip_explains_reason(duckdb_file, health_env):
+    # 周六复权任务被跳过：不再显示「滞后 14 天」，而是黄色「本周跳过」+ 原因
+    from app.updater.writer import UPDATE_LOG_DDL
+    _topup(duckdb_file)
+    conn = _rw(duckdb_file)
+    conn.execute(UPDATE_LOG_DDL)
+    conn.execute("INSERT INTO update_log (id, data_type, status, detail, created_at) "
+                 "VALUES ('t1','adjust_factor','skipped','baostock 未安装（可选依赖）',"
+                 "'2026-10-31 09:15:00')")
+    conn.execute("CHECKPOINT")
+    conn.close()
+    r = assess(_ro(duckdb_file), now=datetime(2026, 11, 6, 12, 0, 0))
+    adj = next(i for i in r["freshness"]["items"] if i["table"] == "adjust_factor")
+    assert adj["state"] == "warn" and adj["badge"] == "本周跳过"
+    assert "baostock" in adj["note"] and "滞后" not in adj["note"]
+    assert adj["cycle"] == "每周六 09:00 增量一次"
+
+
+def test_freshness_resident_universe_is_green(duckdb_file, health_env):
+    # 证券清单没有日期维度：有行数就是常驻清单，不再显示「无数据」
+    r = assess(_ro(duckdb_file), now=NOW)
+    uni = next(i for i in r["freshness"]["items"] if i["table"] == "stock_universe")
+    assert uni["state"] == "ok" and uni["badge"] == "常驻清单"
+    assert "常驻清单" in uni["cycle"]
 
 
 def test_assess_coverage_penalty(duckdb_file, health_env):

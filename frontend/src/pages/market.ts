@@ -1383,7 +1383,7 @@ function renderKlpBar(): void {
     high: view.high,
     low: view.low,
     prevClose: view.base,
-  }, "full");
+  }, "full", true);
   // 标注入口：已收藏才显示；有标注时常显最新一条，悬停看全部，点击编辑
   const notesEl = document.getElementById("kl-notes");
   if (notesEl) notesEl.innerHTML = noteChipHtml(s.symbol, "bar");

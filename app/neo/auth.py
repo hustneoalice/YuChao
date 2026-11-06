@@ -7,6 +7,8 @@ from pathlib import Path
 from threading import Lock
 from fastapi import Header, HTTPException
 import jwt
+from app.config import settings
+from .contracts import CAPABILITIES
 
 _lock = Lock()
 _active = {}
@@ -14,9 +16,9 @@ _recent = {}
 
 
 def authorize(authorization: str | None = Header(None)):
-    key = os.getenv('YUCHAO_NEO_SIGNING_KEY', '')
-    issuer = os.getenv('YUCHAO_NEO_ISSUER', '')
-    grants_file = os.getenv('YUCHAO_NEO_GRANTS_FILE', '')
+    key = os.getenv('YUCHAO_NEO_SIGNING_KEY', settings.neo_signing_key)
+    issuer = os.getenv('YUCHAO_NEO_ISSUER', settings.neo_issuer)
+    grants_file = os.getenv('YUCHAO_NEO_GRANTS_FILE', settings.neo_grants_file)
     if len(key) < 32 or not issuer or not grants_file:
         raise HTTPException(503, 'NEO service unavailable')
     if not authorization or not authorization.startswith('Bearer '):
@@ -24,7 +26,7 @@ def authorize(authorization: str | None = Header(None)):
     try:
         claims = jwt.decode(authorization[7:], key, algorithms=['HS256'], audience='neo-compute', issuer=issuer,
             options={'require':['exp','iat','sub','scope','jti','iss','aud']})
-        if (not claims['sub'] or not claims['sub'].isdigit() or claims['scope'] != 'neo.trend_histogram'
+        if (not claims['sub'] or not claims['sub'].isdigit() or claims['scope'] not in CAPABILITIES
             or not isinstance(claims['iat'], int) or not isinstance(claims['exp'], int)
             or claims['exp'] - claims['iat'] > 30 or claims['exp'] <= claims['iat']
             or not isinstance(claims['jti'], str) or not claims['jti']):

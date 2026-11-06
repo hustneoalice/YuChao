@@ -5,9 +5,9 @@
 连接会被拒——调用方（router）自行 try/except 降级为「无法体检」。
 
 打分口径（策影 foundation 设计「体检评估」对齐）：
-- 新鲜度 40%：每类数据最新日期 vs 预期日期（链位时刻 + 60min 缓冲后预期
-  当日，否则预期上一交易日）；滞后 0/1/2-3/>3 交易日 → 100/70/40/0。
-  财务（报告期）与复权因子（周更）用宽松口径。
+- 新鲜度 40%：按各表自带的更新周期判定（口径见 repo/contracts.py）——
+  日更表按交易日链位，滞后 0/1/2-3/>3 个交易日 → 100/70/40/0；
+  财务报表按季度披露截止日，复权因子按周六任务落账，证券清单按行数。
 - 覆盖率 30%：最新截面覆盖标的数 / 全市场证券数，≥90%→100 线性到 0。
 - 断档 20%：daily_ohlcv 近 10 个交易日逐日检查缺日与标的数骤降。
 - 落账健康 10%：update_log 近 7 天失败次数扣分 + updater 进程在线探测。
@@ -23,6 +23,7 @@ from datetime import date, datetime, timedelta
 from ...config import settings
 from ...updater.registry import TASKS
 from ...updater.trading_calendar import is_trading_day
+from .contracts import CONTRACTS, assess_table
 from .data import _coverage
 
 # 散户能看懂叫法：库表 / 更新任务 → 中文（消息只用中文，原始键仅供前端逻辑
@@ -57,27 +58,13 @@ def _zh_kind(name: str) -> str:
     return _KIND_ZH.get(name) or "数据更新"
 
 
-# 体检对象：表 → kind / 日期列 / 链位时刻(h,m)（None=宽松日历口径）/ 周更 /
-# 宽松口径的宽限天数 (满分界, 及格界)
-_FRESH_TABLES: dict[str, dict] = {
-    "daily_ohlcv": {"kind": "kline_update", "col": "date",
-                    "chain": (17, 0), "weekly": False},
-    "capital_flow": {"kind": "capital_flow", "col": "date",
-                     "chain": (16, 30), "weekly": False},
-    "daily_valuation": {"kind": "valuation", "col": "date",
-                        "chain": (16, 20), "weekly": False},
-    "sector_index": {"kind": "sector_index", "col": "trade_date",
-                     "chain": (15, 35), "weekly": False},
-    # 财务按报告期披露（季报节奏 ≈ 90 天，双倍缓冲宽判）
-    "financials": {"kind": "financials", "col": "report_date",
-                   "chain": None, "weekly": False, "soft": (200, 320)},
-    # 复权因子周六增量（一周一更，双周宽判）
-    "adjust_factor": {"kind": "adjust_factor", "col": "ex_date",
-                      "chain": None, "weekly": True, "soft": (8, 15)},
-}
-
 # 覆盖率计入总分的核心表（个股维度截面）
 _COVER_TABLES = ("daily_ohlcv", "daily_valuation", "capital_flow")
+
+
+def _now() -> datetime:
+    """体检统一时钟（测试可冻结；生产直接用系统时间）。"""
+    return datetime.now()
 
 
 def updater_alive(max_age_s: float = 20.0) -> bool:
@@ -102,94 +89,24 @@ def updater_alive(max_age_s: float = 20.0) -> bool:
 
 # -- 新鲜度 ------------------------------------------------------------------
 
-def _expected_date(now: datetime, chain: tuple[int, int] | None) -> date:
-    """预期最新日期：链位过点 60min 后预期当日（交易日），否则上一交易日。"""
-    today = now.date()
-    if chain is not None:
-        due = now.replace(hour=chain[0], minute=chain[1], second=0, microsecond=0)
-        if now <= due + timedelta(minutes=60):
-            return _prev_trading(today)
-    if is_trading_day(today):
-        return today
-    return _prev_trading(today)
-
-
-def _expected_saturday(now: datetime) -> date:
-    """周更任务预期日期：最近一个周六（含今天）。"""
-    d = now.date()
-    while d.weekday() != 5:
-        d -= timedelta(days=1)
-    return d
-
-
-def _prev_trading(d: date) -> date:
-    d -= timedelta(days=1)
-    while not is_trading_day(d):
-        d -= timedelta(days=1)
-    return d
-
-
-def _trading_lag(latest: str | None, expected: date) -> int:
-    """latest 落后 expected 几个交易日（0=齐平；latest 更新也算 0）。"""
-    if not latest:
-        return 99
-    try:
-        d = date.fromisoformat(str(latest)[:10])
-    except Exception:
-        return 99
-    if d >= expected:
-        return 0
-    lag = 0
-    cur = expected
-    while d < cur and lag < 30:
-        cur = _prev_trading(cur)
-        lag += 1
-    return lag if d == cur else 99
-
-
-def _fresh_score(lag: int, soft: tuple[int, int] | None) -> int:
-    if soft:                          # 财务/复权因子：日历口径宽判
-        full, pass_ = soft
-        return 100 if lag <= full else (60 if lag <= pass_ else 20)
-    return 100 if lag == 0 else (70 if lag == 1 else (40 if lag <= 3 else 0))
-
-
 def _freshness(conn, now: datetime) -> tuple[int, list[dict]]:
+    """逐表按各自更新周期判定（口径集中在 repo/contracts.py）。"""
     items, scores = [], []
-    for table, spec in _FRESH_TABLES.items():
-        latest = None
+    for table, spec in CONTRACTS.items():
+        latest, rows = None, 0
         try:
-            row = conn.execute(f"SELECT MAX({spec['col']}) FROM {table}").fetchone()
-            latest = str(row[0]) if row and row[0] else None
+            row = conn.execute(
+                f"SELECT COUNT(*), MAX({spec['col']}) FROM {table}"
+                if spec.get("col") else f"SELECT COUNT(*), NULL FROM {table}"
+            ).fetchone()
+            rows = int(row[0] or 0)
+            latest = str(row[1]) if row[1] else None
         except Exception:
             pass
-        soft = spec.get("soft")
-        if spec["weekly"]:
-            expected = _expected_saturday(now)
-            lag = _calendar_lag(latest)
-        elif soft:                    # 报告期口径：纯日历宽限
-            expected = None
-            lag = _calendar_lag(latest)
-        else:
-            expected = _expected_date(now, spec["chain"])
-            lag = _trading_lag(latest, expected)
-        score = _fresh_score(lag, soft)
-        scores.append(score)
-        items.append({
-            "table": table, "kind": spec["kind"], "latest": latest,
-            "expected": str(expected) if expected else None, "lag_days": lag,
-            "score": score, "lenient": bool(soft),
-        })
+        it = assess_table(conn, table, latest, rows, now)
+        scores.append(it["score"])
+        items.append(it)
     return round(sum(scores) / len(scores)) if scores else 100, items
-
-
-def _calendar_lag(latest: str | None) -> int:
-    if not latest:
-        return 99
-    try:
-        return (datetime.now().date() - date.fromisoformat(str(latest)[:10])).days
-    except Exception:
-        return 99
 
 
 # -- 覆盖率 ------------------------------------------------------------------
@@ -223,10 +140,10 @@ def _coverage_all(conn) -> tuple[int, list[dict]]:
 
 # -- 断档 --------------------------------------------------------------------
 
-def _gap_check(conn) -> tuple[int, list[dict]]:
+def _gap_check(conn, now: datetime) -> tuple[int, list[dict]]:
     """近 10 个交易日：缺日 −20，当日标的数较中位数骤降 >30% −10。"""
     days: list[date] = []
-    d = datetime.now().date()
+    d = now.date()
     while len(days) < 10:
         if is_trading_day(d):
             days.append(d)
@@ -282,10 +199,10 @@ def _ledger_check(conn) -> tuple[int, list[dict], bool]:
 # -- 汇总 ----------------------------------------------------------------------
 
 def assess(conn, now: datetime | None = None) -> dict:
-    now = now or datetime.now()
+    now = now or _now()
     fresh_score, fresh_items = _freshness(conn, now)
     cover_score, cover_items = _coverage_all(conn)
-    gap_score, gap_items = _gap_check(conn)
+    gap_score, gap_items = _gap_check(conn, now)
     ledger_score, failed_7d, alive = _ledger_check(conn)
 
     score = round(fresh_score * 0.4 + cover_score * 0.3
@@ -296,13 +213,12 @@ def assess(conn, now: datetime | None = None) -> dict:
     for it in fresh_items:
         if it["score"] < 100:
             issues.append({
-                "level": "warn" if it["score"] >= 40 else "error",
+                "level": "warn" if it["state"] == "warn" else "error",
                 "code": "freshness", "kind": it["kind"],
-                "message": f"{_zh_table(it['table'])}最新 {it['latest'] or '暂无数据'}"
-                           + (f"，预期 {it['expected']}（滞后 {it['lag_days']} 天）"
-                              if it["expected"] else f"（已滞后 {it['lag_days']} 天）"),
+                "message": f"{_zh_table(it['table'])}：{it['note']}"
+                           f"（更新周期：{it['cycle']}）",
                 "action": {"kind": it["kind"], "force": True}
-                if not it.get("lenient") else None,
+                if it["mode"] == "daily" and it["kind"] else None,
             })
     for it in cover_items:
         if it["score"] < 100 and it["coverage"] is not None:

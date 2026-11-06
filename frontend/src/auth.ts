@@ -96,6 +96,8 @@ async function submitAuth(): Promise<void> {
     closeModals();
     (document.getElementById("auth-pwd") as HTMLInputElement).value = "";
     toast(mode === "login" ? `欢迎回来，${user.username || user.email}` : "注册成功，已自动登录");
+    // 登录后重读大模型状态：顶栏灯/小飞机按该账户的配置点亮
+    document.dispatchEvent(new CustomEvent("yc:llm-changed"));
     // 云设置拉取合并：服务器缺失键回传本地，自选/卡片/外观跟账户走
     void pullOnLogin().then(() => emit());
   } catch (e) {
@@ -135,6 +137,7 @@ export function logout(): void {
   localStorage.removeItem("yc_token");
   setUser(null);
   emit();
+  document.dispatchEvent(new CustomEvent("yc:llm-changed"));
   toast("已退出登录");
 }
 

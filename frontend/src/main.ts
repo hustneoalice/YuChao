@@ -18,6 +18,8 @@ import { initSectors, jumpSector, loadSectors } from "./pages/sectors";
 import { initCorepicks, renderCorepicks } from "./pages/corepicks";
 import { initCards, renderCards } from "./pages/cards";
 import { initSettings, refreshDatachip, refreshUpChip, openSettingsTab } from "./pages/settings";
+import { initAi } from "./pages/ai";
+import { initQuickAsk } from "./pages/quickask";
 import { initSync, pullOnLogin } from "./sync";
 import { SseClient } from "./sse";
 import { initWatchPanel } from "./watch";
@@ -162,6 +164,8 @@ function boot(): void {
   initSectors();
   initCards();
   initSettings();
+  initAi();                   // 智能页：问股对话（规则模式零依赖，配模型后自动升级）
+  initQuickAsk();             // 右下角快速问股浮框（任意页面可唤起，自动带当前标的）
   initWatchPanel();           // 加自选/分组管理面板（modal-watch）：行情页 star 与核心标明细共用
   initSync();                 // F04：本地变更→云推送；带 token 启动→静默拉取合并
 

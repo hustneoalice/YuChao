@@ -93,7 +93,7 @@ def test_fetch_kline_tx_endpoint_rotation(monkeypatch):
             ["2026-11-02", "10.0", "10.5", "11.0", "9.5", "1000"]]}}}
 
     monkeypatch.setattr(sources, "get_json", fake_get_json)
-    rows = sources.fetch_kline_tx("600519")
+    rows = sources.fetch_kline_tx("600519", 800)     # 单页（≤2000 不触发分页）
     assert len(calls) == 3                          # 轮换到第 3 个端点
     assert rows[0]["v"] == 100_000                  # 手 → 股
     assert rows[0]["t"] == "2026-11-02"
@@ -133,7 +133,7 @@ def test_lane_circuit_breaker_cooldown(updater_env, monkeypatch):
     res = kmod.update_kline(progress=None, ctx={"cancel_check": lambda: False})
     assert res["status"] == "success"
     assert calls["tx"] == 3                         # 3 败后冷却，第 4/5 只跳过
-    assert calls["sina"] == 5                       # 新浪全程接管
+    assert calls["sina"] == 7                       # 新浪全程接管（5 股 + 2 基金）
     assert calls["em"] == 0                         # sina 可用则东财不启用
 
 

@@ -3,7 +3,7 @@
 EventSource 不支持自定义 header（设计文档 06.2）——SSE 的 JWT 走 query 参数，
 同一解析函数两条路都吃。
 """
-from fastapi import Query, Request
+from fastapi import Depends, Query, Request
 
 from ..errors import forbidden, unauthorized, vip_required
 from . import service
@@ -17,8 +17,12 @@ def resolve_token(request: Request, token: str | None = Query(default=None)) -> 
     return token
 
 
-def current_user(token: str | None = None) -> dict | None:
-    """可选鉴权：无效/缺失返回 None（公开端点不因带错令牌而 500）。"""
+def current_user(token: str | None = Depends(resolve_token)) -> dict | None:
+    """可选鉴权：无效/缺失返回 None（公开端点不因带错令牌而 500）。
+
+    注意必须 Depends(resolve_token)：否则 FastAPI 会把 token 当 query 参数，
+    Authorization 头永远读不到（AI 端点曾因此拿不到用户自己的模型配置）。
+    """
     if not token:
         return None
     payload = service.decode_token(token)

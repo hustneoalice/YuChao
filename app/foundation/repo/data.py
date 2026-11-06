@@ -1,6 +1,8 @@
 """数据底座状态：表清单体检（行数 / 最新日期）+ 状态机。"""
 from datetime import datetime
 
+from .contracts import CONTRACTS, assess_table
+
 _INVENTORY = (
     "daily_ohlcv", "market_snapshot", "adjust_factor", "capital_flow", "financials",
     "stock_universe", "sector_index", "daily_valuation",
@@ -53,9 +55,18 @@ def table_status(conn, table: str) -> dict:
     coverage = None
     if table in _COVERAGE_TABLES:
         coverage = _coverage(conn, table, _COVERAGE_TABLES[table], latest)
-    return {"table": table, "rows": int(row[0]) if row else 0,
-            "latest_date": latest, "earliest_date": str(row[2]) if row and row[2] else None,
-            "coverage": coverage}
+    result = {"table": table, "rows": int(row[0]) if row else 0,
+              "latest_date": latest,
+              "earliest_date": str(row[2]) if row and row[2] else None,
+              "coverage": coverage}
+    # 按数据类别自带的更新周期判定（日更/季度/周更/常驻），前端据此上色
+    if table in CONTRACTS:
+        fresh = assess_table(conn, table, latest, result["rows"])
+        result.update({"cycle": fresh["cycle"], "expected": fresh["expected"],
+                       "fresh": fresh["state"],
+                       "fresh_badge": fresh["badge"],
+                       "fresh_note": fresh["note"]})
+    return result
 
 
 # 各表"最新日期"列名（1.0 schema 原样；无日期维度 → None）

@@ -74,7 +74,7 @@ NEW_TABLES_DDL = """
         PRIMARY KEY (date, pool, symbol)
     );
 
-    -- 个股资料（主营问答 F16 与个股资料页共用；采集源 AKShare）
+    -- 个股资料（主营问答 F16 与个股资料页共用；东财 F10 采集）
     CREATE TABLE IF NOT EXISTS stock_profile (
         symbol VARCHAR PRIMARY KEY,
         name VARCHAR,

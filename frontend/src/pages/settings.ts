@@ -147,6 +147,17 @@ async function refreshUpState(): Promise<void> {
     const st = UP_STATUS[r.status] ?? UP_STATUS.running;
     const isRun = r.status === "running";
     const pct = Math.max(r.percent ?? 0, 1.5);
+    /* 只有按标的/按项统计的批次任务才有成功/失败可数；单次任务显示 —，避免误导成 0/0 */
+    const hasBatch = (r.total ?? 0) > 0;
+    /* 速度与预计剩余：由已处理/已用时间推导；任务结束后回到总耗时 */
+    const rate = hasBatch && isRun && r.elapsed_s && (r.done ?? 0) > 0
+      ? ((r.done ?? 0) / r.elapsed_s) * 60 : 0;
+    const leftS = rate > 0 ? Math.max(0, ((r.total ?? 0) - (r.done ?? 0)) / rate * 60) : 0;
+    const pace = rate > 0
+      ? `${fmt(rate, 0)} 只/分${leftS > 0
+          ? ` · 剩 ${Math.floor(leftS / 60)}:${String(Math.floor(leftS % 60)).padStart(2, "0")}`
+          : ""}`
+      : "";
     parts.push(
       `<div class="uprow">` +
       `<i class="logdot ${st.dot}"${isRun ? ' style="animation:pulse 1.2s infinite"' : ""}></i>` +
@@ -162,10 +173,13 @@ async function refreshUpState(): Promise<void> {
       `</div>`,
       `<div class="upstats">` +
       `<div><div class="k">成功 / 失败</div><div class="v">` +
-      `<span style="color:var(--down)">${fmt(r.succeeded ?? 0, 0)}</span><span style="color:var(--faint)"> / </span>` +
-      `<span style="color:${r.failed ? "var(--up)" : "var(--faint)"}">${fmt(r.failed ?? 0, 0)}</span></div></div>` +
+      (hasBatch
+        ? `<span style="color:var(--down)">${fmt(r.succeeded ?? 0, 0)}</span><span style="color:var(--faint)"> / </span>` +
+          `<span style="color:${r.failed ? "var(--up)" : "var(--faint)"}">${fmt(r.failed ?? 0, 0)}</span>`
+        : `<span style="color:var(--faint)">—</span>`) + `</div></div>` +
       `<div><div class="k">已写入数据</div><div class="v">${r.rows != null ? fmtW(r.rows) : "—"}</div></div>` +
-      `<div><div class="k">${isRun ? "已用时间" : "总耗时"}</div><div class="v">${fmtDur(r.elapsed_s)}</div></div></div>`,
+      `<div><div class="k">${pace ? "速度 / 预计剩余" : (isRun ? "已用时间" : "总耗时")}</div>` +
+      `<div class="v">${pace || fmtDur(r.elapsed_s)}</div></div></div>`,
     );
     if (r.message) parts.push(`<div style="font-size:11px;color:var(--faint)">${esc(r.message)}</div>`);
     const logs = (r.logs ?? []).slice(-8).reverse();
@@ -247,7 +261,7 @@ async function refreshHealth(): Promise<void> {
   const ret = Object.values(h.selfheal?.kinds ?? {}).reduce((s, k) => s + (k.retries ?? 0), 0);
   const facts: [string, number, string, string][] = [
     ["数据是否最新", h.freshness?.score ?? 0,
-      kline ? `行情 ${ (kline.latest || "").slice(5, 10) } · 落后 ${kline.lag_days} 天` : "—",
+      kline ? `行情 ${ (kline.latest || "").slice(5, 10) } · 落后 ${kline.lag_days} 个交易日` : "—",
       kline && kline.lag_days === 0 ? "ok" : kline && kline.lag_days <= 1 ? "mid" : "bad"],
     ["覆盖多少股票", h.coverage?.score ?? 0,
       covWorst ? `${esc(TABLE_ZH[covWorst.table] || "数据表")} ${Math.round(covWorst.coverage ?? 0)}%` : "全部完整",
@@ -353,13 +367,15 @@ async function renderData(body: HTMLElement): Promise<void> {
     `<div class="dsgrid">` +
     (filled.length ? filled.map((t) => {
       const n = daysAgo(t.latest_date);
-      const cls = freshCls(n);
+      const cls = t.fresh ?? freshCls(n);
+      const label = t.fresh_badge || freshLabel(n);
       const cov = typeof t.coverage === "number" ? t.coverage : null;
       const covCls = cov == null ? "" : cov >= 90 ? "" : cov >= 50 ? "mid" : "bad";
       return `<div class="dscard"><div class="ds-h"><i class="logdot ${cls}"></i><b>${esc(TABLE_ZH[t.table] || "其他数据")}</b></div>` +
         `<div class="ds-date num">${esc(t.latest_date || "—")}</div>` +
         `<div class="ds-m"><span class="num">${fmtW(t.rows ?? 0)} 条</span>` +
-        `<span class="fresh ${cls}">${freshLabel(n)}</span></div>` +
+        `<span class="fresh ${cls}" title="${esc(t.fresh_note || "")}">${esc(label)}</span></div>` +
+        (t.cycle ? `<div style="font-size:10.5px;color:var(--faint);line-height:1.4">更新周期：${esc(t.cycle)}</div>` : "") +
         (cov != null ? `<div class="ds-cov ${covCls}"><div class="bar"><i style="width:${Math.max(cov, 1.5)}%"></i></div>` +
           `<span class="num">${cov >= 99 ? "完整" : cov.toFixed(0) + "%"}</span></div>` : "") +
         `</div>`;
@@ -603,7 +619,7 @@ async function renderLlm(body: HTMLElement): Promise<void> {
     `<button class="hbtn primary" id="llm-save">保存</button>` +
     `<button class="hbtn" id="llm-test">测试连通</button></div></div>` +
     `<div style="font-size:10.5px;color:var(--faint);line-height:1.7">任何 OpenAI chat/completions 兼容端点均可（DeepSeek / Kimi / 通义 / OpenAI 等）。` +
-    `测试会用已保存配置真实请求一次（max_tokens=1），请先保存再测试。</div></div>`;
+    `测试直接用上方当前输入（改动不必先保存）。</div></div>`;
   let enabled = cfg.enabled;
   document.getElementById("llm-sw")!.addEventListener("click", (e) => {
     enabled = !enabled;
@@ -618,12 +634,16 @@ async function renderLlm(body: HTMLElement): Promise<void> {
         enabled,
       });
       toast("大模型配置已保存");
+      document.dispatchEvent(new CustomEvent("yc:llm-changed"));
       void render();
     } catch (e) { toast((e as Error).message || "保存失败"); }
   });
   document.getElementById("llm-test")!.addEventListener("click", async () => {
     try {
-      const r = await meApi.testLlm();
+      const base_url = (document.getElementById("llm-url") as HTMLInputElement).value.trim();
+      const api_key = (document.getElementById("llm-key") as HTMLInputElement).value.trim();
+      const model = (document.getElementById("llm-model") as HTMLInputElement).value.trim();
+      const r = await meApi.testLlm({ base_url, api_key, model });
       toast(`${r.ok ? "✓" : "✗"} ${r.message}`);
     } catch (e) { toast((e as Error).message || "测试请求失败"); }
   });

@@ -80,31 +80,46 @@ _MONEY_MIN_BARS = 30
 _MONEY_WINDOW = 20
 
 
-def money_indexes(bars):
-    """钱袋信号所在下标：低点后反弹 6% 确认，信号落在拐点后一根（原模型 1 日滞后）。"""
+def qyjj_signals(bars):
+    """钱袋/地雷信号下标：低点/高点后反转 6% 确认，信号落在拐点后一根。
+
+    返回 (下标, 'money'|'mine') 升序列表，与前端 qyjj.ts 同口径：
+    钱袋=阶段低点（画在最低价下方），地雷=阶段高点（画在最高价上方）。"""
     n = len(bars)
     if n < _MONEY_MIN_BARS:
         return []
     close = [b['close'] for b in bars]
     out: set[int] = set()
+    signals: list[tuple[int, str]] = []
     direction = -1                 # 先找底部，再找顶部，严格交替
     ext = 0
     ext_val = close[0]
     for i in range(1, n):
         c = close[i]
+        at = -1
+        signal = None
         if direction == -1:
             if c < ext_val:
                 ext, ext_val = i, c
             elif c >= ext_val * (1 + _MONEY_PCT):
                 at = ext + 1
-                if at < n:
-                    out.add(at)
+                signal = 'money'
                 direction, ext, ext_val = 1, i, c
         elif c > ext_val:
             ext, ext_val = i, c
         elif c <= ext_val * (1 - _MONEY_PCT):
+            at = ext + 1
+            signal = 'mine'
             direction, ext, ext_val = -1, i, c
-    return sorted(out)
+        if signal and at < n and at not in out:
+            out.add(at)
+            signals.append((at, signal))
+    return signals
+
+
+def money_indexes(bars):
+    """钱袋信号所在下标：低点后反弹 6% 确认，信号落在拐点后一根（原模型 1 日滞后）。"""
+    return [i for i, kind in qyjj_signals(bars) if kind == 'money']
 
 
 def qyjj_money_summary(dates, bars, window=_MONEY_WINDOW):
@@ -119,4 +134,64 @@ def qyjj_money_summary(dates, bars, window=_MONEY_WINDOW):
     return dict(money_date=dates[last],
                 money_ago=n - 1 - last,
                 money_cnt=len(recent))
+
+
+# -- 六分段（趋势线六位置，与前端 indicators.ts 同口径：MA7 快 / MA10 慢 + ATR14） --
+_SEG_NAME = ('', '超跌', '反弹', '突破', '超涨', '回踩', '跌破')
+
+
+def six_segment_series(bars):
+    """逐 bar 六分段判定：0=预热不足，1 超跌 → 2 反弹 → 3 突破 → 4 超涨 → 5 回踩 → 6 跌破。"""
+    closes = [b['close'] for b in bars]
+    ma7: list = []
+    ma10: list = []
+    atr14: list = []
+    trs: list = []
+    s7 = s10 = s_tr = 0.
+    for i, close in enumerate(closes):
+        s7 += close
+        if i >= 7:
+            s7 -= closes[i - 7]
+        s10 += close
+        if i >= 10:
+            s10 -= closes[i - 10]
+        ma7.append(s7 / 7 if i >= 6 else None)
+        ma10.append(s10 / 10 if i >= 9 else None)
+        high, low = bars[i].get('high'), bars[i].get('low')
+        high = close if high is None else high
+        low = close if low is None else low
+        prev = closes[i - 1] if i > 0 else close
+        tr = max(high - low, abs(high - prev), abs(low - prev))
+        trs.append(tr)
+        s_tr += tr
+        if i >= 14:
+            s_tr -= trs[i - 14]
+        atr14.append(s_tr / 14 if i >= 13 else None)
+    out = []
+    for i, close in enumerate(closes):
+        fast, slow, atr = ma7[i], ma10[i], atr14[i]
+        if fast is None or slow is None or atr is None or not slow:
+            out.append(0)
+            continue
+        deep = 1.5 * max(atr / close, 0.01)
+        dev = close / slow - 1
+        if close >= slow:
+            if fast > slow and dev >= deep:
+                out.append(4)                          # 超涨
+            elif fast >= slow and close < fast:
+                out.append(5)                          # 回踩快线
+            else:
+                out.append(3)                          # 突破 / 上升趋势
+        elif fast > slow:
+            out.append(6)                              # 刚跌破慢线
+        else:
+            out.append(1 if dev <= -deep else 2)        # 超跌 / 反弹
+    return out
+
+
+def six_segment_summary(dates, values):
+    """当前所在段位与名称（无数据时 segment=0、名称空）。"""
+    segment = values[-1] if values else 0
+    return dict(segment=segment, segment_name=_SEG_NAME[segment],
+                data_date=dates[-1] if dates else '')
 

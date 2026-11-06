@@ -93,6 +93,52 @@ def register(email: str, password: str, username: str | None = None) -> dict:
                      "tier": "free", "role": "user"}}
 
 
+def ensure_admin() -> Optional[dict]:
+    """首次启动初始化内置管理员（幂等）。
+
+    规则：
+    - 库里已有任何 admin → 跳过（后续改密码属用户自己的事）；
+    - 配置的邮箱/用户名已被普通账户占用 → 就地升级为管理员（永久 VIP）；
+    - 否则新建 admin（role=admin，tier=pro，pro_expires_at=NULL 永久）。
+    """
+    if not settings.admin_seed:
+        return None
+    email = (settings.admin_email or "").strip().lower()
+    username = (settings.admin_username or "").strip() or None
+    password = settings.admin_password or ""
+    if not email or not password:
+        logger.warning("管理员初始化跳过：邮箱或密码为空")
+        return None
+
+    conn = get_conn()
+    try:
+        if conn.execute("SELECT 1 FROM users WHERE role='admin' LIMIT 1").fetchone():
+            return None
+        taken = conn.execute(
+            "SELECT id FROM users WHERE email=? OR (username IS NOT NULL AND username=?)",
+            (email, username)).fetchone()
+        if taken:
+            conn.execute(
+                "UPDATE users SET role='admin', tier='pro', pro_expires_at=NULL WHERE id=?",
+                (taken["id"],))
+            conn.commit()
+            logger.info("内置管理员已升级：%s", email)
+            return {"id": taken["id"], "email": email, "upgraded": True}
+        user_id = secrets.token_hex(8)
+        salt = secrets.token_hex(16)
+        conn.execute(
+            "INSERT INTO users (id, email, username, password_hash, salt, tier, pro_expires_at, role, created_at) "
+            "VALUES (?,?,?,?,?,'pro',NULL,'admin',?)",
+            (user_id, email, username, hash_password(password, salt), salt,
+             datetime.now().isoformat(timespec="seconds")),
+        )
+        conn.commit()
+        logger.info("内置管理员已初始化：%s / %s", username or "-", email)
+        return {"id": user_id, "email": email, "upgraded": False}
+    finally:
+        conn.close()
+
+
 def login(identifier: str, password: str, remember: bool = True) -> dict:
     identifier = (identifier or "").strip()
     is_email = bool(EMAIL_RE.match(identifier))

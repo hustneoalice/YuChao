@@ -97,7 +97,8 @@ export const meApi = {
   llm: () => req<LlmCfg>("/me/llm"),
   putLlm: (p: { base_url?: string; api_key?: string; model?: string; enabled?: boolean }) =>
     req<LlmCfg>("/me/llm", { method: "PUT", body: p }),
-  testLlm: () => req<TestResult>("/me/llm/test", { method: "POST", body: {} }),
+  testLlm: (p?: { base_url?: string; api_key?: string; model?: string }) =>
+    req<TestResult>("/me/llm/test", { method: "POST", body: p ?? {} }),
   /* F10 · 飞书推送（webhook/secret 永不回显） */
   feishu: () => req<FeishuCfg>("/me/feishu"),
   putFeishu: (p: {
@@ -436,14 +437,16 @@ export const corepicksApi = {
 export interface DataStatus {
   stage: "uninitialized" | "initializing" | "ready" | "updating" | "update_failed";
   duckdb_path: string;
-  tables: { table: string; rows?: number; latest_date?: string; earliest_date?: string; coverage?: number | null }[];
+  tables: { table: string; rows?: number; latest_date?: string; earliest_date?: string;
+    coverage?: number | null; cycle?: string; expected?: string | null;
+    fresh?: "ok" | "warn" | "bad"; fresh_badge?: string; fresh_note?: string }[];
   generated_at: string;
 }
 /* P1 体检报告（/data/health）：四维打分 + 分级 + 带修复动作的问题清单 */
 export interface HealthReport {
   score: number;
   grade: "healthy" | "warn" | "poor";
-  freshness: { score: number; items: { table: string; kind: string; latest?: string | null; expected?: string | null; lag_days: number; score: number; lenient?: boolean }[] };
+  freshness: { score: number; items: { table: string; kind: string; latest?: string | null; expected?: string | null; lag_days: number; score: number; state?: "ok" | "warn" | "bad"; badge?: string; cycle?: string; note?: string; mode?: string }[] };
   coverage: { score: number; items: { table: string; latest?: string | null; coverage?: number | null; score: number }[] };
   gap: { score: number; items: { date: string; symbols: number; missing: boolean; drop: boolean }[] };
   ledger: { score: number; updater_alive: boolean; failed_7d: { kind: string; failed: number }[] };
@@ -497,4 +500,87 @@ export const dataApi = {
 export const licenseApi = {
   redeem: (code: string) =>
     req<{ tier: string; pro_expires_at: string; plan: string; days: number }>("/license/redeem", { method: "POST", body: { code } }),
+};
+
+/* ── ai（智能助手） ── */
+export interface AiToolCall {
+  tool: string; args: Record<string, unknown>; ms: number;
+  data_date?: string | null; rows?: number;
+}
+export interface AiAnswer {
+  mode: "rule" | "llm"; fallback?: boolean; question: string; answer: string;
+  tool_calls: AiToolCall[]; candidates: { symbol: string; name: string }[];
+  missing: string[]; warnings: string[]; data_date: string | null;
+}
+export interface AiToolSpec {
+  id: string; name: string; cat: string; desc: string;
+  params: Record<string, string>; returns: string; source: string;
+  freshness: string | null; readonly: boolean; needs_config: boolean;
+}
+export interface AiStreamMeta {
+  mode: "rule" | "llm"; fallback?: boolean; missing: string[]; warnings: string[];
+  data_date: string | null; candidates?: { symbol: string; name: string }[];
+}
+export interface AiStreamHandlers {
+  onThinking?: (t: string) => void;
+  onTool?: (c: AiToolCall) => void;
+  onToken?: (t: string) => void;
+  onAnswer?: (t: string) => void;
+  onWarn?: (m: string) => void;
+  onMeta?: (m: AiStreamMeta) => void;
+}
+
+export const aiApi = {
+  chat: (q: string, symbol?: string) =>
+    req<AiAnswer>("/ai/chat", { method: "POST", body: { q, symbol: symbol || null } }),
+  /** SSE 流式问股：thinking 推理流 / tool 调用卡 / token 正文 / answer 整段 / meta 收尾 */
+  chatStream: async (q: string, symbol: string | undefined,
+                      h: AiStreamHandlers, signal?: AbortSignal): Promise<void> => {
+    const headers: Record<string, string> = { "Content-Type": "application/json" };
+    const token = getToken();
+    if (token) headers.Authorization = `Bearer ${token}`;
+    const res = await fetch(BASE + "/ai/chat/stream", {
+      method: "POST", headers, signal,
+      body: JSON.stringify({ q, symbol: symbol || null }),
+    });
+    if (!res.ok || !res.body) {
+      let message = res.statusText || `HTTP ${res.status}`;
+      try { const j = await res.json(); if (typeof j.message === "string") message = j.message; } catch { /* 非 JSON */ }
+      throw new ApiError(res.status, "stream_error", message);
+    }
+    const reader = res.body.getReader();
+    const dec = new TextDecoder();
+    let buf = "";
+    const dispatch = (block: string): void => {
+      let ev = "message";
+      const data: string[] = [];
+      for (const line of block.split("\n")) {
+        if (line.startsWith("event:")) ev = line.slice(6).trim();
+        else if (line.startsWith("data:")) data.push(line.slice(5).trimStart());
+      }
+      if (!data.length) return;
+      let obj: Record<string, unknown>;
+      try { obj = JSON.parse(data.join("\n")) as Record<string, unknown>; } catch { return; }
+      if (ev === "thinking") h.onThinking?.(String(obj.t ?? ""));
+      else if (ev === "tool") h.onTool?.(obj as unknown as AiToolCall);
+      else if (ev === "token") h.onToken?.(String(obj.t ?? ""));
+      else if (ev === "answer") h.onAnswer?.(String(obj.answer ?? ""));
+      else if (ev === "warn") h.onWarn?.(String(obj.message ?? ""));
+      else if (ev === "meta") h.onMeta?.(obj as unknown as AiStreamMeta);
+    };
+    for (;;) {
+      const { done, value } = await reader.read();
+      if (done) break;
+      buf += dec.decode(value, { stream: true });
+      let cut = buf.indexOf("\n\n");
+      while (cut >= 0) {
+        dispatch(buf.slice(0, cut));
+        buf = buf.slice(cut + 2);
+        cut = buf.indexOf("\n\n");
+      }
+    }
+    if (buf.trim()) dispatch(buf);
+  },
+  tools: () => req<{ items: AiToolSpec[]; count: number }>("/ai/tools"),
+  health: () => req<{ llm: boolean; mode: string; model: string | null; reason: string | null }>("/ai/health"),
 };
