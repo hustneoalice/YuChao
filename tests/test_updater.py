@@ -367,8 +367,10 @@ def test_sector_index_task(updater_env, tmp_path, monkeypatch):
 def test_market_snapshot_task(updater_env, monkeypatch):
     """盘中快照：qt 全字段 → market_snapshot（股票+指数同表 kind 区分）。"""
     from app.updater.collectors import market_snapshot as msnap
+    from datetime import datetime
+    monkeypatch.setattr(msnap, "now_cst", lambda: datetime(2026,11,5,0,0))
 
-    def fake_snap(codes, progress=None, cancel=None):
+    def fake_snap(codes, progress=None, cancel=None, expected_date=None):
         # 与真实 fetch_qt_snapshot 同口径：入参股票裸码/指数全码混合，
         # 出键一律 full 形态（600519.SH）——裸码会撞 000001 双重身份
         out = {}
@@ -387,7 +389,7 @@ def test_market_snapshot_task(updater_env, monkeypatch):
                             5.0e9, 4.2e9)
         return out
 
-    monkeypatch.setattr(msnap, "expected_asof", lambda: "2026-11-02")
+    monkeypatch.setattr(msnap, "expected_asof", lambda *args: "2026-11-02")
     monkeypatch.setattr(msnap, "_MIN_SNAPSHOT_ROWS", 5)   # 夹具小数据集
     monkeypatch.setattr(msnap.sources, "fetch_qt_snapshot", fake_snap)
     res = msnap.update_market_snapshot(progress=None,
@@ -410,8 +412,10 @@ def test_market_snapshot_task(updater_env, monkeypatch):
 def test_market_snapshot_offhours_skip(updater_env, monkeypatch):
     """非交易时段且当日已有快照 → 幂等秒跳（interval 触发的重复轮次不重拉）。"""
     from app.updater.collectors import market_snapshot as msnap
+    from datetime import datetime
+    monkeypatch.setattr(msnap, "now_cst", lambda: datetime(2026,11,5,0,0))
 
-    monkeypatch.setattr(msnap, "expected_asof", lambda: "2026-10-30")
+    monkeypatch.setattr(msnap, "expected_asof", lambda *args: "2026-10-30")
     monkeypatch.setattr(msnap, "_in_trading_hours", lambda now: False)  # 模拟收盘后
     called = {"n": 0}
 
@@ -427,7 +431,7 @@ def test_market_snapshot_offhours_skip(updater_env, monkeypatch):
     # force=True：非交易时段也补一轮（清单扩充后手动刷新快照）
     monkeypatch.setattr(msnap, "_MIN_SNAPSHOT_ROWS", 5)
 
-    def fake_snap(codes, progress=None, cancel=None):
+    def fake_snap(codes, progress=None, cancel=None, expected_date=None):
         called["n"] += 1
         out = {}
         for c in codes:

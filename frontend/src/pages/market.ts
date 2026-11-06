@@ -2,19 +2,23 @@ import { estimateFloatShares } from "../volume-activity";
 /* 行情页：个股头 + klinecharts K线 + 右列功能卡 */
 import { marketApi, type Bar, type Kline, type FundFlowRange, type IndexQuote, type Quote } from "../api";
 import { cssv, esc, fmt, fmtChg, fmtVol, fmtYi, fmtYiS } from "../fmt";
-import { sma, bollSeries, kdjSeries, atrSeries, sixSegment, SEGNAME } from "../indicators";
+import { sma, bollSeries, kdjSeries, atrSeries, sixSegment, SEGNAME, SEGACTION, SEGFULL } from "../indicators";
 export { SEGNAME };
 import { ic } from "../icons";
-import { CARD_DEFS, addWatch, addWatchGroup, allWatchGroups, getState, inWlFilter, isWatched, notifyLocal, removeWatch, setCardPref, subscribe, toggleWatchGroup, toggleWlGroup } from "../store";
-import { openModal, toast } from "../ui";
-import { openWatchPanel } from "../watch";
+import { CARD_DEFS, RIGHT_TABS, addWatch, addWatchGroup, allWatchGroups, getState, inWlFilter, isWatched, notifyLocal, removeWatch, setCardPref, subscribe, toggleWatchGroup, toggleWlGroup, type RightTabId } from "../store";
+import { openModal, multiPick, toast } from "../ui";
+import { bindNoteHover, hideNotePop, initNoteEditor, noteChipHtml, openNoteModal } from "../note-ui";
+import { openGroupPanel, openWatchPanel } from "../watch";
 import { stockSearch, type StockSearchHandle } from "../searchbox";
 import { refreshSparksIn, sparkSvg } from "../sparks";
 import { TRENDS, setTrendPalette, trendPaletteKey, IND_DEFS, IND_CATS, IND_BY_KEY, type KlineChartHandle, type MainKey, type SubKey, type RangeFund, type RangeStats, type PickBar } from "./kline";
 import { createChartPanel, quoteHeadHtml, type ChartPanelHandle } from "../chartpanel";
 import { createIntraday, type IntradayHandle } from "../intraday";
+import { shareholderBody, bindShareholders, prefetchShareholders } from "../shareholders";
+import { bindChips, chipBody, prefetchChips } from "../chips";
+import { bindOrderbook, bindTrades, orderbookBody, tradesBody, prefetchDepth, prefetchTrades } from "../depth";
 
-export const SEG6 = ["超卖", "低位", "弱势", "回升", "强势", "超买"];
+export const SEG6 = ["超跌", "反弹", "突破", "超涨", "回踩", "跌破"];
 
 export interface CurStock { symbol: string; name: string; trendFocus?: { date?: string } }
 /** 多周期布局：single 单屏 / h 左右双列 / v 上下两层 / quad 四宫格（策影同款） */
@@ -90,8 +94,8 @@ function readCustomPresets(): Record<string, Preset> {
   } catch { /* 坏值忽略 */ }
   return {};
 }
-/** ★ 常显指标（工具栏两行只渲染这个集合）：localStorage 持久化，坏键/缺失回退默认六项 */
-const IND_FAV_DEF = ["ma", "boll", "vol", "macd", "kdj", "rsi"];
+/** ★ 常显指标（工具栏两行只渲染这个集合）：localStorage 持久化，坏键/缺失回退默认项 */
+const IND_FAV_DEF = ["ma", "boll", "vol", "macd", "kdj", "rsi", "qyjj"];
 function readIndFavs(): string[] {
   try {
     const v = JSON.parse(localStorage.getItem("yc_indfav") || "") as unknown;
@@ -119,7 +123,24 @@ function applyPreset(p: Preset): void {
 const KCACHE_MAX = 30;
 const kcache = new Map<string, Kline>();                       // Map 插入序 = LRU 序
 const qcache = new Map<string, { q: Quote; at: number }>();
+/** 列表批量报价的快照（自选卡/自选页/成分股表都已拉过一次）：切过去先用它秒上屏，再后台校准 */
+const qprime = new Map<string, { q: Quote; at: number }>();
+const QPRIME_TTL = 60_000;
 let curCtl: AbortController | null = null;                     // 切换即中止上一只在途请求
+let barsSym = "";                                              // mk.bars 当前归属的标的（换标的后旧K线不可用于新标的价格）
+
+/** 列表拿到批量报价后调用：给切换铺一条「立刻有数」的底 */
+export function primeQuotes(items: Quote[]): void {
+  const now = Date.now();
+  for (const q of items) if (q?.symbol) qprime.set(q.symbol, { q, at: now });
+  while (qprime.size > 240) qprime.delete(qprime.keys().next().value!);
+}
+function qprimeGet(sym: string): Quote | null {
+  const e = qprime.get(sym);
+  if (!e) return null;
+  if (Date.now() - e.at > QPRIME_TTL) { qprime.delete(sym); return null; }
+  return e.q;
+}
 
 function kcacheGet(sym: string): Kline | null {
   const k = kcache.get(sym);
@@ -148,9 +169,26 @@ export function warmStock(symbol: string): void {
   void marketApi.quote(symbol).then((q) => { if (q) qcache.set(symbol, { q, at: Date.now() }); }).catch(() => {});
 }
 
+/* 侧栏预取：用户还在看 K 线时，后台把筹码/股东/60分/盘口/逐笔拉好，
+   切卡即出数。300ms 防抖：方向键连续切票时只预取最后一只。 */
+let panelsTimer = 0;
+function schedulePanels(symbol: string): void {
+  window.clearTimeout(panelsTimer);
+  panelsTimer = window.setTimeout(() => {
+    if (mk.cur?.symbol !== symbol) return;
+    void Promise.allSettled([
+      prefetchChips(symbol), prefetchShareholders(symbol), prefetchTrend60(symbol),
+      prefetchDepth(symbol), prefetchTrades(symbol),
+    ]).then(() => { if (mk.cur?.symbol === symbol) renderRight(); });
+  }, 300);
+}
+
 /* ── 载入 ── */
 export async function openStock(s: CurStock, from?: { page: string; label: string } | null): Promise<void> {
   mk.cur = s;
+  const hit = kcacheGet(s.symbol);
+  const hotQ = qcacheGet(s.symbol);
+  mk.quote = hotQ ?? qprimeGet(s.symbol);                      // 先换/清 quote：goPage 同步重绘时不会沿用上一只的价格
   if (s.trendFocus) {
     mk.layout = "single";
     mk.panels = ["d"];
@@ -169,15 +207,31 @@ export async function openStock(s: CurStock, from?: { page: string; label: strin
   curCtl?.abort();                                             // 在途旧请求作废（保护服务端也防乱序）
   const ctl = new AbortController();
   curCtl = ctl;
-  const hit = kcacheGet(s.symbol);
-  const hotQ = qcacheGet(s.symbol);
-  if (hotQ) mk.quote = hotQ;                                   // 热 quote 先上屏，不等实时源
+  schedulePanels(s.symbol);                                    // 侧栏筹码/股东/60分/盘口/逐笔后台预取
+  let barsReady = !!hit;                                       // 新标的 K线是否已上屏（决定能否用 quoteView 算价）
+  /** 行情快照到达即刷顶部信息条；K线未就绪先存着，等 K线渲染时一并上屏 */
+  const applyQuote = (q: Quote | null): void => {
+    if (mk.cur?.symbol !== s.symbol || !q) return;
+    qcache.set(s.symbol, { q, at: Date.now() });
+    mk.quote = q;
+    if (!barsReady) {
+      renderKlpBar();                                          // 只刷顶部信息条；右列等K线上屏后再整卡重绘
+      return;
+    }
+    if (mk.subInds.includes("volumeactivity")) renderKline();  // 该副图吃实时成交额，需重画
+    else renderKlpBar();
+    renderRight();
+  };
+  // quote 与 K线并行拉取：不再等 K线完成才请求快照（否则顶部价格要等下一轮 12s 轮询）
+  if (!hotQ) void marketApi.quote(s.symbol, { signal: ctl.signal }).then(applyQuote).catch(() => {});
   if (hit) {
     // 缓存命中：立即整屏渲染，然后 SWR 静默回验（末根可能被盘中轮询推进过）
     mk.bars = hit.bars;
+    barsSym = s.symbol;
     mk.minuteData = null;
     minuteAt = 0;
     mk.m60 = null;
+    barsReady = true;
     renderKline();
     renderRight();
     showBriefing();
@@ -187,6 +241,7 @@ export async function openStock(s: CurStock, from?: { page: string; label: strin
         kcachePut(s.symbol, k);
         if (mk.cur?.symbol !== s.symbol) return;               // 用户又切走了：只留缓存
         mk.bars = k.bars;
+        barsSym = s.symbol;
         renderKline();
       })
       .catch(() => {});
@@ -199,10 +254,11 @@ export async function openStock(s: CurStock, from?: { page: string; label: strin
     kcachePut(s.symbol, k);                                    // 过期回包也入缓存（回切免费）
     if (mk.cur?.symbol !== s.symbol) return;                   // 用户已切到别的标的，丢弃过期回包
     mk.bars = k.bars;
-    mk.quote = null;
+    barsSym = s.symbol;
     mk.minuteData = null;                      // 换标的：分时/60分缓存作废，切到时重拉
     minuteAt = 0;
     mk.m60 = null;
+    barsReady = true;
     renderKline();
     renderRight();
     showBriefing();
@@ -210,16 +266,6 @@ export async function openStock(s: CurStock, from?: { page: string; label: strin
     if ((e as Error).name === "AbortError") return;            // 被新切换中止：静默
     toast((e as Error).message || "K线加载失败");
     return;
-  }
-  try {
-    const q = await marketApi.quote(s.symbol, { signal: ctl.signal });
-    if (mk.cur?.symbol !== s.symbol || !q) return;
-    qcache.set(s.symbol, { q, at: Date.now() });
-    mk.quote = q;
-    if (mk.subInds.includes("volumeactivity")) renderKline();
-    renderRight();
-  } catch (e) {
-    if ((e as Error).name !== "AbortError") { /* 实时兜底失败：保持日线数据展示 */ }
   }
   startPoll();
 }
@@ -246,6 +292,7 @@ async function pollTick(): Promise<void> {
     if (mk.cur?.symbol !== s.symbol || !q) return;
     qcache.set(s.symbol, { q, at: Date.now() });               // 喂缓存：切走再切回时热 quote 秒上屏
     mk.quote = q;
+    renderKlpBar();                                            // 顶部现价/涨跌幅跟快照立即跳动
     renderRight();
     // 分时面板：与全景一致随轮询静默刷新（全景 30s 重载；后端 minute 有 30s TTL）
     if (mk.panels.includes("t") && Date.now() - minuteAt > 25_000) {
@@ -404,6 +451,7 @@ function updateWatchBtn(): void {
   b.classList.toggle("on", on);
   b.title = on ? "已收藏 · 点击设置分组" : "收藏 / 设置分组";
   b.innerHTML = ic(on ? "heart-filled" : "heart", 13);
+  renderKlpBar();                      // 收藏状态变化 → 信息条「标注」入口显隐同步
 }
 
 function openWatchPop(): void {
@@ -486,9 +534,9 @@ export function initMarket(): void {
   let hoverT: ReturnType<typeof setTimeout> | null = null;
   document.addEventListener("mouseover", (ev) => {
     if (document.hidden) return;
-    const tr = (ev.target as HTMLElement | null)?.closest?.("tr[data-key]") as HTMLElement | null;
+    const tr = (ev.target as HTMLElement | null)?.closest?.("tr[data-key], [data-go-stock]") as HTMLElement | null;
     if (!tr) return;
-    const sym = tr.dataset.key || "";
+    const sym = tr.dataset.key || tr.dataset.goStock || "";
     if (!/^\d{6}(\.[A-Z]{2})?$/.test(sym)) return;             // 只预热股票键；板块等其它键跳过
     if (hoverT) clearTimeout(hoverT);
     hoverT = setTimeout(() => { hoverT = null; warmStock(sym); }, 120);
@@ -517,6 +565,17 @@ export function initMarket(): void {
   window.addEventListener("resize", () => closeWatchPop());
   subscribe(updateWatchBtn);   // 自选增删/分组变更（含云同步回放）→ 按钮态同步
   updateWatchBtn();
+  // 标注：信息条内悬停看全部、点击编辑（事件委托在稳定的容器上）
+  const notesEl = document.getElementById("kl-notes")!;
+  bindNoteHover(notesEl);
+  initNoteEditor();
+  notesEl.addEventListener("click", (e) => {
+    const t = (e.target as HTMLElement).closest("[data-note]") as HTMLElement | null;
+    if (!t) return;
+    hideNotePop();
+    openNoteModal(t.dataset.note!);
+  });
+  document.addEventListener("yc:notes-changed", () => { if (mk.cur) renderKlpBar(); });
   // 实时价轮询：行情页可见时每 20s 静默刷新当前股 quote（后端 10s 缓存兜东财限流）
   window.setInterval(async () => {
     if (!mk.cur || !document.getElementById("page-market")!.classList.contains("on")) return;
@@ -1312,7 +1371,7 @@ function renderKlpBar(): void {
   if (!bar || !head || !s) return;
   bar.hidden = false;
   // 现价/涨跌幅：今日已有成交（rt_live）才用实时价；盘前回到上一交易日收盘口径
-  const bars = mk.bars;
+  const bars = barsSym === s.symbol ? mk.bars : [];          // 换标的后旧K线不参与新标的价格计算
   const view = quoteView(q, bars);
   head.innerHTML = quoteHeadHtml({
     name: s.name || s.symbol,
@@ -1325,6 +1384,9 @@ function renderKlpBar(): void {
     low: view.low,
     prevClose: view.base,
   }, "full");
+  // 标注入口：已收藏才显示；有标注时常显最新一条，悬停看全部，点击编辑
+  const notesEl = document.getElementById("kl-notes");
+  if (notesEl) notesEl.innerHTML = noteChipHtml(s.symbol, "bar");
 }
 
 export function renderKline(): void {
@@ -1494,13 +1556,18 @@ function restoreWatchSearch(kept: { val: string; focus: boolean } | null): void 
   if (kept.val.trim()) inp.dispatchEvent(new Event("input"));   // 重放下拉结果
 }
 
-/** 自选卡分组胶囊：与自选页共享同一个多选筛选（wlGroups），点击即加入/移出 */
+/** 自选卡分组胶囊：默认单选互斥；Ctrl/⌘/Shift 或按住 Tab 才多选 */
 function bindWlGroupChips(scope: HTMLElement): void {
   scope.querySelectorAll<HTMLElement>("[data-wl-g]").forEach((b) =>
     b.addEventListener("click", (e) => {
       e.stopPropagation();                     // 不触发行的打开个股
-      toggleWlGroup(b.dataset.wlG!);
+      toggleWlGroup(b.dataset.wlG!, multiPick(e));
       renderRight();
+    }));
+  scope.querySelectorAll<HTMLElement>("[data-wl-gm]").forEach((b) =>
+    b.addEventListener("click", (e) => {
+      e.stopPropagation();
+      openGroupPanel();
     }));
 }
 
@@ -1553,6 +1620,7 @@ async function refreshWlQuotes(): Promise<void> {
     for (let i = 0; i < symbols.length; i += 50) {
       const r = await marketApi.quotes(symbols.slice(i, i + 50));
       for (const q of r.items) wlQ.set(q.symbol, q);
+      primeQuotes(r.items);                                    // 顺手铺缓存：点自选卡切票时价格秒上屏
     }
     wlQAt = Date.now();
     wlQSig = sig;
@@ -1690,83 +1758,131 @@ function quoteView(q: Quote | null, bars: Bar[]) {
   };
 }
 
+/* ── 趋势卡（多周期）：60分 / 日 / 周 短线多空 + 近 N 根趋势柱（红多头 / 绿空头） ── */
+const trend60: { symbol: string; bars: Bar[] } = { symbol: "", bars: [] };
+/** 60分 K 按标的缓存（打开个股即预取，切到趋势卡直接出柱线） */
+const trend60Cache = new Map<string, Bar[]>();
+const trendPending = new Map<string, Promise<void>>();
+
+export function prefetchTrend60(symbol: string): Promise<void> {
+  if (trend60Cache.has(symbol) || (trend60.symbol === symbol && trend60.bars.length)) {
+    return Promise.resolve();
+  }
+  const pending = trendPending.get(symbol);
+  if (pending) return pending;
+  const req = marketApi.kline({ symbol, freq: "60" }).then((k) => {
+    trend60Cache.set(symbol, k.bars);
+    while (trend60Cache.size > 24) trend60Cache.delete(trend60Cache.keys().next().value!);
+    if (mk.cur?.symbol === symbol) { trend60.symbol = symbol; trend60.bars = k.bars; }
+  }).catch(() => { /* 预取失败：切到趋势卡时 bindTrend 会重试 */ })
+    .finally(() => { trendPending.delete(symbol); });
+  trendPending.set(symbol, req);
+  return req;
+}
+
+/** 每根 K 的收盘相对 MA(n) 偏离%（柱线高度与红绿由此得出） */
+function trendDevs(list: Bar[], count: number, n = 10): number[] {
+  const out: number[] = [];
+  const from = Math.max(n - 1, list.length - count);
+  for (let i = from; i < list.length; i++) {
+    let sum = 0;
+    for (let j = i - n + 1; j <= i; j++) sum += list[j].close;
+    const ma = sum / n;
+    if (!ma) continue;
+    out.push((list[i].close - ma) / ma * 100);
+  }
+  return out;
+}
+
+function trendRow(label: string, list: Bar[], mode: string): string {
+  const devs = trendDevs(list, mode === "detailed" ? 24 : 12);
+  const d = devs[devs.length - 1];
+  if (d == null) {
+    return `<div class="tr-row"><span class="tr-per">${label}</span>` +
+      `<span class="tr-none">数据不足</span></div>`;
+  }
+  const up = d >= 0;
+  const hist = devs.map((x) => {
+    const h = 2 + Math.min(Math.abs(x) / 1.2, 1) * 14;      // ±1.2% 打满 16px
+    return `<i class="${x >= 0 ? "up" : "down"}" style="height:${h.toFixed(1)}px"></i>`;
+  }).join("");
+  return `<div class="tr-row" title="${label} 收盘相对 MA10 偏离">` +
+    `<span class="tr-per">${label}</span>` +
+    `<b class="tr-state ${up ? "up" : "down"}">${up ? "多头" : "空头"}</b>` +
+    `<span class="num tr-dev ${up ? "up" : "down"}">${up ? "+" : ""}${d.toFixed(2)}%</span>` +
+    `<div class="tr-hist">${hist}</div></div>`;
+}
+
+export function trendBody(symbol: string, mode: string): string {
+  const daily = mk.bars;
+  if (daily.length < 12) return `<div class="bempty">数据不足</div>`;
+  const weekly = aggDaily(daily, "w");
+  const m60 = trend60.symbol === symbol ? trend60.bars : [];
+  // 六段位：围绕日线短线趋势线（MA7 快 / MA10 慢）的六个位置，1 超跌 → … → 6 跌破
+  const seg = sixSegment(daily, daily.length - 1);
+  const segCol = seg === 3 || seg === 5 ? "var(--up)" : seg === 4 ? "var(--accent)" : "var(--down)";
+  // 六分段理论：围绕日线短线趋势线的六个位置（众赢原话），当前段亮格 + 操作建议
+  const cells = [1, 2, 3, 4, 5, 6].map((n) => `<i class="${n === seg ? "on" : ""}"` +
+    ` style="--seg:${n === seg ? segCol : "var(--panel-3)"}"` +
+    ` title="第${n}段 · ${SEGFULL[n]}（${SEGACTION[n]}）"></i>`).join("");
+  return `<div class="tr-matrix">` +
+    `${trendRow("60分", m60, mode)}${trendRow("日", daily, mode)}${trendRow("周", weekly, mode)}` +
+    `</div>` +
+    `<div class="tr-six"><div class="tr-six-h"><span class="tr-k">六段</span>` +
+    `<span class="tr-cells">${cells}</span></div>` +
+    `<div class="tr-six-txt"><b style="color:${segCol}">${seg}段 · ${SEGFULL[seg] || SEGNAME[seg]}</b>` +
+    `<span>${SEGACTION[seg] || ""}</span></div></div>`;
+}
+
+/** 60 分钟 K：优用预取缓存；未命中时补拉，取回后只重铺本卡片 */
+export function bindTrend(card: HTMLElement, symbol: string, mode: string): void {
+  if (trend60.symbol === symbol) return;
+  const paint = (): void => {
+    const body = card.querySelector<HTMLElement>(".fbody");
+    if (body && card.isConnected && mk.cur?.symbol === symbol) body.innerHTML = trendBody(symbol, mode);
+  };
+  const cached = trend60Cache.get(symbol);
+  if (cached) {
+    trend60.symbol = symbol;
+    trend60.bars = cached;
+    paint();
+    return;
+  }
+  void prefetchTrend60(symbol).then(() => {
+    if (mk.cur?.symbol !== symbol) return;
+    if (trend60.symbol !== symbol) {
+      const hit = trend60Cache.get(symbol);
+      if (!hit) return;                          // 拉取失败：保持占位，下次重绘再试
+      trend60.symbol = symbol;
+      trend60.bars = hit;
+    }
+    paint();
+  });
+}
+
 function cardBody(cid: string, mode: string): string {
   const s = mk.cur;
   if (!s) return "";
+  if (cid === "shareholders") return shareholderBody(s.symbol, mode);
+  if (cid === "chips") return chipBody(s.symbol, mode);
+  if (cid === "orderbook") return orderbookBody(s.symbol, mode, mk.quote);
+  if (cid === "trades") return tradesBody(s.symbol, mode);
   const bars = mk.bars;                    // 卡片统计基准固定日线
   const q = mk.quote;
   const closes = mk.bars.map((b) => b.close);
   const shortSeq = closes.slice(-10), midSeq = closes.slice(-30);
   const chg = q?.pct_chg ?? 0;
-  if (cid === "info") {
-    // 策影 BasicInfoCard 同款：名称代码 + 3 列字段网格（缺值整格不渲染）+ 概念 chips
-    const last = bars[bars.length - 1];
-    if (!last) return `<div class="bempty">暂无基本信息</div>`;
-    const view = quoteView(q, bars);
-    const price = view.price ?? last.close;
-    const chgPct = view.pct ?? 0;
-    const chgAbs = view.chgAbs ?? 0;
-    const cls = chgPct >= 0 ? "up" : "down";
-    const val = q?.valuation;
-    const fmtCap = (v?: number | null): string | null =>
-      v == null || !isFinite(v) ? null : v >= 1e12 ? fmt(v / 1e12, 2) + "万亿" : fmtYi(v, 0);
-    const row = (l: string, v: string | null, vc = "") =>
-      v == null ? "" : `<div class="bi-r"><span>${l}</span><b class="num ${vc}">${v}</b></div>`;
-    const rows = [
-      // 行式键值（不用格子形式）：每行「标签 …… 值」右对齐，两列排布
-      row("最新价", fmt(price), cls),
-      row("涨跌幅", `${fmtChg(chgAbs)} <i>${fmtChg(chgPct)}%</i>`, cls),
-      row("行业", q?.industry || (s.symbol.includes(".") ? "指数" : null)),
-      row("换手", q?.turnover_rate != null ? fmt(q.turnover_rate) + "%" : null),
-      row("总市值", fmtCap(val?.total_mv)), row("流通市值", fmtCap(val?.circ_mv)),
-      row("PE(TTM)", val?.pe_ttm != null ? (val.pe_ttm > 0 ? fmt(val.pe_ttm) : "亏损") : null),
-      row("PB", val?.pb != null && val.pb > 0 ? fmt(val.pb) : null),
-    ].join("");
-    const cons = (q?.concept ?? "").split(/[,，、;；\s]+/).map((x) => x.trim()).filter(Boolean);
-    return `<div class="bi-name"><b>${esc(q?.name || s.name)}</b><span class="num">${s.symbol}</span></div>` +
-      `<div class="bi-rows">${rows}</div>` +
-      (cons.length ? `<div class="bi-cons">${cons.slice(0, 6).map((c) => `<span class="sh-con">${esc(c)}</span>`).join("")}` +
-        (cons.length > 6 ? `<span class="sh-con more" title="${esc(cons.slice(6).join("、"))}">+${cons.length - 6}</span>` : "") + `</div>` : "");
-  }
-  if (cid === "trend") {
-    // 颜色条信息的卡片化收纳：短/中线多空（收盘 vs MA10/45）+ 六段位位置条（低调淡色）
-    const last = closes[closes.length - 1];
-    if (!last || bars.length < 5) return `<div class="bempty">数据不足</div>`;
-    const maLast = (n: number): number | null => {
-      if (closes.length < n) return null;
-      let sum = 0;
-      for (let i = closes.length - n; i < closes.length; i++) sum += closes[i];
-      return sum / n;
-    };
-    const trLine = (label: string, n: number) => {
-      const mv = maLast(n);
-      if (mv == null) return "";
-      const dev = (last - mv) / mv * 100;
-      const up = dev >= 0;
-      return `<div class="tr-line"><span class="tr-k">${label}</span>` +
-        `<b class="${up ? "up" : "down"}">${up ? "多头" : "空头"}</b>` +
-        `<span class="num tr-dev">${up ? "+" : ""}${dev.toFixed(2)}%</span></div>`;
-    };
-    // 六段位：60 窗口分位（与色带/副图同口径）→ 段号 + 0-100% 位置条
-    const win = bars.slice(-60);
-    const below = win.filter((b) => b.close < last).length;
-    const q = below / win.length;
-    const seg = sixSegment(bars, bars.length - 1);
-    return `<div class="tr-lines">${trLine("短线", 10)}${trLine("中线", 45)}</div>` +
-      `<div class="tr-pos"><span class="tr-k">六段</span>` +
-      `<div class="tr-bar"><i style="left:${(q * 100).toFixed(1)}%"></i></div>` +
-      `<b style="color:var(--${q >= 0.5 ? "up" : "down"})">${seg}段·${SEGNAME[seg]}</b></div>`;
-  }
+  if (cid === "trend") return trendBody(s.symbol, mode);
   if (cid === "watch") {
     const wl = getState().watchlist;
     const sel = getState().wlGroups;                  // 多选筛选：空 = 全部
     const list = wl.filter(inWlFilter);
     const det = mode === "detailed";
-    // 分组胶囊：与自选页共用 wlGroups，任一处勾选/取消两边同步
+    // 分组胶囊：默认单选（点「全部」恢复）；按住 Ctrl/⌘/Shift/Tab 可多选
     const grpbar = `<div class="wl-grpbar">${["全部", ...allWatchGroups()].map((g) => {
       const on = g === "全部" ? sel.length === 0 : sel.includes(g);
-      return `<button class="wl-gchip${on ? " on" : ""}" data-wl-g="${esc(g)}">${esc(g)}</button>`;
-    }).join("")}</div>`;
+      return `<button class="wl-gchip${on ? " on" : ""}" data-wl-g="${esc(g)}" title="${g === "全部" ? "显示全部自选" : "单选；按住 Ctrl/⌘/Shift/Tab 多选"}">${esc(g)}</button>`;
+    }).join("")}<button class="wl-gchip wl-gact" data-wl-gm title="管理分组（新建 / 改名 / 删除）">${ic("gear", 11)}</button></div>`;
     // 行式列表（同花顺自选同款）：序号 | 名称代码(分组) | 当日走势 | (成交额 换手) | 现价 | 涨跌幅 | 移除
     const rows = list.map((w, i) => {
       const wq = wlQ.get(w.symbol);
@@ -1791,12 +1907,17 @@ function cardBody(cid: string, mode: string): string {
   }
   if (cid === "signals") {
     const segI = sixSegment(mk.bars, mk.bars.length - 1);
+    const segNm = SEGNAME[segI] || "—";
+    const segAct = SEGACTION[segI] || "";
+    const segCol = segI === 3 || segI === 5 ? "var(--up)" : segI === 4 ? "var(--p1)" : "var(--down)";
     if (mode === "simple") {
-      return `<div class="csimple"><div class="st"><b>${SEGNAME[segI]}</b> · 六分段判定<br><span style="font-size:10px;color:var(--faint)">短线 ${shortSeq[shortSeq.length - 1] > shortSeq[0] ? "上行" : "下行"} · 中线 ${midSeq[midSeq.length - 1] > midSeq[0] ? "上行" : "下行"}</span></div><div class="minifig">${spark(midSeq, 64, 22, "var(--p1)")}</div></div>`;
+      return `<div class="csimple"><div class="st"><b>${segNm}</b> · 六分段判定<br><span style="font-size:10px;color:var(--faint)">${segAct} · 短线 ${shortSeq[shortSeq.length - 1] > shortSeq[0] ? "上行" : "下行"} · 中线 ${midSeq[midSeq.length - 1] > midSeq[0] ? "上行" : "下行"}</span></div><div class="minifig">${spark(midSeq, 64, 22, "var(--p1)")}</div></div>`;
     }
-    return `<div style="font-size:11px;color:var(--faint)">六分段 · ${SEGNAME[segI]}</div>` +
-      `<div class="sixseg" id="rc-six">${Array.from({ length: 6 }, (_, k2) => `<i class="${k2 <= segI - 1 ? "on" : ""}${k2 === segI - 1 ? " cur" : ""}"></i>`).join("")}</div>` +
-      `<div class="sixlab"><span>超卖</span><span>超买</span></div>` +
+    return `<div style="font-size:11px;color:var(--faint)">六分段 · 趋势线六位置</div>` +
+      `<div class="sixseg" id="rc-six">${Array.from({ length: 6 }, (_, k2) => `<i class="${k2 === segI - 1 ? "on cur" : ""}" style="${k2 === segI - 1 ? `background:${segCol}` : ""}"></i>`).join("")}</div>` +
+      `<div class="sixlab"><span>超跌</span><span>跌破</span></div>` +
+      `<div style="display:flex;align-items:center;gap:6px;margin:2px 0 0"><b style="color:${segCol};font-size:12.5px">${segI}段 · ${segNm}</b>` +
+      `<span style="font-size:10.5px;color:var(--faint)">${segAct}</span></div>` +
       `<div class="tr2">${spark(shortSeq, 96, 26, "var(--up)")}${spark(midSeq, 96, 26, "var(--p1)")}</div>` +
       `<div style="display:flex;gap:8px;margin-top:8px">` +
       `<div style="flex:1;background:var(--panel-2);border-radius:9px;padding:7px 9px"><div style="font-size:10px;color:var(--faint)">短线趋势</div><div style="font-size:13px;font-weight:650;color:${shortSeq[shortSeq.length - 1] > shortSeq[0] ? "var(--up)" : "var(--down)"}">${shortSeq[shortSeq.length - 1] > shortSeq[0] ? "上行" : "下行"}</div></div>` +
@@ -1980,6 +2101,14 @@ function renderKlInfo(): void {
     kv("PE(TTM)", v?.pe_ttm != null ? (v.pe_ttm > 0 ? fmt(v.pe_ttm, 1) : "亏损") : null);
 }
 
+/* ── 右侧抽屉栏目（tab）：一个栏目装多张卡片，当前栏目本地记忆 ── */
+const RTAB_KEY = "yc_right_tab";
+function readRightTab(): RightTabId {
+  const v = localStorage.getItem(RTAB_KEY);
+  return RIGHT_TABS.some((t) => t.id === v) ? v as RightTabId : "market";
+}
+let rightTab: RightTabId = readRightTab();
+
 export function renderRight(): void {
   renderKlInfo();
   const el = document.getElementById("rightcol");
@@ -1987,15 +2116,53 @@ export function renderRight(): void {
   const kept = keepWatchSearch();            // 轮询重建前保留自选卡搜索态
   const st = getState();
   const defs = [...CARD_DEFS].sort((a, b) => st.cards[a.id].order - st.cards[b.id].order);
-  let html = "";
-  for (const def of defs) {
+  const tabDefs = defs.filter((d) => st.cards[d.id].on && d.tab === rightTab);
+  let html = `<nav class="rtabs" role="tablist">` + RIGHT_TABS.map((t) =>
+    `<button class="rtab${t.id === rightTab ? " on" : ""}" data-rtab="${t.id}" role="tab" aria-selected="${t.id === rightTab}">${t.name}</button>`
+  ).join("") + `</nav>`;
+  for (const def of tabDefs) {
     const p = st.cards[def.id];
-    if (!p.on) continue;
     html += `<div class="rcard" data-cid="${def.id}">${cardHead(def)}` +
       `<div class="fbody${p.mode === "simple" && def.id === "signals" ? "" : ""}${false ? " hide" : ""}">${cardBody(def.id, p.mode)}</div></div>`;
   }
+  if (!tabDefs.length) {
+    html += `<div class="rcard bempty">该栏目暂无启用的卡片，可在「功能卡片」页开启</div>`;
+  }
   html += `<div class="cmpl">仅提供基于公开数据的规则化分析，不构成投资建议 · 指标按公开规则计算，VIP 明细由系统处理后返回</div>`;
   el.innerHTML = html;
+  el.querySelectorAll<HTMLElement>("[data-rtab]").forEach((b) =>
+    b.addEventListener("click", () => {
+      const id = b.dataset.rtab as RightTabId;
+      if (id === rightTab) return;
+      rightTab = id;
+      localStorage.setItem(RTAB_KEY, id);
+      renderRight();
+    }));
+  const chipCard = el.querySelector<HTMLElement>('[data-cid="chips"]');
+  if (chipCard && mk.cur) {
+    const symbol = mk.cur.symbol;
+    bindChips(chipCard, symbol, () => {
+      if (mk.cur?.symbol === symbol && rightTab === "chips") renderRight();
+    });
+  }
+  const shareholderCard = el.querySelector<HTMLElement>('[data-cid="shareholders"]');
+  if (shareholderCard) {
+    const symbol = mk.cur.symbol;
+    bindShareholders(shareholderCard, symbol, () => {
+      if (mk.cur?.symbol === symbol) renderRight();
+    });
+  }
+  const trendCard = el.querySelector<HTMLElement>('[data-cid="trend"]');
+  if (trendCard) bindTrend(trendCard, mk.cur.symbol, st.cards.trend.mode);
+  // 盘口 tab：盘口（基本信息+五档）/ 成交明细 各自 5s 轮询，只刷新本卡片
+  const curSymbol = mk.cur.symbol;
+  for (const cid of ["orderbook", "trades"] as const) {
+    const card = el.querySelector<HTMLElement>(`[data-cid="${cid}"]`);
+    if (!card) continue;
+    const mode = st.cards[cid].mode;
+    if (cid === "orderbook") bindOrderbook(card, curSymbol, mode, () => mk.quote);
+    else bindTrades(card, curSymbol, mode);
+  }
   el.querySelectorAll<HTMLElement>("[data-vip-open]").forEach((b) =>
     b.addEventListener("click", () => openModal("modal-vip")));
   el.querySelectorAll<HTMLElement>("[data-ic-go-core]").forEach((b) =>

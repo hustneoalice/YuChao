@@ -1,5 +1,5 @@
 """行情契约：K 线 / 快照 / 搜索。字段名与 1.0 存储逐字段兼容。"""
-from typing import Optional
+from typing import Literal, Optional
 
 from pydantic import BaseModel, Field
 
@@ -91,6 +91,7 @@ class Quote(BaseModel):
     name: Optional[str] = None
     market: Optional[str] = None
     industry: Optional[str] = None
+    concept: Optional[str] = None          # 概念标签（东财 F10 所属板块，逗号分隔）
     status: Optional[str] = None
     date: Optional[str] = None
     open: Optional[float] = None
@@ -119,6 +120,60 @@ class QuotesOut(BaseModel):
     missing: list[str] = []
 
 
+class DepthLevel(BaseModel):
+    """盘口单档：价格 + 委托量。volume 单位为手（腾讯原始口径）。"""
+
+    price: float
+    volume: int
+    amount: Optional[float] = Field(default=None, description="该档委托金额（元，price*volume*100）")
+
+
+class Depth(BaseModel):
+    """五档盘口（腾讯 qt 实时，3s 缓存）。applicable=False 表示无盘口（指数/停牌/外盘）。"""
+
+    symbol: str
+    name: Optional[str] = None
+    applicable: bool = False
+    time: Optional[str] = None              # "HH:MM:SS"（腾讯行情时间）
+    price: Optional[float] = None
+    prev_close: Optional[float] = None
+    open: Optional[float] = None
+    high: Optional[float] = None
+    low: Optional[float] = None
+    chg: Optional[float] = None
+    pct: Optional[float] = None
+    avg_price: Optional[float] = None
+    limit_up: Optional[float] = None
+    limit_down: Optional[float] = None
+    bids: list[DepthLevel] = []
+    asks: list[DepthLevel] = []
+    bid_total: int = 0                     # 五档委买合计（手）
+    ask_total: int = 0                     # 五档委卖合计（手）
+    bid_ask_diff: int = 0                  # 委差（手）
+    bid_ask_ratio: Optional[float] = None  # 委比（%）
+    outer_vol: Optional[int] = None        # 外盘（手）
+    inner_vol: Optional[int] = None        # 内盘（手）
+    volume: Optional[int] = None           # 当日成交量（股）
+    amount: Optional[float] = None         # 当日成交额（元）
+    turnover_rate: Optional[float] = None
+    vol_ratio: Optional[float] = None
+    amplitude: Optional[float] = None
+
+
+class TradeItem(BaseModel):
+    """逐笔成交：time=HH:MM:SS，volume=手，direction=1 买 / 2 卖 / 其他中性。"""
+
+    time: str
+    price: float
+    volume: int
+    direction: Optional[int] = None
+
+
+class Trades(BaseModel):
+    symbol: str
+    items: list[TradeItem] = []
+
+
 class SearchHit(BaseModel):
     symbol: str
     name: Optional[str] = None
@@ -132,8 +187,8 @@ class SearchHit(BaseModel):
 class TargetItem(BaseModel):
     """目标页扫描行（策影目标页同源口径）：指标层 + 四条件布尔。
 
-    条件：40日均量（当日量 ≥ 40日均量）、短线趋势橙（收盘 > MA10，K 线通道
-    填橙同一判定）、中线趋势橙（收盘 > MA45）、近 20 个交易日有涨停
+    条件：40日均量（当日量 ≥ 40日均量）、短线趋势橙（收盘 ≥ MA10，K 线通道
+    填橙同一判定）、中线趋势橙（收盘 ≥ MA45）、近 20 个交易日有涨停
     （主板 10% / 创业科创 20% 阈值口径）。
     ST 股票服务端直接剔除；北交所受 bj_enabled 开关控制。"""
 
@@ -144,12 +199,12 @@ class TargetItem(BaseModel):
     vol_ma40: Optional[float] = Field(default=None, description="40日均量")
     vol_ratio: Optional[float] = Field(default=None, description="当日量 / 40日均量")
     vol_hit: bool = Field(default=False, description="条件①：当日量 ≥ 40日均量")
-    short_orange: bool = Field(default=False, description="条件②：收盘 > MA10（短线趋势橙）")
-    mid_orange: bool = Field(default=False, description="条件③：收盘 > MA45（中线趋势橙）")
+    short_orange: bool = Field(default=False, description="条件②：收盘 ≥ MA10（短线趋势橙）")
+    mid_orange: bool = Field(default=False, description="条件③：收盘 ≥ MA45（中线趋势橙）")
     limit_up_20d: bool = Field(default=False, description="条件④：近 20 个交易日有涨停")
     limit_up_cnt: int = Field(default=0, description="近 20 个交易日涨停次数")
-    seg: int = Field(default=0, description="六分段 1..6（60 日窗口收盘分位）")
-    seg_name: str = Field(default="", description="六分段名：超卖/低位/弱势/回升/强势/超买")
+    seg: int = Field(default=0, description="六分段 1..6（趋势线六位置：超跌/反弹/突破/超涨/回踩/跌破）")
+    seg_name: str = Field(default="", description="六分段名：超跌/反弹/突破/超涨/回踩/跌破")
     pullback: bool = Field(default=False, description="回调中：收盘跌破 MA7 快线")
 
     trend_value: Optional[float] = None
@@ -158,6 +213,9 @@ class TargetItem(BaseModel):
     trend_above_days: int = 0
     neg_run: int = Field(default=0, description="连续负柱收窄天数（绿柱缩短，提前捕捉上穿零轴）")
     neg_abs: Optional[float] = Field(default=None, description="当前负柱距零轴幅度 |STICKV|（正值时为 null）")
+    money_date: Optional[str] = Field(default=None, description="最近一次钱袋子（ZigZag 低点）日期")
+    money_ago: Optional[int] = Field(default=None, description="钱袋距今交易日数（0=今日；null=近20日未出现）")
+    money_cnt: int = Field(default=0, description="近 20 个交易日钱袋出现次数")
     trend_data_date: str = ""
     trend_provisional: bool = False
 
@@ -188,7 +246,11 @@ class TargetScanOut(BaseModel):
     computed_at: str = Field(default="", description="本次结果的计算时间（YYYY-MM-DD HH:MM）")
     provisional: bool = Field(default=False, description="是否拼入今日实时快照（K 线未落库）")
     values: dict[str, float] = Field(default_factory=dict, description="本次生效的数值条件阈值")
-    items: list[TargetItem] = Field(default_factory=list, description="命中列表（强势段在前，截断至 limit）")
+    stale: bool = Field(default=False, description="日线落后快照日超过 1 个交易日，本次未计算")
+    data_date: str = Field(default="", description="实际使用的日线日期")
+    lag: Optional[int] = Field(default=None, description="日线落后快照日的交易日数")
+    message: str = Field(default="", description="不可计算的原因（stale 时非空）")
+    items: list[TargetItem] = Field(default_factory=list, description="命中列表（按六分段操作优先级排序，截断至 limit）")
 
 
 class BoardRow(BaseModel):
@@ -254,6 +316,8 @@ class ZyBlockRow(BaseModel):
     type_code: int                          # 1 地域 / 2 概念 / 4 行业 / 8 风格 / 9 题材
     parent_code: Optional[str] = None
     members: int = 0                        # 有当日快照的成分数
+    total_members: int = 0                  # 全部成分，与有行情数量分开
+    children: int = 0
     up_count: int = 0
     down_count: int = 0
     flat_count: int = 0
@@ -276,3 +340,26 @@ class ZyBlockMembersOut(BaseModel):
     block_code: str = ""
     block_name: str = ""
     as_of: str = ""
+
+
+class ShareholderItem(BaseModel):
+    rank: int
+    name: str
+    shares: Optional[int] = None
+    ratio: Optional[float] = None  # 占总股本 %，不是占流通股比例
+    change: Literal["进入", "加仓", "减仓", "不变", "无法比较"]
+    share_change: Optional[int] = None
+    ratio_change: Optional[float] = None  # 百分点
+    is_social_security: bool = False
+
+
+class ShareholdersOut(BaseModel):
+    symbol: str
+    report_dates: list[str] = Field(default_factory=list)
+    report_date: Optional[str] = None
+    previous_report_date: Optional[str] = None
+    notice_date: Optional[str] = None
+    total_ratio: Optional[float] = None
+    ratio_change: Optional[float] = None
+    items: list[ShareholderItem] = Field(default_factory=list)
+    source: str = "东方财富 · 定期报告披露"

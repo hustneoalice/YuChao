@@ -1,9 +1,13 @@
 /* 自选页（localStorage 客户端实现，F04 后端就绪后切换） */
-import { marketApi } from "../api";
+import { marketApi, type Quote } from "../api";
 import { esc, fmt, fmtChg, fmtYi } from "../fmt";
 import { ic } from "../icons";
-import { getState, setWlGroups, toggleWlGroup, inWlFilter, removeWatch, addWatch, isWatched, addWatchGroup, allWatchGroups } from "../store";
-import { toast, openModal, closeModals } from "../ui";
+import { getState, setWlGroups, toggleWlGroup, inWlFilter, removeWatch, addWatch, isWatched, addWatchGroup, allWatchGroups,
+  getWatchNotes } from "../store";
+import { bindNoteHover, hideNotePop, initNoteEditor, noteChipHtml, openNoteModal } from "../note-ui";
+import { toast, openModal, closeModals, multiPick } from "../ui";
+import { openGroupPanel } from "../watch";
+import { primeQuotes } from "./market";
 import { stockSearch, type StockSearchHandle } from "../searchbox";
 import { refreshSparksIn, sparkSvg } from "../sparks";
 import { createPager, slicePage, type Pager } from "../pager";
@@ -31,6 +35,8 @@ const WL_COLS: DataTableCol<WatchItem>[] = [
   { label: "成交额", num: true, sort: (w) => amtCache.get(w.symbol) ?? null,
     render: (w) => `<span style="color:var(--faint)">${fmtYi(amtCache.get(w.symbol) ?? null, 1)}</span>` },
   { label: "信号", render: () => `<span class="tag p1">看盘</span>` },
+  { label: "标注", width: 62, sort: (w) => getWatchNotes(w.symbol).length,
+    render: (w) => noteChipHtml(w.symbol) },
   { label: "分组", sort: (w) => w.groups.join("、"),
     render: (w) => `<span style="font-size:11.5px;color:var(--dim)">${esc(w.groups.join("、"))}</span>` },
   { label: "", width: 52, render: (w) =>
@@ -39,18 +45,20 @@ const WL_COLS: DataTableCol<WatchItem>[] = [
 
 function drawChips(): void {
   const groups = ["全部", ...allWatchGroups()];
-  const sel = getState().wlGroups;                  // 多选：空 = 全部
+  const sel = getState().wlGroups;                  // 单选筛选：空 = 全部；多选仅修饰键
   const el = document.getElementById("wl-groups")!;
   el.innerHTML = groups.map((g) =>
-    `<span class="chip${(g === "全部" ? sel.length === 0 : sel.includes(g)) ? " on" : ""}" data-g="${esc(g)}">${esc(g)}${g !== "全部" && sel.includes(g) ? ic("check", 10) : ""}</span>`).join("") +
-    `<span class="chip" id="wl-newgrp" style="border-style:dashed">${ic("plus", 11)}新建分组</span>`;
+    `<span class="chip${(g === "全部" ? sel.length === 0 : sel.includes(g)) ? " on" : ""}" data-g="${esc(g)}" title="${g === "全部" ? "显示全部" : "单选；按住 Ctrl/⌘/Shift/Tab 多选"}">${esc(g)}${g !== "全部" && sel.includes(g) ? ic("check", 10) : ""}</span>`).join("") +
+    `<span class="chip" id="wl-newgrp" style="border-style:dashed">${ic("plus", 11)}新建分组</span>` +
+    `<span class="chip" id="wl-grp-manage">${ic("gear", 11)}管理分组</span>`;
   el.querySelectorAll<HTMLElement>(".chip[data-g]").forEach((c) =>
-    c.addEventListener("click", () => {
+    c.addEventListener("click", (e) => {
       wlReset = true;
-      toggleWlGroup(c.dataset.g!);   // 点「全部」清空；点分组加入/移出
+      toggleWlGroup(c.dataset.g!, multiPick(e));   // 默认单选互斥；修饰键才多选
       drawChips();
       renderRows(true);
     }));
+  el.querySelector("#wl-grp-manage")!.addEventListener("click", () => openGroupPanel());
   // 新建分组：就地展开输入框（不依赖 prompt，部分浏览器/内嵌窗口会拦截）
   el.querySelector("#wl-newgrp")!.addEventListener("click", () => {
     const host = el.querySelector("#wl-newgrp")!;
@@ -98,6 +106,7 @@ export async function fetchChg(symbols: string[]): Promise<void> {
 }
 
 function renderRows(reset = false): void {
+  hideNotePop();                  // 表体重建 → 悬停浮层立即收起，避免残影
   if (reset) wlReset = true;
   const sel = getState().wlGroups;
   let rows = getState().watchlist.filter((w) => inWlFilter(w));   // 多选分组取并集
@@ -109,6 +118,12 @@ function renderRows(reset = false): void {
   if (!wlTbl) wlTbl = createDataTable(document.getElementById("wl-wrap")!, WL_COLS, {
     rowKey: (w) => w.symbol,
     onRow: (w, ev) => {
+      const note = (ev.target as HTMLElement).closest("[data-note]") as HTMLElement | null;
+      if (note) {                                  // 标注：打开编辑弹窗（不跳个股）
+        hideNotePop();
+        openNoteModal(note.dataset.note!);
+        return;
+      }
       const del = (ev.target as HTMLElement).closest("[data-del]") as HTMLElement | null;
       if (del) {                                   // 行内移除按钮
         removeWatch(del.dataset.del!);
@@ -130,12 +145,15 @@ function renderRows(reset = false): void {
 }
 
 async function loadPrices(symbols: string[]): Promise<void> {
+  const got: Quote[] = [];
   await Promise.allSettled(symbols.map(async (sym) => {
     const q = await marketApi.quote(sym);
+    got.push(q);
     priceCache.set(sym, q.close ?? 0);
     chgCache.set(sym, q.pct_chg ?? 0);
     amtCache.set(sym, q.amount ?? 0);
   }));
+  primeQuotes(got);                                            // 点表格切票时顶部价格秒上屏
 }
 
 export function renderWatchlist(): void {
@@ -180,6 +198,10 @@ export function initWatchlist(): void {
   };
   document.getElementById("wl-add")!.addEventListener("click", openAdd);
   document.getElementById("wl-empty-add")!.addEventListener("click", openAdd);
+  // 标注：hover 浮层 + 编辑弹窗（委托绑定，表格重绘后仍生效）
+  bindNoteHover(document.getElementById("wl-wrap")!);
+  initNoteEditor();
+  document.addEventListener("yc:notes-changed", () => renderRows());
 }
 
 export function isInWatchlist(sym: string): boolean { return isWatched(sym); }

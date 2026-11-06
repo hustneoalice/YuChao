@@ -285,11 +285,32 @@ def _split_groups(raw: Optional[str]) -> list[str]:
     return [s]
 
 
+def _notes(raw: str | None) -> list[dict]:
+    """标注 JSON → 合法列表（单只最多 50 条，丢弃空内容）。"""
+    try:
+        v = json.loads(raw or "[]")
+    except (ValueError, TypeError):
+        return []
+    if not isinstance(v, list):
+        return []
+    out = []
+    for n in v:
+        if not isinstance(n, dict):
+            continue
+        text = str(n.get("text") or "").strip()
+        if not text:
+            continue
+        out.append({"id": str(n.get("id") or ""),
+                    "date": str(n.get("date") or ""),
+                    "text": text[:500]})
+    return out[:50]
+
+
 def get_watchlist(user_id: str) -> list[dict]:
     conn = get_conn()
     try:
         rows = conn.execute(
-            "SELECT symbol, name, group_id, created_at FROM watchlists "
+            "SELECT symbol, name, group_id, notes_json, created_at FROM watchlists "
             "WHERE user_id=? ORDER BY created_at DESC, symbol", (user_id,)).fetchall()
     finally:
         conn.close()
@@ -297,7 +318,8 @@ def get_watchlist(user_id: str) -> list[dict]:
     for r in rows:
         gs = _split_groups(r["group_id"])
         out.append({"symbol": r["symbol"], "name": r["name"] or r["symbol"],
-                    "group": gs[0], "groups": gs, "ts": r["created_at"]})
+                    "group": gs[0], "groups": gs, "ts": r["created_at"],
+                    "notes": _notes(r["notes_json"])})
     return out
 
 
@@ -317,14 +339,16 @@ def put_watchlist(user_id: str, items: list[dict]) -> list[dict]:
         if not groups:
             groups = [str(it.get("group") or "默认").strip() or "默认"]
         gid = groups[0] if len(groups) == 1 else json.dumps(groups, ensure_ascii=False)
-        rows.append((user_id, sym, gid, str(it.get("name") or sym), now))
+        notes = _notes(json.dumps(it.get("notes") or [], ensure_ascii=False))
+        rows.append((user_id, sym, gid, str(it.get("name") or sym),
+                     json.dumps(notes, ensure_ascii=False), now))
     conn = get_conn()
     try:
         conn.execute("BEGIN")
         conn.execute("DELETE FROM watchlists WHERE user_id=?", (user_id,))
         conn.executemany(
-            "INSERT INTO watchlists (user_id, symbol, group_id, name, created_at) "
-            "VALUES (?,?,?,?,?)", rows)
+            "INSERT INTO watchlists (user_id, symbol, group_id, name, notes_json, created_at) "
+            "VALUES (?,?,?,?,?,?)", rows)
         conn.commit()
     except Exception:
         conn.rollback()

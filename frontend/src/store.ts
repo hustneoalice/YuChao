@@ -5,15 +5,27 @@ export type CardMode = "simple" | "detailed";
 export interface CardPref { on: boolean; mode: CardMode; order: number }
 export type CardPrefs = Record<string, CardPref>;
 
+export type RightTabId = "market" | "chips" | "depth" | "holder";
+/** 右侧抽屉的栏目：一个 tab 下可放多张卡片（CARD_DEFS.tab），后续可继续加 */
+export const RIGHT_TABS = [
+  { id: "market", name: "看盘" },
+  { id: "chips", name: "筹码" },
+  { id: "depth", name: "盘口" },
+  { id: "holder", name: "股东" },
+] as const;
+
 export const CARD_DEFS = [
-  { id: "info", name: "基本信息", icon: "info", desc: "名称代码 / 最新价 / 行业概念 / 换手 / 市值 / 市盈率 / 市净率 / 总股本（没有当日估值数据时按实时行情兜底）。" },
-  { id: "watch", name: "自选股", icon: "star", desc: "与左侧自选列表同步的实时看板：现价 / 涨跌幅 / 换手 / 成交额一屏速览，点击直达个股。" },
-  { id: "signals", name: "信号面板", icon: "lightning", desc: "六分段位置判定与操作提示，VIP 因子明细（趋势/位置）由系统计算。" },
-  { id: "trend", name: "趋势", icon: "chart-line", desc: "短线/中线多空状态（收盘价相对 MA10/MA45 的偏离）与六段位位置条，把颜色条信息收进卡片。" },
-  { id: "moneyflow", name: "资金流", icon: "trend-up", desc: "超大 / 大 / 中 / 小单当日净流入结构，以及主力净额近五日迷你走势。" },
-  { id: "indicators", name: "技术指标", icon: "chart-line-up", desc: "MA / BOLL / RSI / KDJ 关键读数与 MA20 背离状态。" },
-  { id: "valuation", name: "估值", icon: "database", desc: "市盈率（TTM）/ 市净率 / 市销率，以及总市值、流通市值。" },
-  { id: "corepick", name: "核心标档案", icon: "target", desc: "该标的在追涨 / 低吸池中的档案与资金分（名单公开）。" },
+  { id: "watch", name: "自选股", icon: "star", tab: "market", desc: "与左侧自选列表同步的实时看板：现价 / 涨跌幅 / 换手 / 成交额一屏速览，点击直达个股。" },
+  { id: "signals", name: "信号面板", icon: "lightning", tab: "market", desc: "六分段位置判定与操作提示，VIP 因子明细（趋势/位置）由系统计算。" },
+  { id: "trend", name: "趋势", icon: "chart-line", tab: "market", desc: "60分 / 日 / 周 三周期短线趋势（收盘 vs MA10）：多头红、空头绿，右侧为近 12/24 根趋势柱，附六段位。" },
+  { id: "moneyflow", name: "资金流", icon: "trend-up", tab: "market", desc: "超大 / 大 / 中 / 小单当日净流入结构，以及主力净额近五日迷你走势。" },
+  { id: "indicators", name: "技术指标", icon: "chart-line-up", tab: "market", desc: "MA / BOLL / RSI / KDJ 关键读数与 MA20 背离状态。" },
+  { id: "valuation", name: "估值", icon: "database", tab: "market", desc: "市盈率（TTM）/ 市净率 / 市销率，以及总市值、流通市值。" },
+  { id: "corepick", name: "核心标档案", icon: "target", tab: "market", desc: "该标的在追涨 / 低吸池中的档案与资金分（名单公开）。" },
+  { id: "shareholders", name: "十大流通股东", icon: "user", tab: "holder", desc: "季度持股披露 / 持股数量变化 / 社保基金新进；进入仅表示新进入十大名单。" },
+  { id: "chips", name: "筹码分布", icon: "list", tab: "chips", desc: "按日线换手衰减估算价格筹码：获利比例 / 平均成本 / 90% 成本区间 / 集中度，指数不适用。" },
+  { id: "orderbook", name: "盘口", icon: "cell-signal-high", tab: "depth", desc: "对标众赢「盘口」：名称概念 + 最高/开盘/昨收/振幅/涨跌停/量比/换手/市盈率/市净率/成交额/市值/内外盘 + 买卖五档 + 委比委差，一屏集中。" },
+  { id: "trades", name: "成交明细", icon: "list", tab: "depth", desc: "对标众赢「分时差价」：逐笔成交时间 / 价格 / 手数 / B·S 方向，主买红、主卖绿，最新在前。" },
 ] as const;
 
 export interface AppState {
@@ -29,22 +41,56 @@ export interface AppState {
   wlGroups: string[];
 }
 
+export interface WatchNote {
+  id: string;
+  /** YYYY-MM-DD：标注适用日期（可回溯/可改） */
+  date: string;
+  text: string;
+}
+
 export interface WatchEntry {
   symbol: string;
   name: string;
   /** 一只股票可属于多个分组，至少含「默认」 */
   groups: string[];
   ts: number;
+  /** 标注（多条）：操作策略 / 提醒，悬停「标注」列可看 */
+  notes: WatchNote[];
 }
 
-/** 旧数据迁移：group: string → groups: string[] */
+function newNoteId(): string {
+  return `n${Date.now().toString(36)}${Math.random().toString(36).slice(2, 6)}`;
+}
+
+/** 今天（本地时区）YYYY-MM-DD */
+export function todayYmd(): string {
+  const d = new Date();
+  const p = (n: number): string => String(n).padStart(2, "0");
+  return `${d.getFullYear()}-${p(d.getMonth() + 1)}-${p(d.getDate())}`;
+}
+
+function sanitizeNotes(raw: unknown): WatchNote[] {
+  if (!Array.isArray(raw)) return [];
+  const out: WatchNote[] = [];
+  raw.forEach((n) => {
+    if (!n || typeof n !== "object") return;
+    const o = n as Record<string, unknown>;
+    const text = String(o.text ?? "").trim();
+    if (!text) return;
+    out.push({ id: String(o.id || newNoteId()), date: String(o.date || todayYmd()), text });
+  });
+  return out;
+}
+
+/** 旧数据迁移：group: string → groups: string[]；缺省补 notes 空数组 */
 function loadWatchlist(): WatchEntry[] {
-  const raw = load<Array<{ symbol: string; name?: string; group?: string; groups?: string[]; ts?: number }>>(LS.watchlist, []);
+  const raw = load<Array<{ symbol: string; name?: string; group?: string; groups?: string[]; ts?: number; notes?: unknown }>>(LS.watchlist, []);
   return raw.filter((w) => w && w.symbol).map((w) => ({
     symbol: w.symbol,
     name: w.name || w.symbol,
     groups: w.groups?.length ? w.groups : [w.group || "默认"],
     ts: w.ts || Date.now(),
+    notes: sanitizeNotes(w.notes),
   }));
 }
 
@@ -65,7 +111,7 @@ function loadCards(): CardPrefs {
   const prefs: CardPrefs = {};
   CARD_DEFS.forEach((c, i) => {
     const r = raw[c.id] ?? {};
-    prefs[c.id] = { on: r.on ?? true, mode: r.mode === "detailed" ? "detailed" : "simple", order: r.order ?? i };
+    prefs[c.id] = { on: r.on ?? true, mode: r.mode === "detailed" ? "detailed" : "simple", order: r.order ?? (c.id === "shareholders" ? 0.5 : i) };
   });
   return prefs;
 }
@@ -155,13 +201,53 @@ export function isWatched(symbol: string): boolean {
 export function addWatch(symbol: string, name: string, group = "默认"): boolean {
   if (isWatched(symbol)) return false;
   noteGroups([group]);
-  state.watchlist.unshift({ symbol, name: name || symbol, groups: [group || "默认"], ts: Date.now() });
+  state.watchlist.unshift({ symbol, name: name || symbol, groups: [group || "默认"], ts: Date.now(), notes: [] });
   saveWatchlist();
   return true;
 }
 export function removeWatch(symbol: string): void {
   state.watchlist = state.watchlist.filter((w) => w.symbol !== symbol);
   saveWatchlist();
+}
+
+/* ── 自选标注（操作策略 / 提醒，多条 · 可改可删） ── */
+/** 某只自选的标注，按日期倒序（同日按新增先后） */
+export function getWatchNotes(symbol: string): WatchNote[] {
+  const w = state.watchlist.find((x) => x.symbol === symbol);
+  return w ? w.notes.slice().sort((a, b) => b.date.localeCompare(a.date)) : [];
+}
+
+export function addWatchNote(symbol: string, date: string, text: string): boolean {
+  const w = state.watchlist.find((x) => x.symbol === symbol);
+  const t = text.trim();
+  if (!w || !t) return false;
+  w.notes.unshift({ id: newNoteId(), date: date || todayYmd(), text: t });
+  saveWatchlist();
+  return true;
+}
+
+export function updateWatchNote(symbol: string, id: string, patch: { date?: string; text?: string }): boolean {
+  const w = state.watchlist.find((x) => x.symbol === symbol);
+  const n = w?.notes.find((x) => x.id === id);
+  if (!n) return false;
+  if (patch.date !== undefined) n.date = patch.date || todayYmd();
+  if (patch.text !== undefined) {
+    const t = patch.text.trim();
+    if (!t) return false;                  // 空内容不覆盖
+    n.text = t;
+  }
+  saveWatchlist();
+  return true;
+}
+
+export function removeWatchNote(symbol: string, id: string): boolean {
+  const w = state.watchlist.find((x) => x.symbol === symbol);
+  if (!w) return false;
+  const before = w.notes.length;
+  w.notes = w.notes.filter((n) => n.id !== id);
+  if (w.notes.length === before) return false;
+  saveWatchlist();
+  return true;
 }
 /** 整组覆盖（多选）：空数组自动回落「默认」，保证一只股票至少有一个组 */
 export function setWatchGroups(symbol: string, groups: string[]): void {
@@ -220,18 +306,59 @@ export function addWatchGroup(name: string): boolean {
   emit();
   return true;
 }
+/** 重命名分组：默认分组不可改；同步股票所属分组、当前筛选与注册表 */
+export function renameWatchGroup(from: string, to: string): boolean {
+  const old = (from || "").trim();
+  const name = (to || "").trim();
+  if (!old || !name || old === "默认" || name === "默认" || name === old) return false;
+  if (allWatchGroups().includes(name)) return false;
+  const i = state.watchGroups.indexOf(old);
+  if (i >= 0) state.watchGroups[i] = name;
+  else state.watchGroups.push(name);
+  state.watchlist.forEach((w) => {
+    if (!w.groups.includes(old)) return;
+    w.groups = Array.from(new Set(w.groups.map((g) => (g === old ? name : g))));
+  });
+  state.wlGroups = Array.from(new Set(state.wlGroups.map((g) => (g === old ? name : g))));
+  localStorage.setItem(LS.watchGroups, JSON.stringify(state.watchGroups));
+  localStorage.setItem(LS.watchlist, JSON.stringify(state.watchlist));
+  notifyLocal("watchlist");
+  emit();
+  return true;
+}
+
+/** 删除分组：默认分组不可删；组内股票回落到「默认」 */
+export function removeWatchGroup(name: string): boolean {
+  const g = (name || "").trim();
+  if (!g || g === "默认" || !allWatchGroups().includes(g)) return false;
+  state.watchGroups = state.watchGroups.filter((x) => x !== g);
+  state.watchlist.forEach((w) => {
+    if (!w.groups.includes(g)) return;
+    const rest = w.groups.filter((x) => x !== g);
+    w.groups = rest.length ? rest : ["默认"];
+  });
+  state.wlGroups = state.wlGroups.filter((x) => x !== g);
+  localStorage.setItem(LS.watchGroups, JSON.stringify(state.watchGroups));
+  localStorage.setItem(LS.watchlist, JSON.stringify(state.watchlist));
+  notifyLocal("watchlist");
+  emit();
+  return true;
+}
+
 /** 云端自选整批装载（applying 抑制回推） */
 export function loadWatchlistFrom(items: WatchEntry[]): void {
-  state.watchlist = items;
+  state.watchlist = items.map((w) => ({ ...w, notes: sanitizeNotes(w.notes) }));
   localStorage.setItem(LS.watchlist, JSON.stringify(state.watchlist));
   emit();
 }
-/** 分组筛选（多选）：空 = 全部；点「全部」清空；点某组则加入/移出 */
-export function toggleWlGroup(g: string): void {
-  if (g === "全部") state.wlGroups = [];
-  else state.wlGroups = state.wlGroups.includes(g)
+/** 分组筛选：默认单选互斥（点「全部」清空）；
+    multi=true（Ctrl/⌘/Shift 或按住 Tab）时支持多选并集 */
+export function toggleWlGroup(g: string, multi = false): void {
+  if (!g || g === "全部") state.wlGroups = [];
+  else if (multi) state.wlGroups = state.wlGroups.includes(g)
     ? state.wlGroups.filter((x) => x !== g)
     : [...state.wlGroups, g];
+  else state.wlGroups = [g];
   emit();
 }
 export function setWlGroups(gs: string[]): void {

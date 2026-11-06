@@ -1,163 +1,94 @@
-/* 核心标页：公开名单 + VIP 因子明细（403 → 锁定） */
-import { corepicksApi, type Corepick } from "../api";
-import { esc, fmt, fmtChg } from "../fmt";
-import { createPager, slicePage, type Pager } from "../pager";
-import { createDataTable, type DataTable, type DataTableCol } from "../table";
-import { ic } from "../icons";
-import { getState, isVip } from "../store";
-import { openModal, closeModals } from "../ui";
+/* 核心标强轮动：计算后台执行，页面读取已保存快照。 */
+import { corepicksApi, dataApi, type RotationResponse, type RotationStock, type RotationBlock } from "../api";
+import { esc, fmtYiS } from "../fmt";
+import { createDataTable, type DataTable } from "../table";
 import { openWatchPanel } from "../watch";
 
-let tab: "chase" | "dip" | "all" = "chase";
-let picks: Corepick[] = [];
-let date = "";
-let cpPager: Pager | null = null;
-let cpTbl: DataTable<Corepick> | null = null;
-let cpReset = false;
-
-function showCore(name: string): void {
-  document.querySelectorAll("[data-core-state]").forEach((s) =>
-    s.classList.toggle("on", (s as HTMLElement).dataset.coreState === name));
-}
+let data: RotationResponse | null = null;
+let table: DataTable<RotationStock>;
+let candidates: DataTable<RotationBlock>;
+let kind = "行业";
+let revision = 0;
+let initialized = false;
+let loading = false;
+let requestedAt = 0;
+const el = (id: string) => document.getElementById(`cp-${id}`)!;
+const dateInput = () => el("date") as HTMLInputElement;
+const history = () => el("history") as HTMLSelectElement;
+const pct = (v: number | null | undefined) => v == null ? "—" : `${v > 0 ? "+" : ""}${v.toFixed(2)}%`;
+const money = (v: number | null) => v == null ? "—" : fmtYiS(v);
+const time = (v: string) => v.replace("T", " ").slice(0, 19);
+const status = (s: string) => ({completed:"已完成",waiting:"等待数据",cancelled:"已停止"}[s] || s);
+function renderCandidates(): void { candidates.render(data?.result?.candidates.filter(b => b.category === kind) || []); }
 
 export async function renderCorepicks(): Promise<void> {
-  showCore("loading");
+  if (!initialized || loading) return;
+  loading = true;
+  const current = ++revision;
+  const date = dateInput().value;
   try {
-    picks = await corepicksApi.list(undefined, tab === "all" ? undefined : tab);
-    date = picks[0]?.date || "";
-    document.getElementById("cp-date")!.textContent = date || "最新";
-    document.getElementById("cp-total")!.textContent = String(picks.length);
-    if (!picks.length) { showCore("empty"); return; }
-    renderRows();
-    showCore("data");
-  } catch (e) {
-    (document.getElementById("cp-err-msg") as HTMLElement).textContent = (e as Error).message || "请求失败";
-    showCore("error");
-  }
-}
-
-function scoreCell(v: number | null | undefined, color: string): string {
-  return `<div class="scorebar"><span class="num" style="font-size:11px;color:var(--faint);width:22px">${v ?? "—"}</span><span class="sb"><i style="width:${v ?? 0}%;background:${color}"></i></span></div>`;
-}
-
-function renderRows(): void {
-  if (!cpPager) cpPager = createPager(document.getElementById("cp-pager")!, "corepicks", renderRows);
-  if (!cpTbl) cpTbl = createDataTable(document.getElementById("cp-wrap")!, CP_COLS, {
-    rowKey: (r) => r.symbol,
-    onRow: (r, ev) => {
-      const b = (ev.target as HTMLElement).closest("[data-cp-open]") as HTMLElement | null;
-      if (b) { void openDetail(b.dataset.cpOpen!, b.dataset.pool || "chase"); return; }
-      void openDetail(r.symbol, r.pool);
-    },
-    empty: "暂无核心标数据",
-  });
-  if (cpReset) { cpPager.reset(); cpReset = false; }
-  const rows = cpTbl.sort(picks);
-  cpPager.update(rows.length);
-  const start = (cpPager.page - 1) * cpPager.size;
-  cpTbl.render(slicePage(cpPager, rows), start);
-}
-
-const CP_COLS: DataTableCol<Corepick>[] = [
-  { label: "#", width: 34, mono: true, render: (_r, i) => `<span style="color:var(--faint)">${i + 1}</span>` },
-  { label: "代码", mono: true, sort: "symbol", render: (r) => r.symbol },
-  { label: "名称", sort: "name", render: (r) => `<span style="font-weight:600">${esc(r.name)}</span>` },
-  { label: "池", sort: "pool", render: (r) =>
-      `<span class="tag ${r.pool === "chase" ? "acc" : "p1"}">${r.pool === "chase" ? "追涨" : "低吸"}</span>` },
-  { label: "板块", sort: "sector", render: (r) => esc(r.sector || "—") },
-  { label: "资金分", sort: (r) => r.fund_score ?? null, render: (r) => scoreCell(r.fund_score, "var(--accent)") },
-  { label: "三因子明细", render: (r) => isVip()
-      ? `<button class="hbtn" data-cp-open="${r.symbol}" data-pool="${r.pool}" style="height:26px;padding:0 10px;font-size:11.5px">三因子</button>`
-      : `<span class="tag lock">${ic("lock", 10)}VIP</span>` },
-  { label: "六分段", render: (r) => `<span class="tag ${segCls(r.seg)}">${esc(segName(r.seg))}</span>` },
-  { label: "操作", width: 74, render: (r) => `<button class="hbtn" data-cp-open="${r.symbol}" data-pool="${r.pool}" style="height:26px;padding:0 10px;font-size:11.5px">明细</button>` },
-];
-
-function segName(seg: string | null | undefined): string {
-  return seg || "—";
-}
-function segCls(seg: string | null | undefined): string {
-  switch (seg) {
-    case "强势": case "超买": return "acc";
-    case "超卖": case "低位": return "flat";
-    case null: case undefined: return "flat";
-    default: return "p1";
-  }
-}
-
-/* 明细弹窗：VIP → /corepicks/{symbol}/factors；未授权 403 → VIP 弹窗 */
-async function openDetail(symbol: string, pool: string): Promise<void> {
-  const r = picks.find((x) => x.symbol === symbol && x.pool === pool) ||
-    picks.find((x) => x.symbol === symbol);
-  if (!r) return;
-  document.getElementById("dt-name")!.textContent = r.name || symbol;
-  document.getElementById("dt-code")!.textContent = `${symbol} · ${date}`;
-  const tag = document.getElementById("dt-pool-tag") as HTMLElement;
-  tag.textContent = r.pool === "chase" ? "追涨池" : "低吸池";
-  tag.className = "tag " + (r.pool === "chase" ? "acc" : "p1");
-
-  if (!isVip()) {
-    (document.getElementById("dt-factors") as HTMLElement).innerHTML =
-      `<div class="factor" style="grid-column:1/-1;display:grid;place-items:center;gap:8px;padding:22px">${ic("lock-key", 22)}<b>VIP 三因子明细已锁定</b><span style="font-size:11px;color:var(--faint)">趋势 / 位置 / 六分段由系统计算，未开通 VIP 不显示</span><button class="hbtn primary" data-dt-vip style="height:28px">开通 VIP</button></div>`;
-    (document.getElementById("dt-kv") as HTMLElement).innerHTML =
-      `<dt>资金分</dt><dd class="num">${r.fund_score ?? "—"}</dd><dt>六分段</dt><dd>${esc(r.seg || "—")}</dd>`;
-  } else {
-    (document.getElementById("dt-factors") as HTMLElement).innerHTML =
-      `<div class="factor"><div class="k">三因子明细</div><div style="font-size:11.5px;color:var(--dim);margin-top:4px">加载中…</div></div>`;
-    (document.getElementById("dt-kv") as HTMLElement).innerHTML = "";
-    try {
-      const f = await corepicksApi.factors(symbol, r.date, r.pool);
-      const fac = (f.factors || {}) as Record<string, unknown>;
-      const num = (k: string) => (typeof fac[k] === "number" ? fac[k] as number : null);
-      const f1 = num("fund_score") ?? r.fund_score;
-      const f2 = num("trend_score");
-      const f3 = num("position_score");
-      (document.getElementById("dt-factors") as HTMLElement).innerHTML =
-        `<div class="factor"><div class="k">资金因子</div><div class="v num" style="color:var(--accent)">${f1 ?? "—"}</div></div>` +
-        `<div class="factor"><div class="k">趋势因子</div><div class="v num" style="color:var(--p1)">${f2 ?? "—"}</div></div>` +
-        `<div class="factor"><div class="k">位置因子</div><div class="v num" style="color:var(--vip)">${f3 ?? "—"}</div></div>`;
-      const segI = typeof fac.seg_index === "number" ? fac.seg_index : 3;
-      (document.getElementById("dt-seg-v") as HTMLElement).textContent = `${segName(f.seg)}（${segI}/6）`;
-      (document.getElementById("dt-sixseg") as HTMLElement).innerHTML =
-        Array.from({ length: 6 }, (_, k) => `<i class="${k <= segI - 1 ? "on" : ""}${k === segI - 1 ? " cur" : ""}"></i>`).join("");
-      (document.getElementById("dt-kv") as HTMLElement).innerHTML =
-        `<dt>资金分</dt><dd class="num">${f1 ?? "—"}</dd><dt>板块</dt><dd>${esc(f.sector || "—")}</dd><dt>更新</dt><dd class="num">${esc(f.date)}</dd>`;
-    } catch (e) {
-      (document.getElementById("dt-factors") as HTMLElement).innerHTML =
-        `<div class="factor" style="grid-column:1/-1;color:var(--up);font-size:12px">因子加载失败：${esc((e as Error).message)}</div>`;
-    }
-  }
-  (document.getElementById("dt-sixseg") as HTMLElement).innerHTML =
-    (document.getElementById("dt-sixseg") as HTMLElement).innerHTML ||
-    Array.from({ length: 6 }, () => `<i></i>`).join("");
-  (document.getElementById("dt-seg-v") as HTMLElement).textContent =
-    (document.getElementById("dt-seg-v") as HTMLElement).textContent || "—";
-  const watchBtn = document.getElementById("dt-watch")!;
-  watchBtn.onclick = () => {
-    // 统一走「加入自选 / 分组管理」面板（与行情页 star 行为一致）
-    openWatchPanel(symbol, r.name || symbol);
-  };
-  openModal("modal-detail");
-  document.querySelector<HTMLButtonElement>("[data-dt-vip]")?.addEventListener("click", () => {
-    closeModals();
-    document.getElementById("vipbadge")!.click();
-  });
+    const [response, state] = await Promise.all([corepicksApi.rotation(date || undefined), dataApi.state()]);
+    if (current !== revision || date !== dateInput().value) return;
+    data = response;
+    const result = data.result;
+    const busy = [state.running, ...state.queued].find(t => t?.kind === "corepicks");
+    const recent = state.recent.find(t => t.kind === "corepicks");
+    const latest = data.latest_attempt;
+    const pending = requestedAt > Date.now() - 15000 && !busy && (!latest || Date.parse(latest.created_at) < requestedAt);
+    if (busy || (latest && Date.parse(latest.created_at) >= requestedAt)) requestedAt = 0;
+    (el("run") as HTMLButtonElement).disabled = !!busy || pending;
+    el("status").textContent = busy ? `${busy.label} · ${busy.stage || busy.status} ${busy.message || ""}` : pending ? "计算请求已提交，等待后台开始…" : recent?.status === "failed" ? `最近计算失败：${recent.error || recent.message}；保留上一份结果。` : latest ? `${status(latest.status)} · ${latest.message} · ${time(latest.created_at)} · ${latest.trigger === "auto" ? "自动" : "手动"}` : "尚未生成结果，点击立即计算。";
+    history().innerHTML = '<option value="">最新结果</option>' + data.history.map(d => `<option value="${esc(d)}">${esc(d)}</option>`).join("");
+    history().value = data.history.includes(date) ? date : "";
+    el("run").textContent = date ? "计算该日" : "立即计算";
+    el("meta").textContent = result ? `结果交易日 ${result.date} · 生成于 ${time(result.created_at)} · ${result.trigger === "auto" ? "自动" : "手动"} · 合格板块 ${result.selected_blocks.length} 个 · 入选 ${result.items.length} 条${result.previous_available ? ` · 已排除 ${result.previous_date} 优选板块` : ` · ${result.previous_date || "上一交易日"} 无模型记录，本次未执行昨日排除`}` : "";
+    table.render(result?.items || []);
+    el("empty").textContent = !result ? (date ? `${date} 尚未生成结果，可点击“计算该日”。` : "暂无已完成结果。") : result.items.length < 4 ? `本次符合条件 ${result.items.length} 条，不自动降低条件补足。` : "";
+    el("note").textContent = result ? `${result.note} 本次缺少有效资金或占比剔除 ${result.excluded_stock_records} 条成分记录（跨板块可能重复）。` : "板块涨幅采用成分股平均涨幅，数据缺失不当作0。";
+    el("selected").innerHTML = result?.selected_blocks.length ? result.selected_blocks.map(b => `<p><b>${esc(b.category)} · ${esc(b.name)}</b>：涨幅第 ${b.change_rank} 名 / ${pct(b.change_rate)}，主力净额 ${money(b.main.net)}，本板块独立选取最多4只。</p>`).join("") : '<p>没有符合条件的优选板块。</p>';
+    renderCandidates();
+    el("runs").innerHTML = data.runs.map(r => `<p>${esc(time(r.created_at))} · ${esc(r.date)} · ${r.trigger === "auto" ? "自动" : "手动"} · ${esc(status(r.status))} · ${esc(r.message)}</p>`).join("") || "暂无运行记录";
+  } catch (error) {
+    if (current === revision) { el("status").textContent = `读取失败：${error instanceof Error ? error.message : "请重试"}`; (el("run") as HTMLButtonElement).disabled = false; }
+  } finally { if (current === revision) { loading = false; if(date !== dateInput().value) void renderCorepicks(); } }
 }
 
 export function initCorepicks(): void {
-  document.getElementById("cp-tabs")!.addEventListener("click", (e) => {
-    const b = (e.target as HTMLElement).closest("button") as HTMLElement | null;
-    if (!b) return;
-    tab = b.dataset.t as "chase" | "dip" | "all";
-    document.querySelectorAll("#cp-tabs button").forEach((x) => x.classList.toggle("on", x === b));
-    cpReset = true;
-    void renderCorepicks();
+  if (initialized) { void renderCorepicks(); return; }
+  initialized = true;
+  table = createDataTable(el("wrap"), [
+    { label:"所属板块", render:r => r.sources.map(s => `${esc(s.category)}·${esc(s.name)}`).join(" / ") },
+    { label:"板块内排名", render:r => String(r.rank) },
+    { label:"代码", render:r => esc(r.symbol) },
+    { label:"名称", render:r => `<b>${esc(r.name)}</b>` },
+    { label:"市场", render:r => r.mainboard ? "主板" : "其他A股" },
+    { label:"涨幅", num:true, render:r => pct(r.change_rate) },
+    { label:"资金排名", render:r => r.fund_rank ? `第${r.fund_rank}名 / 前12` : "—" },
+    { label:"主力净额", num:true, render:r => money(r.main.net) },
+    { label:"主力介入度", num:true, render:r => pct(r.main.participation) },
+    { label:"主力占比", num:true, render:r => pct(r.main.ratio) },
+    { label:"入选依据", render:r => r.sources.map(s => `${esc(s.category)}·${esc(s.name)}（板块涨幅第${s.change_rank}）`).join(" / ") },
+    { label:"操作", render:() => '<button class="hbtn" data-k>日K</button> <button class="hbtn" data-watch>自选</button>' },
+  ], {rowKey:r => `${r.sources[0]?.code}:${r.symbol}`, onRow:(r,e) => {
+    if ((e.target as HTMLElement).closest('[data-watch]')) { openWatchPanel(r.symbol,r.name); return; }
+    document.dispatchEvent(new CustomEvent('yc:open-stock',{detail:{symbol:r.symbol,name:r.name,from:{page:'corepicks',label:'核心标'}}}));
+  }});
+  candidates = createDataTable(el("candidates"), [
+    {label:"涨幅排名",render:r => String(r.change_rank)}, {label:"板块",render:r => esc(r.name)},
+    {label:"涨幅",num:true,render:r => pct(r.change_rate)}, {label:"主力净额",num:true,render:r => money(r.main.net)},
+    {label:"筛选结果",render:r => esc(r.reason)},
+  ],{rowKey:r => r.key});
+  el("kinds").addEventListener('click',e => { const b=(e.target as HTMLElement).closest<HTMLElement>('[data-kind]'); if(!b) return; kind=b.dataset.kind!; el("kinds").querySelectorAll('button').forEach(x=>x.classList.toggle('on',x===b)); renderCandidates(); });
+  history().addEventListener('change',() => { dateInput().value=history().value; void renderCorepicks(); });
+  dateInput().addEventListener('change',() => void renderCorepicks());
+  el("latest").addEventListener('click',() => { dateInput().value=""; void renderCorepicks(); });
+  el("refresh").addEventListener('click',() => void renderCorepicks());
+  el("run").addEventListener('click',async () => {
+    (el("run") as HTMLButtonElement).disabled=true;
+    el("status").textContent="正在提交计算任务…";
+    try { await corepicksApi.runRotation(dateInput().value || undefined); requestedAt=Date.now(); await renderCorepicks(); }
+    catch(error) { el("status").textContent=`提交失败：${error instanceof Error ? error.message : "请重试"}`; (el("run") as HTMLButtonElement).disabled=false; }
   });
-  document.getElementById("cp-retry")!.addEventListener("click", () => void renderCorepicks());
+  setInterval(() => { if(document.getElementById('page-corepicks')?.classList.contains('on') && !document.hidden) void renderCorepicks(); },5000);
   void renderCorepicks();
 }
-
-export function coreCount(): number { return picks.length; }
-export function curDate(): string { return date; }
-export function useStoreState(): string { return getState().theme; }
-export function fmtChgExport(v: number): string { return fmtChg(v); }

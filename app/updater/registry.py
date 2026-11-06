@@ -72,6 +72,10 @@ TASKS: tuple[dict, ...] = (
      "cooldown_s": 0,     # interval 自带 5min 节律；新鲜度秒跳也会拦掉盘中刷新
      "description": "交易时段每 5 分钟用最新快照重算目标指标层（页面直接读表，"
                     "现价/涨跌幅/量比跟行情页一致）；非交易时段自动跳过"},
+    {"kind": "mainforce_cache", "label": "主力军情预计算",
+     "fn": "app.updater.collectors.mainforce:update_mainforce",
+     "needs": ["capital_flow", "valuation", "kline_update", "zy_block_sync"],
+     "description": "收盘后预生成行业、概念、地域与个股的六个周期资金排行，打开即读缓存"},
     {"kind": "financials", "label": "财务数据",
      "fn": "app.updater.collectors.financials:update_financials",
      "freshness": {"log": True},
@@ -84,9 +88,9 @@ TASKS: tuple[dict, ...] = (
      "fn": "app.updater.collectors.adjust_factor:update_adjust_factor",
      "freshness": {"log": True},
      "description": "每周六更新复权因子（用于计算前复权 K 线）"},
-    {"kind": "corepicks", "label": "核心标推送",
+    {"kind": "corepicks", "label": "核心标强轮动计算",
      "fn": "app.updater.collectors.corepicks:update_corepicks",
-     "description": "每晚更新核心标选股名单"},
+     "description": "每日20:00依据行业、题材、地域涨幅与资金优选最多4只核心标，支持手动计算"},
     {"kind": "feishu_push", "label": "飞书推送",
      "fn": "app.updater.collectors.feishu_push:push_corepicks",
      "notify": True,
@@ -123,9 +127,10 @@ CRON_CHAIN: tuple[tuple[str, int, int], ...] = (
     ("pe_percentile", 16, 50),
     ("kline_update", 17, 0),
     ("target_scan", 17, 20),      # 目标页指标层预计算（K 线落库后）
+    ("mainforce_cache", 17, 25),
     ("financials", 17, 30),
     ("backup", 18, 10),           # 更新链收尾后快照；策影零备份，这是超越点
-    ("corepicks", 21, 0),
+    ("corepicks", 20, 0),
 )
 WEEKLY: tuple[tuple[str, int, int], ...] = (
     ("adjust_factor", 9, 0),      # 周六

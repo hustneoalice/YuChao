@@ -443,10 +443,10 @@ def test_market_targets(client: TestClient, duckdb_file):
     assert body["scanned"] >= 2 and body["as_of"]
 
     t = next(x for x in body["items"] if x["symbol"] == "600519")
-    # 种子 60 根单边上升：站上全部均线、量达标、第 6 段、非回调、近 20 日无涨停
+    # 种子 60 根单边上升：站上全部均线、量达标、趋势线突破（第 3 段）、非回调、近 20 日无涨停
     assert t["name"] == "贵州茅台"
     assert t["short_orange"] and t["mid_orange"] and t["vol_hit"]
-    assert t["seg"] == 6 and t["seg_name"] == "超买"
+    assert t["seg"] == 3 and t["seg_name"] == "突破"
     assert t["pullback"] is False
     assert t["limit_up_20d"] is False and t["limit_up_cnt"] == 0
     assert t["vol_ratio"] is not None and t["vol_ratio"] > 0.99

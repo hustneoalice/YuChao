@@ -1,4 +1,5 @@
 """行情读取：K 线（复权派生视图）/ 快照 / 搜索。"""
+import time
 from typing import Optional
 from threading import Lock
 from datetime import datetime
@@ -163,6 +164,14 @@ def get_quote(conn, symbol: str) -> dict:
         fkeys = ["date", "net_main", "net_super", "net_large", "net_medium", "net_small"]
         out["capital_flow"] = dict(zip(fkeys, flow))
         out["capital_flow"]["date"] = str(out["capital_flow"]["date"])
+
+    # 概念标签：sector_member（东财概念成分快照）→ 逗号串，前端拆 chip
+    cons = conn.execute(
+        "SELECT DISTINCT bk_name FROM sector_member WHERE symbol = ? ORDER BY bk_name",
+        [symbol],
+    ).fetchall()
+    if cons:
+        out["concept"] = ",".join(c[0] for c in cons if c[0])
     return out
 
 
@@ -321,7 +330,8 @@ def search(conn, q: str, limit: int = 10,
     qs = q.strip()
     qu, ql = qs.upper(), qs.lower()
     want_pinyin = qs.isascii() and qs.isalpha()   # 纯字母才走拼音（代码查询不拼表）
-    cand: list[tuple[int, int, dict]] = []
+    # (打分, 类别序, 热度, 行)：拼音命中同分时按总市值降序，让「cd」优先出长电科技
+    cand: list[tuple[int, int, float, dict]] = []
     seen: set[tuple[str, str]] = set()
 
     # 各类原始行：stock 走池内档案，fund 走场内基金清单，index 取静态目录，
@@ -368,12 +378,12 @@ def search(conn, q: str, limit: int = 10,
             return 3
         return None
 
-    def put(kind: str, row: tuple, sc: int) -> None:
+    def put(kind: str, row: tuple, sc: int, pop: float = 0.) -> None:
         key = (kind, row[0])
         if key in seen:
             return
         seen.add(key)
-        cand.append((sc, _KIND_ORDER[kind], {
+        cand.append((sc, _KIND_ORDER[kind], -pop, {
             "symbol": row[0], "name": row[1], "market": row[2],
             "industry": row[3], "status": row[4], "kind": kind,
             "sub": (row[5] if len(row) > 5 else None),
@@ -386,20 +396,24 @@ def search(conn, q: str, limit: int = 10,
                 put(kind, row, sc)
 
     # 拼音兜底：原始命中不足时才展开（避免每次请求都拼全表）；板块/指数同享。
+    # 同分（如 cd 命中 长电科技/成都燃气/崇达技术…）按总市值降序，大票优先。
     if want_pinyin and len(cand) < limit:
+        caps = _market_caps(conn) if "stock" in kinds else {}
         for kind, items in rows.items():
             for row in items:
                 if (kind, row[0]) in seen or not row[1]:
                     continue
-                py = _pinyin_variants(row[1])
-                if ql in py["abbr"] or ql in py["full"]:
-                    put(kind, row, 4)
+                sc = _py_grade(_pinyin_variants(row[1]), ql)
+                if sc is not None:
+                    put(kind, row, sc, caps.get(row[0], 0.) if kind == "stock" else 0.)
 
-    cand.sort(key=lambda x: (x[0], x[1]))
-    return [c[2] for c in cand[:limit]]
+    cand.sort(key=lambda x: x[:3])
+    return [c[3] for c in cand[:limit]]
 
 
-_TGT_SEGNAME = ("", "超卖", "低位", "弱势", "回升", "强势", "超买")
+_TGT_SEGNAME = ("", "超跌", "反弹", "突破", "超涨", "回踩", "跌破")
+# 操作优先级（列表排序用，越大越靠前）：突破 > 回踩 > 超涨 > 跌破 > 反弹 > 超跌
+SEG_RANK = {0: 0, 1: 0, 2: 1, 6: 2, 4: 3, 5: 5, 3: 6}
 _TGT_CACHE: dict = {"key": None, "rows": [], "meta": {}}
 _TGT_COLS = ("symbol, name, close, pct_chg, vol_ma40, vol_ratio, vol_hit,"
              " short_orange, mid_orange, limit_up_20d, limit_up_cnt,"
@@ -408,11 +422,15 @@ _TGT_COLS = ("symbol, name, close, pct_chg, vol_ma40, vol_ratio, vol_hit,"
 # 全市场目标指标：一次窗口 SQL 算完（条件无关层），按 (最新K线日期, 标的数, 北交开关) 缓存
 _TGT_SQL = (
     "WITH t AS ("
-    "  SELECT symbol, date, close, volume, pct_chg,"
+    "  SELECT symbol, date, close, high, low, volume, pct_chg,"
+    "         LAG(close) OVER (PARTITION BY symbol ORDER BY date) AS prev_close,"
     "         ROW_NUMBER() OVER (PARTITION BY symbol ORDER BY date DESC) AS rn"
     "  FROM daily_ohlcv),"
     "u AS ("
-    "  SELECT *, MAX(CASE WHEN rn = 1 THEN close END) OVER (PARTITION BY symbol) AS lc"
+    "  SELECT symbol, close, volume, pct_chg, rn,"
+    "         GREATEST(high - low, ABS(high - COALESCE(prev_close, close)),"
+    "                  ABS(low - COALESCE(prev_close, close))) AS tr,"
+    "         MAX(CASE WHEN rn = 1 THEN close END) OVER (PARTITION BY symbol) AS lc"
     "  FROM t WHERE rn <= 60)"
     "SELECT symbol,"
     "       MAX(CASE WHEN rn = 1 THEN close END) AS close,"
@@ -422,11 +440,10 @@ _TGT_SQL = (
     "       AVG(CASE WHEN rn <= 10 THEN close END) AS ma10,"
     "       AVG(CASE WHEN rn <= 45 THEN close END) AS ma45,"
     "       AVG(CASE WHEN rn <= 40 THEN volume END) AS vol_ma40,"
+    "       AVG(CASE WHEN rn <= 14 THEN tr END) AS atr14,"
     "       SUM(CASE WHEN rn <= 20 AND pct_chg >= (CASE"
     "             WHEN symbol LIKE '30%' OR symbol LIKE '68%' THEN 19.9"
-    "             ELSE 9.9 END) THEN 1 ELSE 0 END) AS up20,"
-    "       SUM(CASE WHEN close < lc THEN 1 ELSE 0 END) AS below,"
-    "       COUNT(*) AS n"
+    "             ELSE 9.9 END) THEN 1 ELSE 0 END) AS up20"
     " FROM u GROUP BY symbol")
 
 
@@ -473,10 +490,11 @@ def _tgt_sql(live_date: Optional[str]) -> str:
     if not live_date:
         return _TGT_SQL
     live = (
-        "(SELECT symbol, date, close, volume, pct_chg FROM daily_ohlcv"
+        "(SELECT symbol, date, close, high, low, volume, pct_chg FROM daily_ohlcv"
         f" WHERE date < DATE '{live_date}'"
         " UNION ALL"
         " SELECT symbol, trade_date AS date, current AS close,"
+        " COALESCE(high, current) AS high, COALESCE(low, current) AS low,"
         " volume * 100 AS volume, change_rate AS pct_chg FROM market_snapshot"
         f" WHERE kind = 'stock' AND trade_date = DATE '{live_date}'"
         " AND current IS NOT NULL AND volume > 0)"
@@ -535,6 +553,31 @@ def stock_targets_universe(conn) -> tuple[list[dict], dict]:
     return compute_target_scan(conn)
 
 
+def six_segment(close, ma7, ma10, atr14) -> int:
+    """六分段（趋势线六位置）：以短线操盘 MA7 快 / MA10 慢为基准。
+
+    1 超跌 → 2 反弹 → 3 突破 → 4 超涨 → 5 回踩 → 6 跌破；偏离阈值按
+    ATR(14)/收盘价自适应（1.5 倍，最低 1%），与前端 indicators.ts 同口径。"""
+    try:
+        close, ma7, ma10 = float(close), float(ma7), float(ma10)
+        atr = float(atr14 or 0)
+    except (TypeError, ValueError):
+        return 0
+    if not ma10 or not ma7 or close <= 0:
+        return 0
+    deep = 1.5 * max(atr / close, 0.01)
+    dev = close / ma10 - 1
+    if close >= ma10:
+        if ma7 > ma10 and dev >= deep:
+            return 4                                   # 超涨（趋势已转多后远离慢线）
+        if ma7 >= ma10 and close < ma7:
+            return 5                                   # 回踩快线
+        return 3                                       # 突破 / 上升趋势
+    if ma7 > ma10:
+        return 6                                       # 跌破慢线（趋势线跌破）
+    return 1 if dev <= -deep else 2                    # 超跌 / 反弹
+
+
 def compute_target_scan(conn, live: Optional[dict] = None) -> tuple[list[dict], dict]:
     """即时计算指标层（定时任务写表 / 预计算缺失时的兜底），按数据指纹进缓存。
 
@@ -563,15 +606,15 @@ def compute_target_scan(conn, live: Optional[dict] = None) -> tuple[list[dict], 
             continue
         close, ma7, ma10, ma45 = r[1], r[4], r[5], r[6]
         vol, vol_ma40 = r[3], r[7]
-        seg = min(6, int((r[9] / r[10]) * 6) + 1)       # 60 窗口收盘分位 → 1..6
-        cnt = int(r[8] or 0)
+        seg = six_segment(close, ma7, ma10, r[8])        # 趋势线六位置 → 1..6
+        cnt = int(r[9] or 0)
         out.append({
             "symbol": sym, "name": name, "close": close, "pct_chg": r[2],
             "vol_ma40": vol_ma40,
             "vol_ratio": (vol / vol_ma40) if (vol is not None and vol_ma40) else None,
             "vol_hit": bool(vol_ma40 and vol is not None and vol >= vol_ma40),
-            "short_orange": bool(ma10 and close > ma10),
-            "mid_orange": bool(ma45 and close > ma45),
+            "short_orange": bool(ma10 and close >= ma10),
+            "mid_orange": bool(ma45 and close >= ma45),
             "limit_up_20d": cnt > 0, "limit_up_cnt": cnt,
             "seg": seg, "seg_name": _TGT_SEGNAME[seg],
             "pullback": bool(ma7 and close < ma7),
@@ -585,22 +628,91 @@ def compute_target_scan(conn, live: Optional[dict] = None) -> tuple[list[dict], 
     return out, meta
 
 
-_PY_CACHE: dict[str, dict[str, str]] = {}
+_PY_CACHE: dict[str, dict] = {}
+
+# 总市值截面缓存（拼音同分排序用）：10 分钟 TTL + 估值日期键，避免每次搜索扫表
+_MV_CACHE: dict = {"at": 0., "rows": {}, "key": ""}
 
 
-def _pinyin_variants(name: str) -> dict[str, str]:
-    """名称 → {abbr: 首字母缩写, full: 无分隔全拼}；首调后缓存。"""
+def _market_caps(conn) -> dict[str, float]:
+    """各标的最新总市值（元）；只用于搜索结果的同分热度排序，失败即空表降级。"""
+    try:
+        head = conn.execute("SELECT MAX(date) FROM daily_valuation").fetchone()
+        key = str(head[0]) if head and head[0] else ""
+        now = time.time()
+        if key and _MV_CACHE["key"] == key and now - _MV_CACHE["at"] < 600:
+            return _MV_CACHE["rows"]
+        rows = {r[0]: float(r[1] or 0) for r in conn.execute(
+            "SELECT symbol, total_mv FROM daily_valuation"
+            " QUALIFY row_number() OVER (PARTITION BY symbol ORDER BY date DESC) = 1"
+        ).fetchall()}
+        _MV_CACHE.update(at=now, rows=rows, key=key)
+        return rows
+    except Exception:                       # 估值表缺失/未初始化：热度全部置 0
+        return {}
+
+
+def _py_grade(py: dict, ql: str) -> Optional[int]:
+    """拼音命中度（越小越靠前）：缩写全等 4 / 前缀 5 / 包含 6。
+
+    「cd」这类缩写前缀要先出长电科技(cdkj)、成都燃气(cdrq)，而不是被一堆
+    中间含 cd 的名称（如辽宁成大 lncd）挤占 limit 名额。"""
+    if not ql:
+        return None
+    abbrs = py.get("abbrs") or [py.get("abbr", "")]
+    if any(a == ql for a in abbrs):
+        return 4
+    if any(a.startswith(ql) for a in abbrs) or py["full"].startswith(ql):
+        return 5
+    if any(ql in a for a in abbrs) or ql in py["full"]:
+        return 6
+    return None
+
+
+def abbr_grade(name: Optional[str], ql: str, abbr: Optional[str] = None) -> int:
+    """搜索排序用命中度：0 缩写全等 / 1 前缀 / 2 包含 / 9 未命中。
+
+    腾讯联想自带市场口径缩写（长电科技 = cdkj），优先用它；本地行没有该
+    字段时用 pypinyin 多音字变体兜底（长 = zhang/chang 两种缩写都试）。
+    """
+    if not name or not ql:
+        return 9
+    py = _pinyin_variants(name)
+    alts = set(py.get("abbrs") or [py.get("abbr", "")])
+    if abbr:
+        alts.add(abbr.lower())
+    alts.discard("")
+    if not alts:
+        return 9
+    if ql in alts:
+        return 0
+    if any(a.startswith(ql) for a in alts) or py.get("full", "").startswith(ql):
+        return 1
+    if any(ql in a for a in alts) or ql in py.get("full", ""):
+        return 2
+    return 9
+
+
+def _pinyin_variants(name: str) -> dict:
+    """名称 → {abbr: 主缩写, abbrs: 多音字缩写变体, full: 无分隔全拼}；首调后缓存。"""
     cached = _PY_CACHE.get(name)
     if cached is not None:
         return cached
     try:
-        from pypinyin import Style, lazy_pinyin
-        pys = lazy_pinyin(name, style=Style.NORMAL, errors="ignore")
-        abbr = "".join(lazy_pinyin(name, style=Style.FIRST_LETTER, errors="ignore"))
-        full = "".join(pys)
+        from pypinyin import Style, lazy_pinyin, pinyin
+        # 非汉字（*ST、TCL、300 等）原样保留：否则 *ST长投 会被拼成 "zt"，
+        # 丢掉前缀后「cd」反被当成缩写全等而排到最前
+        errors = lambda x: list(x)          # noqa: E731
+        full = "".join(lazy_pinyin(name, style=Style.NORMAL, errors=errors)).lower()
+        abbr = "".join(lazy_pinyin(name, style=Style.FIRST_LETTER, errors=errors)).lower()
+        # 多音字（长 zhang/chang、重 zhong/chong…）逐字展开首字母组合，封顶 32 组
+        combos = [""]
+        for opts in pinyin(name, style=Style.FIRST_LETTER, heteronym=True, errors=errors):
+            combos = [c + o.lower() for c in combos for o in dict.fromkeys(opts)][:32]
+        abbrs = sorted({a for a in combos if a} | {abbr})
     except Exception:  # pypinyin 缺失时优雅降级：仅代码/名称检索
-        abbr, full = "", ""
-    out = {"abbr": abbr.lower(), "full": full.lower()}
+        abbr, full, abbrs = "", "", []
+    out = {"abbr": abbr, "abbrs": abbrs, "full": full}
     _PY_CACHE[name] = out
     return out
 
@@ -760,10 +872,15 @@ def target_trend_snapshot(conn) -> Optional[dict]:
             return None
         rows = conn.execute(
             "SELECT symbol, data_date, trend_value, cross_date, cross_ago, above_days,"
-            " neg_run, neg_abs FROM target_trend").fetchall()
+            " neg_run, neg_abs, money_date, money_ago, money_cnt FROM target_trend").fetchall()
         return {r[0]: dict(trend_data_date=r[1], trend_value=r[2],
                            trend_cross_date=r[3], trend_cross_ago=r[4],
-                           trend_above_days=r[5], neg_run=r[6], neg_abs=r[7])
+                           trend_above_days=r[5],
+                           # 旧行（neg_run 补列前算的）为 NULL，统一成 0 才能过契约校验
+                           neg_run=r[6] or 0, neg_abs=r[7],
+                           money_date=r[8], money_ago=r[9],
+                           # 旧行（补列前算的）money_cnt 为 NULL，统一成 0 才能过契约校验
+                           money_cnt=r[10] or 0)
                 for r in rows}
     except Exception:
         return None
@@ -783,7 +900,7 @@ def compute_target_trends(conn):
     分块是硬约束——一次查全市场 5550×2000 根会让 DuckDB 撞内存上限 OOM
     （2026-11-02 线上实测，连带后续 quotes 请求一起 500）。"""
     from itertools import groupby
-    from ..target_trend import trend_histogram, trend_summary
+    from ..target_trend import qyjj_money_summary, trend_histogram, trend_summary
 
     with _TGT_TREND_LOCK:
         fingerprints = conn.execute("""
@@ -819,8 +936,11 @@ def compute_target_trends(conn):
                             _TGT_TREND_CACHE['rows'].pop(symbol, None)
                             continue
                         bars = [dict(high=r[2], low=r[3], close=r[4]) for r in rows]
-                        _TGT_TREND_CACHE['rows'][symbol] = trend_summary(
+                        summary = trend_summary(
                             [str(r[1]) for r in rows], trend_histogram(bars), calendar)
+                        summary.update(qyjj_money_summary(
+                            [str(r[1]) for r in rows], bars))
+                        _TGT_TREND_CACHE['rows'][symbol] = summary
                     for symbol in part:                    # 分块完成即记账，重跑不重复
                         _TGT_TREND_CACHE['keys'][symbol] = keys[symbol]
             finally:

@@ -204,7 +204,7 @@ def corepicks_message(conn, date: str | None = None) -> dict | None:
         by_pool.setdefault(str(it.get("pool") or "other"), []).append(it)
     pool_names = {"chase": "追涨池", "dip": "低吸池"}
     seg_names = {str(i): n for i, n in enumerate(
-        ("一段", "二段", "三段", "四段", "五段", "六段"), start=1)}
+        ("超跌", "反弹", "突破", "超涨", "回踩", "跌破"), start=1)}
     lines = []
     for pool, lst in by_pool.items():
         seg = " / ".join(
@@ -263,7 +263,8 @@ def liangdian_message(conn, slot: str = "") -> dict | None:
         hits.append({**row, **t})
     if not hits:
         return None
-    hits.sort(key=lambda x: (-(x.get("seg") or 0), -(x.get("pct_chg") or 0)))
+    hits.sort(key=lambda x: (-repo.market.SEG_RANK.get(x.get("seg") or 0, 0),
+                             -(x.get("pct_chg") or 0)))
 
     lines: list[tuple[str, str]] = [(
         f"命中 {len(hits)} 只 · 数据截至 {target_date}"

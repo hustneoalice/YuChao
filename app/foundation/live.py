@@ -176,6 +176,14 @@ def _tx_quotes(symbols: List[str]) -> Dict[str, Dict[str, Any]]:
             # 「1213715 / 2400万元 / 20.12元」自证即股，×100 会让末根量柱高 100 倍）
             star = tx_key.startswith("sh") and str(p[2] or "")[:3] in ("688", "689")
             vol = num(36)
+            nv = lambda k: float(p[k]) if k < len(p) and p[k] else None   # noqa: E731
+            # 五档盘口：9~18 买一~买五（价/量交替），19~28 卖一~卖五；量单位为手
+            bids = [{"price": nv(9 + 2 * k), "volume": int(nv(10 + 2 * k) or 0)}
+                    for k in range(5)]
+            asks = [{"price": nv(19 + 2 * k), "volume": int(nv(20 + 2 * k) or 0)}
+                    for k in range(5)]
+            bids = [x for x in bids if x["price"] and x["price"] > 0]
+            asks = [x for x in asks if x["price"] and x["price"] > 0]
             out[sym] = {
                 "name": p[1], "price": num(3), "prev_close": num(4),
                 "open": num(5), "high": num(33), "low": num(34),
@@ -189,6 +197,17 @@ def _tx_quotes(symbols: List[str]) -> Dict[str, Dict[str, Any]]:
                 "circ_mv_yi": num(44) if ext else None,    # 流通市值（亿）
                 "total_mv_yi": num(45) if ext else None,   # 总市值（亿）
                 "pb": num(46) if ext else None,            # 市净率
+                # 盘口扩展（仅个股；指数五档为空）
+                "bids": bids, "asks": asks,
+                "avg_price": nv(51) if ext else None,      # 均价
+                "limit_up": nv(47) if ext else None,
+                "limit_down": nv(48) if ext else None,
+                "vol_ratio": nv(49) if ext else None,      # 量比
+                "outer_vol": int(nv(7)) if ext and nv(7) is not None else None,   # 外盘（手）
+                "inner_vol": int(nv(8)) if ext and nv(8) is not None else None,   # 内盘（手）
+                "amplitude": nv(43) if ext else None,
+                "board_time": (raw_ts[8:10] + ":" + raw_ts[10:12] + ":" + raw_ts[12:14]
+                               if len(raw_ts) >= 14 and raw_ts[8:14].isdigit() else None),
             }
     return out
 
@@ -212,6 +231,108 @@ def realtime_quote(symbol: str) -> Optional[Dict[str, Any]]:
         "qdate": d.get("qdate"),                             # 行情归属日（腾讯 p[30]）
         "ts": time.strftime("%Y-%m-%d %H:%M"),
     }
+
+
+@_cached("live:depth", 3)
+def order_book(symbol: str) -> Optional[Dict[str, Any]]:
+    """五档盘口（腾讯 qt，3s 缓存）：买卖五档 + 委比/委差 + 内外盘/均价/涨跌停。
+
+    指数、停牌或无五档的标的返回 applicable=False（前端降级为空态）。"""
+    d = _tx_quotes([symbol]).get(symbol)
+    if not d:
+        return None
+    bids = d.get("bids") or []
+    asks = d.get("asks") or []
+    bid_total = int(sum(x["volume"] for x in bids))
+    ask_total = int(sum(x["volume"] for x in asks))
+    denom = bid_total + ask_total
+    for x in bids + asks:
+        x["amount"] = round(x["price"] * x["volume"] * 100, 2)   # 手 → 股
+    return {
+        "symbol": symbol, "name": d.get("name"),
+        "applicable": bool(bids and asks),
+        "time": d.get("board_time"),
+        "price": d.get("price"), "prev_close": d.get("prev_close"),
+        "open": d.get("open"), "high": d.get("high"), "low": d.get("low"),
+        "chg": d.get("chg"), "pct": d.get("pct"),
+        "avg_price": d.get("avg_price"),
+        "limit_up": d.get("limit_up"), "limit_down": d.get("limit_down"),
+        "bids": bids, "asks": asks,
+        "bid_total": bid_total, "ask_total": ask_total,
+        "bid_ask_diff": bid_total - ask_total,
+        "bid_ask_ratio": round((bid_total - ask_total) / denom * 100, 2) if denom else None,
+        "outer_vol": d.get("outer_vol"), "inner_vol": d.get("inner_vol"),
+        "volume": d.get("volume"), "amount": d.get("amount"),
+        "turnover_rate": d.get("turnover"), "vol_ratio": d.get("vol_ratio"),
+        "amplitude": d.get("amplitude"),
+    }
+
+
+_EM_DETAILS = "https://push2.eastmoney.com/api/qt/stock/details/get"
+
+
+@_cached("live:trades", 5)
+def trades(symbol: str, limit: int = 20) -> List[Dict[str, Any]]:
+    """逐笔成交明细（东财 details，5s 缓存）：时间 / 价 / 手数 / 买卖方向。
+
+    返回按时间倒序（最新在前）；指数/外盘/接口失败返回空列表。"""
+    txs = _tx_symbol(symbol)
+    code = pure_of(symbol)
+    if not code.isdigit():
+        return []
+    secid = f"{'1' if txs.startswith('sh') else '0'}.{code}"
+    try:
+        r = _em_get(_EM_DETAILS, params={
+            "secid": secid,
+            "fields1": "f1,f2,f3,f4",
+            "fields2": "f51,f52,f53,f54,f55",
+            "pos": str(-max(1, min(limit, 100))),
+        })
+        data = (r.json() or {}).get("data") or {}
+    except Exception:                                   # noqa: BLE001
+        return []
+    out: List[Dict[str, Any]] = []
+    for line in reversed(data.get("details") or []):    # 东财返回时间正序 → 倒序
+        parts = str(line).split(",")
+        if len(parts) < 3:
+            continue
+        try:
+            out.append({
+                "time": parts[0], "price": float(parts[1]), "volume": int(float(parts[2])),
+                "direction": int(parts[4]) if len(parts) > 4 and parts[4].lstrip("-").isdigit() else None,
+            })
+        except (TypeError, ValueError):
+            continue
+    return out
+
+
+_EM_F10 = "https://datacenter-web.eastmoney.com/api/data/v1/get"
+
+
+@_cached("live:profile", 600)
+def profile(symbol: str) -> Optional[Dict[str, Any]]:
+    """概念标签（东财 F10 核心题材-所属板块，10 分钟缓存）。
+
+    走 datacenter-web（push2 在部分服务器 IP 会被掐连接，datacenter 稳定可达）；
+    指数、外盘或接口失败返回 None。行业仍以 stock_universe.industry 为准。"""
+    code = pure_of(symbol)
+    if not code.isdigit():
+        return None
+    try:
+        r = _em_get(_EM_F10, params={
+            "reportName": "RPT_F10_CORETHEME_BOARDTYPE",
+            "columns": "SECUCODE,SECURITY_CODE,BOARD_NAME,BOARD_CODE",
+            "filter": f'(SECURITY_CODE="{code}")',
+            "pageNumber": 1, "pageSize": 60,
+            "source": "HSF10", "client": "PC",
+        }, referer="https://emweb.securities.eastmoney.com/")
+        data = ((r.json() or {}).get("result") or {}).get("data") or []
+    except Exception:                                   # noqa: BLE001
+        return None
+    names = [str(d.get("BOARD_NAME")).strip() for d in data if d.get("BOARD_NAME")]
+    if not names:
+        return None
+    return {"concept": ",".join(names)}
 
 
 _RTS_CACHE: Dict[str, tuple[float, Any]] = {}

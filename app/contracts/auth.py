@@ -68,12 +68,20 @@ class PrefsOut(BaseModel):
     prefs: dict
 
 
+class WatchNote(BaseModel):
+    """自选标注：按日期记录操作策略 / 提醒，一只股票可有多条。"""
+    id: str = Field(..., max_length=40)
+    date: str = Field("", max_length=10)     # YYYY-MM-DD
+    text: str = Field(..., max_length=500)
+
+
 class WatchItem(BaseModel):
     symbol: str = Field(..., max_length=16)
     name: str = ""
     group: str = "默认"                      # 兼容旧字段：取 groups 首个
     groups: list[str] = Field(default_factory=list)   # 多分组（一只股票可属于多个组）
     ts: Optional[str] = None                 # ISO 时间（None 则服务端补）
+    notes: list[WatchNote] = Field(default_factory=list)  # 标注（多条）
 
 
 class WatchlistIn(BaseModel):

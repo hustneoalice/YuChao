@@ -7,13 +7,15 @@ from fastapi import APIRouter, Depends, Query
 from fastapi.responses import StreamingResponse
 
 from ...contracts.common import Adjust, Page, WithParam
-from ...contracts.market import (FundFlowRange, Kline, Quote, QuotesOut, SearchHit,
-                                 TargetCondItem, TargetScanOut)
-from ...errors import not_found, vip_required
+from ...contracts.market import (Depth, FundFlowRange, Kline, Quote, QuotesOut, SearchHit,
+                                 TargetCondItem, TargetScanOut, Trades)
+from ...errors import not_found, vip_required, invalid_param, data_not_ready
+from ...contracts.market import ShareholdersOut
+from ...foundation import shareholders
 from ...foundation import repo, screening
 from ...foundation.db import get_conn
 from ...foundation import live
-from ...foundation.symbol import index_form, normalize_symbol
+from ...foundation.symbol import GLOBAL_INDICES, INDEX_NAMES, index_form, normalize_symbol
 from ...updater.collectors.http import _UA, client as tx_client, get_json_hosts, tx_symbol
 from pydantic import TypeAdapter
 
@@ -428,6 +430,15 @@ def quote(symbol: str, conn=Depends(get_conn)):
             _apply_rt(q, rt)
     except Exception:
         pass
+    try:                                    # 行业/概念：东财板块标签（10min 缓存）
+        pf = live.profile(symbol)
+        if pf:
+            if pf.get("industry"):
+                q["industry"] = pf["industry"]
+            if pf.get("concept"):
+                q["concept"] = pf["concept"]
+    except Exception:
+        pass
     return q
 
 
@@ -456,6 +467,21 @@ def quotes(symbols: str = Query(
     return TypeAdapter(QuotesOut).validate_python({"items": items, "missing": missing})
 
 
+@router.get("/market/depth", response_model=Depth, summary="五档盘口（腾讯实时，3s 缓存）")
+def depth(symbol: str = Query(description="6 位代码，兼容 sh.600519 / 600519.SH 形态")):
+    """买卖五档 + 委比/委差 + 内外盘/均价/涨跌停；指数与停牌返回 applicable=False。"""
+    d = live.order_book(symbol)
+    if not d:
+        return Depth(symbol=symbol, applicable=False)
+    return Depth(**d)
+
+
+@router.get("/market/trades", response_model=Trades, summary="逐笔成交明细（东财 details，5s 缓存）")
+def trades(symbol: str = Query(description="6 位代码，兼容 sh.600519 形态"),
+           limit: int = Query(default=20, ge=1, le=100)):
+    return Trades(symbol=symbol, items=live.trades(symbol, limit))
+
+
 @router.get("/market/search", response_model=Page[SearchHit], summary="代码/名称搜索（个股+基金+指数+板块）")
 def search(
     q: str = Query(min_length=1, max_length=20),
@@ -465,21 +491,62 @@ def search(
 ):
     want = {k.strip() for k in kinds.split(",") if k.strip()} if kinds else None
     hits = repo.market.search(conn, q, limit, want)
-    # 新股兜底：stock_universe 是慢变量（当天 16:20 估值任务才入池），本地命中
-    # 不足时补腾讯联想，避免刚上市的票搜不到；命中重复的以本地行为准。
-    if len(hits) < limit and (want is None or "stock" in want):
+    qs = q.strip()
+    qu, ql = qs.upper(), qs.lower()
+    alpha = qs.isascii() and qs.isalpha()          # 纯字母 → 拼音查询
+    allow_stock = want is None or "stock" in want
+    # 腾讯联想兜底：
+    #   · 纯字母：联想源自带多音字词典（「cd」能给出长电科技，pypinyin 会把「长」读成
+    #     zhang 而漏掉），因此字母查询以联想结果优先，本地字面命中（ST/TCL 等）仍在前；
+    #   · 其它：仅在本地面命中不足时补新股（stock_universe 16:20 才入池）。
+    if allow_stock and (alpha or len(hits) < limit):
         try:
             from ...updater.collectors import sources as up_sources   # 延迟导入，避免 API 启动耦合采集层
-            remote = up_sources.search_suggest(q, min(limit - len(hits), 8))
+            remote = up_sources.search_suggest(q, limit if alpha else min(limit - len(hits), 8))
         except Exception:
             remote = []
-        have = {h["symbol"] for h in hits}
-        for r in remote:
-            if r["symbol"] in have:
-                continue
-            hits.append({"symbol": r["symbol"], "name": r["name"],
-                         "market": r["market"].lower(), "industry": None,
-                         "status": None, "kind": "stock", "sub": None})
+        remote_rows = [{"symbol": r["symbol"], "name": r["name"],
+                        "market": r["market"].lower(), "industry": None,
+                        "status": None, "kind": "stock", "sub": None}
+                       for r in remote]
+        # 腾讯口径拼音缩写（长电科技=cdkj、辽宁成大=lncd），排序时用它判前后缀
+        remote_py = {r["symbol"]: (r.get("py") or "") for r in remote}
+
+        def literal(h: dict) -> bool:              # 名称/代码字面包含（非拼音推断）
+            return (qs.lower() in (h.get("name") or "").lower()
+                    or qs.upper() in (h.get("symbol") or "").upper())
+
+        head = [h for h in hits if literal(h)] if alpha else []
+        tail = [h for h in hits if h not in head]
+        merged = list(head)
+        have = {h["symbol"] for h in merged}
+        for r in remote_rows:
+            if r["symbol"] not in have and len(merged) < limit:
+                merged.append(r)
+                have.add(r["symbol"])
+        for h in tail:
+            if len(merged) >= limit:
+                break
+            if h["symbol"] not in have:
+                merged.append(h)
+                have.add(h["symbol"])
+
+        if alpha:
+            # 按匹配度重排：名称/代码字面 > 拼音缩写全等 > 前缀 > 包含（同档个股优先），
+            # 同级保持联想原序（热度）。避免「辽宁成大 lncd」压在「长电科技 cdkj」前面。
+            def rank(h: dict) -> tuple[int, int, int]:
+                name = h.get("name") or ""
+                sym = (h.get("symbol") or "").upper()
+                ko = 0 if h.get("kind") == "stock" else 1
+                if sym == qu or name.lower() == ql:
+                    return (0, ko, 0)
+                if sym.startswith(qu) or name.lower().startswith(ql):
+                    return (1, ko, 0)
+                g = repo.market.abbr_grade(name, ql, remote_py.get(h["symbol"]))
+                return (5, ko, 0) if g >= 9 else (2, ko, g)
+
+            merged.sort(key=rank)
+        hits = merged
     return Page(items=[SearchHit(**h) for h in hits], total=len(hits))
 
 
@@ -499,6 +566,22 @@ def news(symbol: str, limit: int = Query(default=12, ge=1, le=30)):
         return {"items": live.stock_news(symbol, limit)}
     except Exception:
         return {"items": []}
+
+
+@router.get("/market/shareholders", response_model=ShareholdersOut,
+            summary="十大流通股东（季度披露，按股数比较，1h缓存）")
+def stock_shareholders(symbol: str, report_date: Optional[date] = None):
+    if symbol.strip().upper() in INDEX_NAMES or symbol in {item[0] for item in GLOBAL_INDICES}:
+        return ShareholdersOut(symbol=symbol)
+    code = normalize_symbol(symbol)
+    if len(code) != 6 or not code.isascii() or not code.isdigit():
+        raise invalid_param("请输入六位股票代码")
+    try:
+        return shareholders.stock_shareholders(code, report_date.isoformat() if report_date else None)
+    except shareholders.ReportUnavailable as exc:
+        raise invalid_param(str(exc)) from exc
+    except Exception as exc:
+        raise data_not_ready("股东数据加载失败，请稍后重试") from exc
 
 
 @router.get("/market/reports", summary="个股研报（东财 reportapi，2h 缓存）")
@@ -543,14 +626,23 @@ def targets(conds: str = Query(default="vol,short,mid,up20",
 
     所有勾选条件同时满足（AND 叠加）；未勾选的不参与判定。
     flag 条件看布尔字段，value 条件按阈值比较（op 默认 >=），trend 走
-    trend_matches 参数化判定；命中列表按六分段强势在前。"""
+    trend_matches 参数化判定；命中列表按六分段操作优先级（突破/回踩在前）。"""
+    # 计算前置守卫：日线落后超过 1 个交易日就不算，避免旧数据被当成实时榜单。
+    from ...foundation.repo.freshness import fresh_gate
+    gate = fresh_gate(conn, "ohlcv")
+    if not gate["ok"]:
+        return TargetScanOut(items=[], total_hits=0, scanned=0, values={},
+                             as_of=gate["data_date"], stale=True,
+                             data_date=gate["data_date"], lag=gate["lag"],
+                             message=gate["message"])
     items, meta, vals, provisional = _target_scan(
         conn, conds, values, trend_mode, trend_recent,
         trend_still_above, trend_above_days)
     return TargetScanOut(items=items[:limit], total_hits=len(items), values=vals,
                          provisional=provisional,
                          scanned=meta["scanned"], as_of=meta["as_of"],
-                         computed_at=meta.get("computed_at", ""))
+                         computed_at=meta.get("computed_at", ""),
+                         data_date=gate["data_date"], lag=gate["lag"])
 
 
 def _target_scan(conn, conds: str, values: Optional[str],
@@ -564,28 +656,34 @@ def _target_scan(conn, conds: str, values: Optional[str],
     rows, meta = repo.market.stock_targets_universe(conn)
     trend_as_of = meta.get("trend_as_of") or meta["as_of"]
     provisional = bool(meta.get("provisional"))
-    # 负柱收敛 / 距零轴也依赖 STICKV 预计算序列，启用时同样拼接趋势字段
-    if screening.needs_trend(want):
-        trends = repo.market.stock_target_trends(conn)
-        rows = [{**row, **trends.get(row['symbol'], {}),
-                 "trend_provisional": provisional}
-                for row in rows]
+    # 趋势字段常拼：负柱收敛/距零轴依赖 STICKV，钱袋子列（money_ago/money_cnt）
+    # 无论是否勾选条件都要展示，所以这里不做条件判断（target_trend 行数仅几千，join 开销可忽略）
+    trends = repo.market.stock_target_trends(conn) or {}
+    rows = [{**row, **trends.get(row['symbol'], {}),
+             "trend_provisional": provisional}
+            for row in rows]
 
     def trend_hit(t: dict) -> bool:
         return (t.get('trend_data_date') == trend_as_of and
                 trend_matches(t, trend_mode, trend_recent, trend_still_above, trend_above_days))
 
     items = [t for t in rows if screening.matches(t, want, vals, trend_hit(t) if "trend" in want else None)]
+    seg_rank = lambda t: repo.market.SEG_RANK.get(t.get('seg') or 0, 0)
     if "trend" in want:
         items.sort(key=lambda t:
-            ((t.get('trend_cross_ago') if t.get('trend_cross_ago') is not None else 100000), -t['seg']))
+            ((t.get('trend_cross_ago') if t.get('trend_cross_ago') is not None else 100000), -seg_rank(t)))
+    elif "money" in want:
+        # 钱袋榜：越新鲜越靠前（距今天数升序），同日出现再按出现次数/操作优先级
+        items.sort(key=lambda t: (
+            t.get('money_ago') if t.get('money_ago') is not None else 1e9,
+            -(t.get('money_cnt') or 0), -seg_rank(t)))
     elif "negshrink" in want or "nearzero" in want:
-        # 负柱收敛榜：越贴近零轴越靠前（neg_abs 升序），同幅度再按收敛天数/强势段
+        # 负柱收敛榜：越贴近零轴越靠前（neg_abs 升序），同幅度再按收敛天数/操作优先级
         items.sort(key=lambda t: (
             t.get('neg_abs') if t.get('neg_abs') is not None else 1e9,
-            -(t.get('neg_run') or 0), -t['seg']))
+            -(t.get('neg_run') or 0), -seg_rank(t)))
     else:
-        items.sort(key=lambda t: (-t['seg'], -(t['vol_ratio'] or 0)))
+        items.sort(key=lambda t: (-seg_rank(t), -(t.get('vol_ratio') or 0)))
     return items, meta, vals, provisional
 
 
@@ -617,6 +715,13 @@ def targets_export(conds: str = Query(default="vol,short,mid,up20"),
     import io
     from urllib.parse import quote
 
+    # 与页面同一道计算前置守卫：数据断更时导出也拒绝，避免导出一份旧榜单。
+    from ...foundation.repo.freshness import fresh_gate
+    gate = fresh_gate(conn, "ohlcv")
+    if not gate["ok"]:
+        raise data_not_ready(gate["message"], {"data_date": gate["data_date"],
+                                               "lag": gate["lag"]})
+
     items, meta, _vals, _provisional = _target_scan(
         conn, conds, values, trend_mode, trend_recent,
         trend_still_above, trend_above_days)
@@ -631,6 +736,8 @@ def targets_export(conds: str = Query(default="vol,short,mid,up20"),
         ("short_orange", "短线趋势橙", 10, None),
         ("mid_orange", "中线趋势橙", 10, None),
         ("limit_up_cnt", "20日涨停次数", 11, "0"),
+        ("money_ago", "钱袋距今天数", 12, None),
+        ("money_cnt", "20日钱袋次数", 11, "0"),
         ("seg", "六分段", 20, None),
         ("state", "短线状态", 13, None),
     ]
@@ -659,6 +766,9 @@ def targets_export(conds: str = Query(default="vol,short,mid,up20"),
         if key == "above_days":
             n = t.get("trend_above_days")
             return "" if n is None else n
+        if key == "money_ago":
+            n = t.get("money_ago")
+            return "" if n is None else ("当日" if n == 0 else f"{n}日前")
         return t.get(key)
 
     wb = Workbook()
@@ -739,7 +849,7 @@ def snapshot_one(symbol: str = Query(description="个股裸码 600519 或指数�
 
 from ...contracts.market import ZyBlockMembersOut, ZyBlocksOut  # noqa: E402
 
-_ZY_TYPE_NAMES = {1: "地域", 2: "概念", 4: "行业", 8: "风格", 9: "题材"}
+_ZY_TYPE_NAMES = {1: "地域", 2: "概念", 4: "行业", 6: "雷达", 8: "风格", 9: "题材"}
 
 
 @router.get("/market/zy_blocks", response_model=ZyBlocksOut,
@@ -747,11 +857,11 @@ _ZY_TYPE_NAMES = {1: "地域", 2: "概念", 4: "行业", 8: "风格", 9: "题材
 def zy_blocks(type_code: int = Query(default=2),
               sort: str = Query(default="-avg_change"),
               page: int = Query(default=1, ge=1), size: int = Query(default=50, ge=1, le=200),
-              q: Optional[str] = None, conn=Depends(get_conn)):
+              q: Optional[str] = None, parent_code: Optional[str] = None, conn=Depends(get_conn)):
     if type_code not in _ZY_TYPE_NAMES:
-        raise not_found("type_code 仅支持 1/2/4/8/9", {"type_code": type_code})
+        raise not_found("type_code 仅支持 1/2/4/6/8/9", {"type_code": type_code})
     rows, total = repo.zyblock.list_blocks(conn, type_code, sort=sort,
-                                           page=page, size=size, q=q)
+                                           page=page, size=size, q=q, parent_code=parent_code)
     day = conn.execute(
         "SELECT MAX(trade_date) FROM market_snapshot").fetchone()[0]
     return ZyBlocksOut(items=rows, total=total, type_code=type_code,

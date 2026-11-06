@@ -137,7 +137,8 @@ def search_suggest(q: str, limit: int = 8) -> List[Dict[str, str]]:
             nm = json.loads(f'"{name}"')
         except Exception:
             nm = name
-        out.append({"symbol": code, "name": nm, "market": mkt.upper()})
+        # py：腾讯自带的市场口径拼音缩写（长电科技 = cdkj），供搜索排序复用
+        out.append({"symbol": code, "name": nm, "market": mkt.upper(), "py": _py.lower()})
         if len(out) >= limit:
             break
     return out
@@ -342,7 +343,7 @@ def fetch_qt_batch(codes: List[str], progress=None, cancel=None) -> Dict[str, Tu
     return out
 
 
-def fetch_qt_snapshot(codes: List[str], progress=None, cancel=None) -> Dict[str, Tuple]:
+def fetch_qt_snapshot(codes: List[str], progress=None, cancel=None, expected_date=None) -> Dict[str, Tuple]:
     """腾讯 qt 全字段快照 → {sym: 快照元组}（全景大页 market_snapshot 专用）。
 
     字段口径（qt payload 下标实测）：[3]现价 [4]昨收 [5]今开 [6]成交量(手)
@@ -370,6 +371,11 @@ def fetch_qt_snapshot(codes: List[str], progress=None, cancel=None) -> Dict[str,
             p = payload                        # 平安银行 000001.SZ 裸码冲突必须区分
             if len(p) <= 49:
                 continue
+            if expected_date is not None:
+                timestamp = p[30]
+                quote_day = f"{timestamp[:4]}-{timestamp[4:6]}-{timestamp[6:8]}" if len(timestamp)>=8 and timestamp[:8].isdigit() else None
+                if quote_day != str(expected_date):
+                    continue
             price = _num(p[3])
             if not price:
                 continue

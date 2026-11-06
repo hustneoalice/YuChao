@@ -72,3 +72,51 @@ def trend_matches(row, mode, recent, still_above, above_days):
         return positive and row['trend_above_days'] >= above_days
     age = row.get('trend_cross_ago')
     return age is not None and age < recent and (not still_above or positive)
+
+
+# -- 钱眼掘金「钱袋子」（与前端 qyjj.ts 同口径：收盘 ZigZag 6% 反转） ----------
+_MONEY_PCT = 0.06
+_MONEY_MIN_BARS = 30
+_MONEY_WINDOW = 20
+
+
+def money_indexes(bars):
+    """钱袋信号所在下标：低点后反弹 6% 确认，信号落在拐点后一根（原模型 1 日滞后）。"""
+    n = len(bars)
+    if n < _MONEY_MIN_BARS:
+        return []
+    close = [b['close'] for b in bars]
+    out: set[int] = set()
+    direction = -1                 # 先找底部，再找顶部，严格交替
+    ext = 0
+    ext_val = close[0]
+    for i in range(1, n):
+        c = close[i]
+        if direction == -1:
+            if c < ext_val:
+                ext, ext_val = i, c
+            elif c >= ext_val * (1 + _MONEY_PCT):
+                at = ext + 1
+                if at < n:
+                    out.add(at)
+                direction, ext, ext_val = 1, i, c
+        elif c > ext_val:
+            ext, ext_val = i, c
+        elif c <= ext_val * (1 - _MONEY_PCT):
+            direction, ext, ext_val = -1, i, c
+    return sorted(out)
+
+
+def qyjj_money_summary(dates, bars, window=_MONEY_WINDOW):
+    """近 window 个交易日的钱袋：最近一次日期 / 距今天数 / 出现次数。
+
+    钱袋是「低点确认」的早期信号，目标页按距今天数排序比按强度更实用。"""
+    n = len(bars)
+    recent = [i for i in money_indexes(bars) if i >= n - window]
+    if not recent:
+        return dict(money_date=None, money_ago=None, money_cnt=0)
+    last = recent[-1]
+    return dict(money_date=dates[last],
+                money_ago=n - 1 - last,
+                money_cnt=len(recent))
+

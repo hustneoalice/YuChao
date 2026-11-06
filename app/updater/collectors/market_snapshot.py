@@ -10,7 +10,8 @@ import logging
 import time
 from datetime import datetime, time as dtime
 
-from ..util import expected_asof
+from ..util import expected_asof, now_cst
+from ..trading_calendar import is_trading_day
 from ..writer import writer
 from ...foundation.symbol import INDEX_CATALOG
 from . import sources
@@ -26,6 +27,13 @@ def _in_trading_hours(now: datetime) -> bool:
     return dtime(9, 25) <= now.time() <= dtime(15, 5)
 
 
+def snapshot_day(now: datetime) -> str:
+    # 盘中行情属于本交易日，不能使用“最近已收盘日”给当天报价打昨天的标签。
+    if is_trading_day(now) and now.time() >= dtime(9,25):
+        return now.date().isoformat()
+    return expected_asof(now)
+
+
 def update_market_snapshot(progress=None, ctx=None) -> dict:
     start = time.time()
     cancel = (ctx or {}).get("cancel_check")
@@ -34,8 +42,8 @@ def update_market_snapshot(progress=None, ctx=None) -> dict:
     result: dict = {"task": "market_snapshot", "status": "running", "rows": 0}
     progress = progress or (lambda **k: None)
     try:
-        now = datetime.now()
-        day = expected_asof()
+        now = now_cst()
+        day = snapshot_day(now)
         if not _in_trading_hours(now):
             # 收盘后当日已有数据 → 幂等秒跳；没有（节假日自愈场景）也允许补一轮
             conn0 = writer.conn()
@@ -60,7 +68,7 @@ def update_market_snapshot(progress=None, ctx=None) -> dict:
                  message=f"{day} 行情 {len(stock_map)} 只股票 + {len(fund_map)} 只基金 + "
                          f"{len(indexes)} 个指数")
         snap = sources.fetch_qt_snapshot(stocks + indexes,
-                                         progress=progress, cancel=cancel)
+                                         progress=progress, cancel=cancel, expected_date=day)
         if len(snap) < _MIN_SNAPSHOT_ROWS:
             raise RuntimeError(f"只取到 {len(snap)} 条行情（少于 {_MIN_SNAPSHOT_ROWS}，"
                                f"可能被数据源限流），本次不写入")

@@ -3,7 +3,8 @@
    供行情页工具栏 star、核心标明细弹窗等所有「加自选」入口复用。
    变更走 store（emit）→ 左侧自选页、自选股卡片自动同步。 */
 import { esc } from "./fmt";
-import { addWatch, addWatchGroup, allWatchGroups, getState, isWatched, removeWatch, setWatchGroups } from "./store";
+import { ic } from "./icons";
+import { addWatch, addWatchGroup, allWatchGroups, getState, isWatched, removeWatch, removeWatchGroup, renameWatchGroup, setWatchGroups } from "./store";
 import { closeModals, openModal, toast } from "./ui";
 
 let cur: { symbol: string; name: string } | null = null;
@@ -44,6 +45,53 @@ export function openWatchPanel(symbol: string, name: string): void {
   openModal("modal-watch");
 }
 
+/** 分组管理面板（modal-groups）：改名 / 删除 / 新建（与「一只股票多个分组」分开） */
+function drawGroupPanel(): void {
+  const groups = allWatchGroups();
+  const wl = getState().watchlist;
+  document.getElementById("gm-count")!.textContent = `${groups.length} 个分组`;
+  document.getElementById("gm-list")!.innerHTML = groups.map((g) => {
+    const n = wl.filter((w) => w.groups.includes(g)).length;
+    const fixed = g === "默认";
+    return `<div class="gm-row" data-g="${esc(g)}">
+      <input class="gm-in" value="${esc(g)}" maxlength="16" ${fixed ? "readonly" : ""} title="${fixed ? "默认分组不可改名" : "改名后回车或点 ✓ 保存"}">
+      <span class="gm-n num">${n} 只</span>
+      ${fixed ? `<span class="gm-lock" title="默认分组不可删除">${ic("lock", 12)}</span>` :
+        `<button class="gm-btn" data-gm-save title="保存改名">${ic("check", 12)}</button>
+         <button class="gm-btn danger" data-gm-del title="删除分组">${ic("trash", 12)}</button>`}
+    </div>`;
+  }).join("");
+  document.querySelectorAll<HTMLElement>("#gm-list .gm-row").forEach((row) => {
+    const g = row.dataset.g!;
+    if (g === "默认") return;
+    const inp = row.querySelector<HTMLInputElement>(".gm-in")!;
+    const save = (): void => {
+      const to = inp.value.trim();
+      if (!to) { toast("分组名不能为空"); inp.value = g; return; }
+      if (to === g) return;
+      if (!renameWatchGroup(g, to)) { toast(`分组「${to}」已存在`); inp.value = g; inp.select(); return; }
+      toast(`分组已改名为「${to}」`);
+      drawGroupPanel();
+    };
+    row.querySelector("[data-gm-save]")!.addEventListener("click", save);
+    inp.addEventListener("keydown", (e) => { if (e.key === "Enter") { e.preventDefault(); save(); } });
+    row.querySelector("[data-gm-del]")!.addEventListener("click", () => {
+      const n = wl.filter((w) => w.groups.includes(g)).length;
+      if (!removeWatchGroup(g)) return;
+      toast(n ? `已删除「${g}」· ${n} 只股票回到默认` : `已删除分组「${g}」`);
+      drawGroupPanel();
+    });
+  });
+}
+
+/** 打开分组管理面板（右卡分组栏 / 自选页均复用） */
+export function openGroupPanel(): void {
+  (document.getElementById("gm-new") as HTMLInputElement).value = "";
+  drawGroupPanel();
+  closeModals();
+  openModal("modal-groups");
+}
+
 export function initWatchPanel(): void {
   const ok = document.getElementById("wm-ok")!;
   ok.addEventListener("click", () => {
@@ -70,5 +118,20 @@ export function initWatchPanel(): void {
   });
   (document.getElementById("wm-new") as HTMLInputElement).addEventListener("keydown", (e) => {
     if (e.key === "Enter") ok.click();
+  });
+
+  // 分组管理：新建（改名 / 删除在 drawGroupPanel 内逐行绑定）
+  const gmAdd = document.getElementById("gm-add") as HTMLElement;
+  const gmNew = document.getElementById("gm-new") as HTMLInputElement;
+  gmAdd.addEventListener("click", () => {
+    const g = gmNew.value.trim();
+    if (!g) { gmNew.focus(); return; }
+    if (!addWatchGroup(g)) { toast(`分组「${g}」已存在`); gmNew.select(); return; }
+    gmNew.value = "";
+    toast(`已新建分组「${g}」`);
+    drawGroupPanel();
+  });
+  gmNew.addEventListener("keydown", (e) => {
+    if (e.key === "Enter") { e.preventDefault(); gmAdd.click(); }
   });
 }

@@ -53,6 +53,7 @@ CREATE TABLE IF NOT EXISTS watchlists (
     group_id TEXT,                           -- 分组名（前端以名字管理分组）
     name TEXT,                               -- 标的名称（F04 云同步）
     note TEXT,
+    notes_json TEXT NOT NULL DEFAULT '[]',   -- 标注：[{id,date,text}] 多条，按日期
     created_at TEXT NOT NULL,
     PRIMARY KEY (user_id, symbol)
 );
@@ -92,6 +93,7 @@ def _migrate(conn: sqlite3.Connection) -> None:
     """旧库补列（幂等）：CREATE TABLE IF NOT EXISTS 不会改已有表结构。"""
     for stmt in (
         "ALTER TABLE watchlists ADD COLUMN name TEXT",
+        "ALTER TABLE watchlists ADD COLUMN notes_json TEXT NOT NULL DEFAULT '[]'",
         "ALTER TABLE card_config ADD COLUMN mode TEXT NOT NULL DEFAULT 'simple'",
     ):
         try:

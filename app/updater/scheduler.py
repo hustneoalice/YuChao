@@ -1,7 +1,7 @@
 """APScheduler 调度链（1.0 services/scheduler.py 原样迁移，时区北京时间）。
 
 15:35 板块 → 16:00 行情 → 16:20 估值 → 16:30 资金流 → 16:50 PE分位
-→ 17:00 K线 → 17:30 财务；周六 09:00 复权因子；交易日 21:00 核心标。
+→ 17:00 K线 → 17:30 财务；周六 09:00 复权因子；交易日 20:00 核心标。
 
 顺序有讲究：估值(16:20) 必须先于 PE分位(16:50)——分位从当日截面算；
 K线(17:00) 在估值后，前端图表与估值同日可见。
@@ -37,6 +37,8 @@ def build_scheduler(orchestrator, control: ControlRequests | None = None):
     sched.add_job(_minute_tick, "cron", day_of_week="mon-fri", minute="*",
                   args=[orchestrator], id="cron:target_push",
                   replace_existing=True)
+    sched.add_job(_retry_corepicks, "cron", day_of_week="mon-fri", hour="20-23", minute="*/10",
+                  args=[orchestrator], id="cron:corepicks_retry", replace_existing=True)
     return sched
 
 
@@ -46,7 +48,7 @@ def _cron_submit(orchestrator, kind: str):
         # 采了只会给快照盖幽灵日期——1.0 2026-09-25 中秋实测教训）
         orchestrator.log_event(f"非交易日，跳过 {kind}", "info", kind=kind)
         return
-    _submit(orchestrator, kind)
+    _submit(orchestrator, kind, params={"rotation_trigger": "auto"} if kind == "corepicks" else None)
 
 
 def _cron_submit_weekly(orchestrator, kind: str):
@@ -77,3 +79,22 @@ def _submit(orchestrator, kind: str, params: dict | None = None):
         logger.info("[Scheduler] %s 已在队列/执行中，cron 触发去重", kind)
     else:
         logger.warning("[Scheduler] %s 触发失败: %s", kind, r.get("message"))
+
+
+def _retry_corepicks(orchestrator):
+    """20点后等待数据的任务每10分钟重试，成功后不重复。"""
+    now = now_cst()
+    if not is_trading_day(now):
+        return
+    from ..foundation.db import open_conn
+    from ..foundation.repo.core_rotation import read_rotation
+    conn = open_conn()
+    try:
+        data = read_rotation(conn)
+    finally:
+        conn.close()
+    latest = data['latest_attempt']
+    day = now.strftime('%Y-%m-%d')
+    if latest and latest['date'] == day and latest['status'] != 'waiting':
+        return
+    _submit(orchestrator, 'corepicks', params={'rotation_trigger':'auto'})

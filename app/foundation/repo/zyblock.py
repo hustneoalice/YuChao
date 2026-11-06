@@ -21,15 +21,16 @@ _BLOCK_SORT = {
 _TOP_LEVEL = "COALESCE(NULLIF(NULLIF(b.parent_code, ''), '0'), '') = ''"
 _MEMBER_TREE = (
     "WITH mm AS ("
-    "  SELECT DISTINCT"
-    "    COALESCE(NULLIF(NULLIF(c.parent_code, ''), '0'), c.block_code) AS root_code,"
-    "    mem.symbol"
+    "  SELECT block_code AS root_code, symbol FROM zy_block_member"
+    "  UNION SELECT c.parent_code AS root_code, mem.symbol"
     "  FROM zy_block c JOIN zy_block_member mem ON mem.block_code = c.block_code"
+    "  WHERE COALESCE(c.parent_code, '') NOT IN ('', '0')"
     ")")
 
 
 def list_blocks(conn, type_code: int, sort: str = "-avg_change",
-                page: int = 1, size: int = 50, q: Optional[str] = None):
+                page: int = 1, size: int = 50, q: Optional[str] = None,
+                parent_code: Optional[str] = None):
     """板块列表（成分 × 当日快照聚合）→ (rows, total)。
 
     行：block_code/block_name/type_code/parent_code/members/up_count/
@@ -39,19 +40,21 @@ def list_blocks(conn, type_code: int, sort: str = "-avg_change",
     """
     order = _BLOCK_SORT.get(sort, _BLOCK_SORT["-avg_change"])
     cond, params = f"b.type_code = ? AND {_TOP_LEVEL}", [type_code]
+    if parent_code:
+        cond, params = "b.type_code = ? AND b.parent_code = ?", [type_code, parent_code]
     if q:
         cond += " AND b.block_name LIKE ?"
         params.append(f"%{q}%")
     total = conn.execute(
         f"SELECT COUNT(*) FROM zy_block b WHERE {cond}", params).fetchone()[0]
     day = conn.execute("SELECT MAX(trade_date) FROM market_snapshot").fetchone()[0]
-    if not day:
-        return [], total
     off = max(0, (max(1, page) - 1) * size)
     rows = conn.execute(
         f"{_MEMBER_TREE} "
         "SELECT b.block_code, b.block_name, b.type_code, b.parent_code, "
         "       COUNT(s.symbol) AS members, "
+        "       COUNT(mm.symbol) AS total_members, "
+        "       (SELECT COUNT(*) FROM zy_block child WHERE child.parent_code=b.block_code) AS children, "
         "       SUM(CASE WHEN s.change_rate > 0 THEN 1 ELSE 0 END) AS up_count, "
         "       SUM(CASE WHEN s.change_rate < 0 THEN 1 ELSE 0 END) AS down_count, "
         "       AVG(s.change_rate) AS avg_change, "
@@ -66,7 +69,7 @@ def list_blocks(conn, type_code: int, sort: str = "-avg_change",
         "GROUP BY b.block_code, b.block_name, b.type_code, b.parent_code, b.sort_no "
         f"ORDER BY {order} LIMIT ? OFFSET ?",
         [day] + params + [size, off]).fetchall()
-    cols = ("block_code block_name type_code parent_code members up_count "
+    cols = ("block_code block_name type_code parent_code members total_members children up_count "
             "down_count avg_change amount leader leader_change").split()
     out = [dict(zip(cols, r)) for r in rows]
     for d in out:

@@ -10,11 +10,16 @@ import type { Bar } from "../api";
 import { cssv, fmt, fmtYi, fmtVol } from "../fmt";
 import { ema, sixSegmentSeries } from "../indicators";
 import { accumulationSeries } from "../accumulation";
+import { mainCostSeries } from "../main-cost";
+import { stockOperateSeries } from "../stock-operate";
 import { volumeActivitySeries } from "../volume-activity";
 import { trendHistogramSeries } from "../trend-histogram";
 import { strongPullbackSeries } from "../strong-pullback";
+import { drawQyjjIcon, qyjjSeries, type QyjjRow } from "../qyjj";
 import { volumeAverageSeries } from "../volume-average";
 import { mountVolumeSettings, readVolumeSettings } from "../volume-settings";
+import { mountMainCostSettings } from "../main-cost-settings";
+import { applyMA, mountMASettings, visibleMARows } from "../ma-settings";
 
 /* ── 策影配色（tradingColors） ── */
 const UP = "#EF5350";
@@ -58,6 +63,7 @@ export function chartDown(): string {
   return document.documentElement.dataset.dir === "intl" ? UP : DOWN;
 }
 
+
 /** 涨停判定：按代码所在板块的涨幅上限（主板 10 / 创业科创 20 / 北交 30）。
  *  创业板 2020-08-24 起才改 20%；阈值留 0.1 余量，避开 9.87% 这类非涨停收盘。 */
 export function isLimitUp(symbol: string | undefined, pct: number | null | undefined, date?: string): boolean {
@@ -72,7 +78,7 @@ export function isLimitUp(symbol: string | undefined, pct: number | null | undef
 
 /* ── 自研操盘趋势（策影 indicatorRegistry 逐字移植） ──
  * 短线：MA7 快 + MA10 慢（α .82）｜中线：MA35 快 + MA45 慢（α .86）
- * 收盘 > 慢线 → 多头（橙）否则空头（蓝）
+ * 收盘 ≥ 慢线 → 多头（橙）否则空头（蓝）
  */
 function registerTrendChannel(
   name: string, shortName: string,
@@ -237,22 +243,30 @@ function ensureRegistered(): void {
         styles: () => ({ color: "rgba(0,0,0,0)", lineWidth: 1 }),
       },
     ],
-    // MACD 柱改「竖线段」：零轴到值画 1px 竖线，无空心无填充；红绿沿用 K 线口径
-    draw: (params: { ctx?: CanvasRenderingContext2D; chart?: Chart; indicator?: { result?: unknown[] } }) => {
-      const { ctx, chart, indicator } = params;
+    // MACD 柱改「竖线段」：零轴到值画 1px 竖线，无空心无填充；红绿沿用 K 线口径。
+    // 坐标必须用回调里的副图 xAxis/yAxis —— chart.convertToPixel 默认按主图
+    // candle_pane 的价格轴换算，副图里画出来是错的（此前竖线因此看不见）。
+    draw: (params: {
+      ctx?: CanvasRenderingContext2D;
+      xAxis?: { convertToPixel: (v: number) => number };
+      yAxis?: { convertToPixel: (v: number) => number };
+      indicator?: { result?: unknown[] };
+    }) => {
+      const { ctx, xAxis, yAxis, indicator } = params;
       const data = (indicator?.result || []) as ({ macd: number | null } | null)[];
-      if (!ctx || !chart) return false;
+      if (!ctx || !xAxis || !yAxis) return false;
       const up = chartUp(), dn = chartDown();
+      const zeroY = yAxis.convertToPixel(0);
       ctx.lineWidth = 1;
       data.forEach((item, i) => {
         if (!item || item.macd == null) return;
-        const p = chart.convertToPixel({ dataIndex: i, value: item.macd }) as { x?: number; y?: number };
-        const z = chart.convertToPixel({ dataIndex: i, value: 0 }) as { y?: number };
-        if (p.x == null || p.y == null || z.y == null) return;
+        const x = Math.round(xAxis.convertToPixel(i)) + 0.5;  // +0.5 让 1px 竖线落在像素中心，不发虚
+        const y = yAxis.convertToPixel(item.macd);
+        if (!Number.isFinite(x) || !Number.isFinite(y)) return;
         ctx.strokeStyle = item.macd < 0 ? dn : up;
         ctx.beginPath();
-        ctx.moveTo(p.x + 0.5, z.y);   // +0.5 让 1px 竖线落在像素中心，不发虚
-        ctx.lineTo(p.x + 0.5, p.y);
+        ctx.moveTo(x, zeroY);
+        ctx.lineTo(x, y);
         ctx.stroke();
       });
       return false;   // 继续默认绘制 DIF/DEA 两条折线
@@ -401,14 +415,14 @@ function ensureRegistered(): void {
       },
     });
   } catch { /* 重复注册会报错，忽略 */ }
-  // 六分段副图（K线下方叠加趋势图）：60 窗口分位 → 1..6 段台阶线
+  // 六分段副图（K线下方叠加趋势图）：趋势线六位置 1..6 台阶线
   try {
     registerIndicator({
       name: "SIXSEG",
       shortName: "六段",
       precision: 0,
       calc: (kLineDataList) =>
-        sixSegmentSeries(kLineDataList as unknown as { close: number }[]).map((v) => ({ seg: v })),
+        sixSegmentSeries(kLineDataList as unknown as { close: number; high: number; low: number }[]).map((v) => ({ seg: v })),
       figures: [{ key: "seg", title: "段位", type: "line", styles: () => ({ color: "#26C6DA" }) }],
     });
   } catch { /* 重复注册忽略 */ }
@@ -422,6 +436,63 @@ function ensureRegistered(): void {
       key: "accumulation", title: "吸筹", type: "bar", baseValue: 0,
       styles: () => ({ color: "#F000FF", borderColor: "#F000FF", borderSize: 1, style: "stroke" }),
     }],
+  });
+  registerIndicator({
+    name: "ZY_MAIN_COST",
+    shortName: "主力成本·公式版",
+    precision: 2,
+    calc: (list, indicator) => {
+      // extendData 是设置弹窗的四条显隐开关（顺序同 figures），关掉的输出置 null 不上线
+      const visible = (indicator?.extendData as boolean[] | undefined) ?? [true, true, true, true];
+      return mainCostSeries(list as unknown as { open: number; high: number; low: number; close: number; volume?: number | null }[])
+        .map(v => ({
+          ultra: visible[0] === false ? null : v.ultra,
+          short: visible[1] === false ? null : v.short,
+          mid: visible[2] === false ? null : v.mid,
+          long: visible[3] === false ? null : v.long,
+        }));
+    },
+    figures: [
+      { key: "ultra", title: "超短期", type: "line", styles: () => ({ color: "#FF9800", size: 1.2 }) },
+      { key: "short", title: "短期", type: "line", styles: () => ({ color: "#C084FC", size: 1.2 }) },
+      { key: "mid", title: "中期", type: "line", styles: () => ({ color: "#2DD4BF", size: 1.4 }) },
+      { key: "long", title: "长期", type: "line", styles: () => ({ color: "#0A84FF", size: 1.6 }) },
+    ],
+    shouldUpdate: () => ({ calc: true, draw: true }),
+  });
+  registerIndicator({
+    name: "ZY_STOCK_OPERATE", shortName: "个股操盘·公式版", precision: 2, minValue: 0, maxValue: 100,
+    calc: (list) => stockOperateSeries(list as unknown as { high: number; low: number; close: number }[])
+      .map(v => ({ ...v, top: 95, bottom: 5 })),
+    figures: [
+      // 公式里的 95,COLORGREEN 与 5,COLORBLUE 两条常量线，色值取自众赢实图
+      { key: "top", title: "95", type: "line", styles: () => ({ color: "#75FB4C", size: 1 }) },
+      { key: "bottom", title: "5", type: "line", styles: () => ({ color: "#0000F5", size: 1 }) },
+      // 三个信号输出默认白/蓝/品红；都停在 50 时最后画品红，中间那根即呈品红
+      { key: "band", title: "波段进场", type: "line", styles: () => ({ color: "#FFFFFF", size: 1 }) },
+      { key: "rebound", title: "反弹进场", type: "line", styles: () => ({ color: "#0000F5", size: 1 }) },
+      { key: "oversold", title: "超跌进场", type: "line", styles: () => ({ color: "#EA33F7", size: 1 }) },
+    ],
+    draw: ({ ctx, chart, indicator, xAxis, yAxis, bounding }) => {
+      const data = indicator.result as { var4: number | null; band: number | null; rebound: number | null; oversold: number | null; red: boolean | null }[];
+      const range = chart.getVisibleRange();
+      const width = Math.max(1, chart.getBarSpace().bar * 0.6);
+      ctx.save();
+      ctx.beginPath();
+      ctx.rect(0, 0, bounding.width, bounding.height);
+      ctx.clip();
+      // STICKLINE(VAR4,REF(VAR4,1))：逐柱从上一值连到当前值，红=收盘≥MA10，绿=收盘<MA10
+      for (let i = Math.max(1, Math.floor(range.from)); i < Math.min(data.length, Math.ceil(range.to) + 1); i++) {
+        const prev = data[i - 1]?.var4, cur = data[i]?.var4;
+        if (prev == null || cur == null || data[i].red == null) continue;
+        const x = xAxis.convertToPixel(i);
+        const y1 = yAxis.convertToPixel(prev), y2 = yAxis.convertToPixel(cur);
+        ctx.fillStyle = data[i].red ? chartUp() : chartDown();
+        ctx.fillRect(x - width / 2, Math.min(y1, y2), width, Math.max(1, Math.abs(y1 - y2)));
+      }
+      ctx.restore();
+      return false;
+    },
   });
   registerIndicator({
     name: "ZY_VOLUME_ACTIVITY", shortName: "量能活跃·估算股本", precision: 2,
@@ -540,10 +611,13 @@ function ensureRegistered(): void {
         column(x, v.base, v.short, v.short > v.base);
       }
       const selected = data[(indicator.extendData as number | undefined) ?? data.length - 1];
+      // 标题「趋势柱线」由 indicator tooltip 画在左上（10.5px），数值接在其右侧，避免压字
+      ctx.font = "10.5px sans-serif";
+      const titleW = ctx.measureText("趋势柱线").width;
       ctx.font = "12px sans-serif";
       ctx.textBaseline = "top";
       ctx.fillStyle = (selected?.short ?? 0) >= (selected?.base ?? 0) ? chartUp() : chartDown();
-      ctx.fillText(`STICKV ${selected?.short == null ? "--" : selected.short.toFixed(2)}`, 8, 6);
+      ctx.fillText(`STICKV ${selected?.short == null ? "--" : selected.short.toFixed(2)}`, 8 + titleW + 14, 5);
       ctx.restore();
       return false;
     },
@@ -595,6 +669,31 @@ function ensureRegistered(): void {
       ctx.restore();return true;
     },
   });
+  // 钱眼掘金·近似：钱袋=阶段低点（画在最低价下方），地雷=阶段高点（画在最高价上方）
+  registerIndicator({
+    name: "ZY_QYJJ", shortName: "钱眼掘金·近似", precision: 2, shouldFormatBigNumber: false,
+    calc: list => qyjjSeries(list).map(v => ({ ...v, px: v.close })),
+    figures: [{ key: "px", title: "", type: "line", styles: () => ({ color: "transparent" }) }],
+    draw: ({ ctx, chart, indicator, xAxis, yAxis, bounding }) => {
+      const data = indicator.result as QyjjRow[];
+      const range = chart.getVisibleRange();
+      ctx.save();
+      ctx.beginPath();
+      ctx.rect(0, 0, bounding.width, bounding.height);
+      ctx.clip();
+      for (let i = Math.max(0, Math.floor(range.from)); i < Math.min(data.length, Math.ceil(range.to) + 1); i++) {
+        const row = data[i];
+        if (!row?.signal || row.anchor == null) continue;
+        const x = xAxis.convertToPixel(i);
+        const y = yAxis.convertToPixel(row.anchor);
+        // 图标贴 K 线外侧；靠边时夹到绘图区内，避免被裁剪
+        if (row.signal === "money") drawQyjjIcon(ctx, "money", x, Math.min(bounding.height - 11, y + 15));
+        else drawQyjjIcon(ctx, "mine", x, Math.max(11, y - 15));
+      }
+      ctx.restore();
+      return false;
+    },
+  });
   // ATR 自研（klinecharts v10 未内置）：14 日真实波幅均值
   try {
     registerIndicator({
@@ -632,12 +731,15 @@ function ensureRegistered(): void {
         })) as never,
       draw: ({ ctx, indicator }) => {
         ctx.save();
-        ctx.font = "11px sans-serif";
         ctx.textBaseline = "top";
+        // 标题「VOL(5,10)」由 indicator tooltip 画在左上（10.5px），均量线标签接在其右侧，避免压字
+        ctx.font = "10.5px sans-serif";
+        const startX = 8 + ctx.measureText(`VOL(${indicator.calcParams.join(",")})`).width + 14;
+        ctx.font = "11px sans-serif";
         indicator.calcParams.forEach((period, i) => {
           if ((indicator.extendData as boolean[] | undefined)?.[i] === false) return;
           ctx.fillStyle = i === 0 ? "#FF9F43" : "#4DD0E1";
-          ctx.fillText(`MA${period}`, 8 + i * 70, 6);
+          ctx.fillText(`MA${period}`, startX + i * 58, 4);
         });
         ctx.restore();
         return false;
@@ -828,13 +930,15 @@ export const IND_CATS: { cat: IndCat; label: string }[] = [
 ];
 export const IND_DEFS: IndDef[] = [
   // 主图叠加
-  { key: "strongpullback", kc: "ZY_STRONG_PULLBACK", label: "强势调整", cat: "main", where: "main", desc: "用户约定规则：次日量比(50%,200%)、后续>50%、收盘≥MA45；破保护位/低量结束；同组眼睛连线；非众赢原公式" },
-  { key: "ma", kc: "MA", label: "MA", cat: "main", where: "main", desc: "移动平均线 5/10/20" },
+  { key: "qyjj", kc: "ZY_QYJJ", label: "钱眼掘金", cat: "main", where: "main", desc: "众赢云指标 i_qyjj_c 近似移植：收盘 6% 波段反转、信号落在拐点后一根；钱袋=阶段低点、地雷=阶段高点；原公式在服务端，无法逐点还原，与原模型仅部分一致" },
+  { key: "strongpullback", kc: "ZY_STRONG_PULLBACK", label: "强势调整", cat: "main", where: "main", desc: "用户约定规则：起点后第2～8个交易日连线，第9日结束；次日量比(50%,200%)、后续>50%、收盘≥MA45；破保护位/低量结束；同组眼睛连线；非众赢原公式" },
+  { key: "ma", kc: "MA", label: "MA", cat: "main", where: "main", desc: "移动平均线 5/10/20/30/60/120/250（60=季线、120=半年线、250=年线）" },
   { key: "td", kc: "ZY_TD_SEQ", label: "九转序列", cat: "main", where: "main", desc: "TD Sequential：只在成立的 低9/高9、低13/高13 处标数字（收盘对 4 根前连续 9；随后对 2 根前高低累计 13，需完美检验）" },
   { key: "ema", kc: "EMA", label: "EMA", cat: "main", where: "main", desc: "指数移动平均线" },
   { key: "boll", kc: "BOLLX", label: "BOLL", cat: "main", where: "main", desc: "布林带（虚线三轨+淡填充）" },
   { key: "sar", kc: "SAR", label: "SAR", cat: "main", where: "main", desc: "抛物线转向（停损点）" },
   { key: "short", kc: "SHORT_TREND_CHANNEL", label: "短线趋势", cat: "main", where: "main", desc: "策影同款短线操盘趋势通道（收盘对 MA10）" },
+  { key: "maincost", kc: "ZY_MAIN_COST", label: "主力成本", cat: "main", where: "main", desc: "众赢安装包公式移植：ZJ=(O+H+L+C)/4，同一 DMA 按量能占比分四档权重输出超短期/短期/中期/长期四条成本线，齿轮里可逐条开关；原软件标注仅大盘，此处个股也可显示，尚未与原软件逐点核对" },
   { key: "mid", kc: "MID_TREND_CHANNEL", label: "中线趋势", cat: "main", where: "main", desc: "策影同款中线操盘趋势通道（收盘对 MA45）" },
   { key: "avg", kc: "TIME_AVG", label: "均价线", cat: "main", where: "main", desc: "分时均价线（日内）" },
   { key: "bbi", kc: "BBI", label: "BBI", cat: "main", where: "main", desc: "多空指数（四均线加权）" },
@@ -847,6 +951,7 @@ export const IND_DEFS: IndDef[] = [
   { key: "emv", kc: "EMV", label: "EMV", cat: "trend", where: "sub", desc: "简易波动指标（量价趋势）" },
   { key: "dma", kc: "DMA", label: "DMA", cat: "trend", where: "sub", desc: "平均线差（快慢均线差值）" },
   // 动量类
+  { key: "stockoperate", kc: "ZY_STOCK_OPERATE", label: "个股操盘", cat: "mom", where: "sub", desc: "众赢安装包公式移植：收盘在 10 日高低区间的 3 日平滑位置；红柱=收盘≥MA10、绿柱=收盘<MA10；三根水平线为 95（绿）/50（品红）/5（蓝），波段/反弹/超跌进场时信号线由 50 跳到 80；尚未与原软件逐点核对" },
   { key: "kdj", kc: "KDJX", label: "KDJ", cat: "mom", where: "sub", desc: "随机指标（超买80/超卖20参考线）" },
   { key: "rsi", kc: "RSIX", label: "RSI", cat: "mom", where: "sub", desc: "相对强弱指标（超买70/超卖30参考线）" },
   { key: "cci", kc: "CCI", label: "CCI", cat: "mom", where: "sub", desc: "顺势指标（脱离常态范围）" },
@@ -872,7 +977,7 @@ export const IND_DEFS: IndDef[] = [
   { key: "bias", kc: "BIAS", label: "BIAS", cat: "swing", where: "sub", desc: "乖离率（偏离均线程度）" },
   // 波动分位类
   { key: "atr", kc: "ATR", label: "ATR", cat: "volat", where: "sub", desc: "真实波幅（波动强度）" },
-  { key: "sixseg", kc: "SIXSEG", label: "六段", cat: "volat", where: "sub", desc: "自研 60 日分位 1-6 段" },
+  { key: "sixseg", kc: "SIXSEG", label: "六段", cat: "volat", where: "sub", desc: "趋势线六位置（超跌/反弹/突破/超涨/回踩/跌破）：价格相对短线操盘 MA7 快 / MA10 慢的位置" },
 ];
 export const IND_BY_KEY: Record<string, IndDef> = Object.fromEntries(IND_DEFS.map((d) => [d.key, d]));
 
@@ -977,10 +1082,27 @@ function smartHeights(total: number, n: number): { main: number; sub: number } {
   return { main, sub };
 }
 
+/** 副图标题：只画「名称(参数)」，不画数值图例行，尽量少遮挡 */
+function subTip(label: string) {
+  return (p: { indicator: { calcParams?: Array<string | number> } }) => {
+    const ps = (p.indicator.calcParams || []).filter((x): x is number => typeof x === "number");
+    return {
+      name: label,
+      calcParamsText: ps.length ? `(${ps.join(",")})` : "",
+      legends: [],
+      features: [],
+    };
+  };
+}
+
+/** 主图指标：回传空数据源，让出价格区（标题只给副图） */
+const NO_TIP = () => ({ name: "", calcParamsText: "", legends: [], features: [] });
+
 function styles() {
   const border = cssv("--border") || "#2B2B2F";
   const axis = cssv("--axis") || border;
   const text = cssv("--faint") || "#717176";
+  const dim = cssv("--dim") || "#A1A1A6";
   const up = chartUp(), dn = chartDown();
   const hole = cssv("--panel") || "#161618";      // 空心阳线的填充色 = 图表面板底色
   return {
@@ -1016,7 +1138,19 @@ function styles() {
       priceMark: { show: true, last: { show: false }, high: { show: true }, low: { show: true } },
     },
     indicator: {
-      tooltip: { showRule: "none" as const, title: { showName: false, showParams: false } },
+      // 副图常显标题（名称+参数）：多个副图窗格不再分不清谁是谁。
+      // 数值图例行由各指标 callback 关闭（只留标题），44~132px 的副图里少遮挡。
+      tooltip: {
+        showRule: "always" as const,
+        showType: "standard" as const,
+        offsetLeft: 8, offsetRight: 8, offsetTop: 3,
+        title: {
+          show: true, showName: true, showParams: true,
+          color: dim, size: 10.5,
+          marginLeft: 0, marginTop: 0, marginRight: 0, marginBottom: 0,
+        },
+        legend: { color: text, size: 10, marginLeft: 0, marginTop: 0, marginRight: 8, marginBottom: 0 },
+      },
       ohlc: { upColor: up, downColor: dn, noChangeColor: NEUTRAL },
     },
     crosshair: {
@@ -1133,11 +1267,13 @@ export function mountKline(el: HTMLElement): KlineChartHandle {
   const legend = document.createElement("div");
   legend.className = "legend";
   el.appendChild(legend);
+  let legendInds: MainKey[] = [];
   const drawLegend = (inds: MainKey[]) => {
-    const accC = cssv("--accent") || "#FF9F43", p1C = "#0A84FF", vipC = cssv("--vip") || "#FFD60A";
+    legendInds = inds;
     const parts: string[] = [];
     if (inds.includes("ma"))
-      parts.push(`<span><i style="background:${accC}"></i>MA5</span><span><i style="background:${p1C}"></i>MA10</span><span><i style="background:${vipC}"></i>MA20</span>`);
+      parts.push(visibleMARows().map((line) =>
+        `<span><i style="background:${line.color}"></i>${line.label}</span>`).join(""));
     if (inds.includes("boll"))
       parts.push(`<span><i style="background:${chartUp()}"></i><i style="background:#4C8DFF"></i><i style="background:${chartDown()}"></i>BOLL(20,2)</span>`);
     if (inds.includes("avg"))
@@ -1672,6 +1808,8 @@ export function mountKline(el: HTMLElement): KlineChartHandle {
   };
 
   const volumeSettings = mountVolumeSettings(chart, el);
+  const mainCostSettings = mountMainCostSettings(chart, el);
+  const maSettings = mountMASettings(chart, el, () => drawLegend(legendInds));
 
   let dataLen = 0;                     // 上一次灌入的 bar 数（判断「增量刷新」还是「换数据源」）
 
@@ -1756,17 +1894,22 @@ export function mountKline(el: HTMLElement): KlineChartHandle {
       for (const d of defs) {
         if (have.has(d.kc)) continue;
         if (d.key === "ma") {
-          // MA 配色与页面图例一致：MA5 琥珀 / MA10 蓝 / MA20 VIP 金
+          // 周期/显隐/配色统一读均线设置，默认 5/10/20/30/60/120/250
+          const lines = visibleMARows();
+          if (!lines.length) continue;
           chart.createIndicator({
-            name: "MA", paneId: "candle_pane", calcParams: [5, 10, 20], isStack: true,
-            styles: { lines: [{ color: cssv("--accent") || "#FF9F43" }, { color: "#0A84FF" }, { color: cssv("--vip") || "#FFD60A" }] },
+            name: "MA", paneId: "candle_pane",
+            calcParams: lines.map((line) => line.period), isStack: true,
+            createTooltipDataSource: NO_TIP,
+            styles: { lines: lines.map((line) => ({ color: line.color })) },
           } as never, true);
         } else if (d.key === "avg") {
-          chart.createIndicator({ name: "TIME_AVG", paneId: "candle_pane", isStack: true } as never, true);
+          chart.createIndicator({ name: "TIME_AVG", paneId: "candle_pane", isStack: true, createTooltipDataSource: NO_TIP } as never, true);
         } else {
-          chart.createIndicator({ name: d.kc, paneId: "candle_pane", isStack: true } as never, true);
+          chart.createIndicator({ name: d.kc, paneId: "candle_pane", isStack: true, createTooltipDataSource: NO_TIP } as never, true);
         }
       }
+      requestAnimationFrame(mainCostSettings.sync);
     },
     setSub(inds: SubKey[]) {
       // 副图多选：全清后按固定顺序重建，每指标一个窗格（注册表驱动）
@@ -1783,27 +1926,42 @@ export function mountKline(el: HTMLElement): KlineChartHandle {
           chart.createIndicator({
             name: "VOLX", shouldFormatBigNumber: false,
             calcParams: readVolumeSettings().periods, extendData: readVolumeSettings().visible,
+            createTooltipDataSource: subTip(d.label),
             styles: { bars: [{ upColor: up, downColor: dn, noChangeColor: NEUTRAL }] },
           } as never, false);
         } else if (d.key === "macd") {
-          chart.createIndicator({ name: "MACDX", shouldFormatBigNumber: false } as never, false);
+          chart.createIndicator({ name: "MACDX", shouldFormatBigNumber: false, createTooltipDataSource: subTip(d.label) } as never, false);
         } else if (d.key === "volfs") {
           // 通达信 VOLFS：逐分钟量柱红绿按分钟涨跌（figure styles 内着色），轴文本万/亿
-          chart.createIndicator({ name: "VOLFS", shouldFormatBigNumber: false } as never, false);
+          chart.createIndicator({ name: "VOLFS", shouldFormatBigNumber: false, createTooltipDataSource: subTip(d.label) } as never, false);
         } else if (d.key === "sixseg") {
-          // 六分段趋势（K线下方叠加）：60 窗口分位 1..6 段台阶线
-          chart.createIndicator({ name: "SIXSEG", precision: 0 } as never, false);
+          // 六分段趋势（K线下方叠加）：趋势线六位置 1..6 台阶线
+          chart.createIndicator({ name: "SIXSEG", precision: 0, createTooltipDataSource: subTip(d.label) } as never, false);
         } else if (d.key === "trendhistogram") {
-          const id = chart.createIndicator({ name: d.kc } as never, false);
+          const id = chart.createIndicator({ name: d.kc, createTooltipDataSource: subTip(d.label) } as never, false);
           const indicator = chart.getIndicators({ id: id! })[0];
           if (indicator) chart.overrideYAxis({ paneId: indicator.paneId, id: indicator.yAxisId, name: "trend_value" });
         } else {
-          chart.createIndicator({ name: d.kc } as never, false);
+          const id = chart.createIndicator({ name: d.kc, createTooltipDataSource: subTip(d.label) } as never, false);
+          if (d.key === "stockoperate" && id) {
+            const indicator = chart.getIndicators({ id })[0];
+            if (indicator) {
+              // 轴刻度只标三根线的位置（95 / 50 / 5，众赢同款），默认 0/20/40… 看不出线在哪
+              chart.overrideYAxis({
+                paneId: indicator.paneId,
+                createTicks: ({ range, bounding }) => [95, 50, 5].map((v) => ({
+                  value: v,
+                  text: v.toFixed(2),
+                  coord: Math.round((1 - (v - range.realFrom) / range.realRange) * bounding.height),
+                })),
+              });
+            }
+          }
         }
       }
       // 窗格高度交给智能高度统一分配（含 candle_pane）
       applyHeights();
-      requestAnimationFrame(volumeSettings.sync);
+      requestAnimationFrame(() => { volumeSettings.sync(); mainCostSettings.sync(); });
     },
     setPeriod(p: TipPeriod) {
       period = p;
@@ -1851,10 +2009,16 @@ export function mountKline(el: HTMLElement): KlineChartHandle {
     clearRange(notify = true) { clearSel(notify); },
     clearPick(notify = true) { clearPickFn(notify); },
     drawLegend,
-    retheme() { chart.setStyles(periodStyles(period)); requestAnimationFrame(navDraw); },
+    retheme() {
+      chart.setStyles(periodStyles(period));
+      // 均线颜色取自 CSS 变量；换主题后重建一次，避免白线留在亮色背景上
+      if (chart.getIndicators({ paneId: "candle_pane" }).some((i) => i.name === "MA"))
+        applyMA(chart, () => drawLegend(legendInds));
+      requestAnimationFrame(navDraw);
+    },
     resize() {
       chart.resize();
-      requestAnimationFrame(() => { applyHeights(); volumeSettings.sync(); navDraw(); drawPick(); });
+      requestAnimationFrame(() => { applyHeights(); volumeSettings.sync(); mainCostSettings.sync(); maSettings.sync(); navDraw(); drawPick(); });
     },
     destroy() {
       try { chart.unsubscribeAction("onCrosshairChange", onCross as never); } catch { /* 忽略 */ }
@@ -1868,6 +2032,8 @@ export function mountKline(el: HTMLElement): KlineChartHandle {
       sel.remove();
       selTip.remove();
       volumeSettings.destroy();
+      mainCostSettings.destroy();
+      maSettings.destroy();
       tip.remove();
       legend.remove();
       pick.remove();

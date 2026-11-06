@@ -31,7 +31,7 @@ from typing import Any, Callable, Dict, List, Optional
 
 from ..config import settings
 from ..stream.bus import StreamBus
-from .util import expected_asof
+from .util import expected_asof, now_cst
 from .writer import writer
 
 logger = logging.getLogger("yuchao.updater")
@@ -74,6 +74,15 @@ KIND_DATASETS: Dict[str, List[str]] = {
 INTERVAL_TASKS: Dict[str, int] = {
     "market_snapshot": 300,   # 5 分钟一轮（交易时段门控在任务内部）
     "target_scan_live": 300,  # 快照落库后再算目标指标层（页面读表即出，≤5 分钟新鲜）
+}
+
+# 间隔任务的提交时段（北京时间，闭区间）。盘后不再每 5 分钟空转提交：任务
+# 内部虽会幂等秒跳，但每次提交都会让顶栏闪一次「正在更新 · 盘中行情」，收盘后
+# 看着像还在盘中（2026-11-03 用户反馈）。market_snapshot 留到 15:25 —
+# expected_asof 15:10 才切到当日，必须留一轮把收盘快照落到当日。
+INTERVAL_WINDOWS: Dict[str, tuple[tuple[int, int], tuple[int, int]]] = {
+    "market_snapshot": ((9, 25), (15, 25)),
+    "target_scan_live": ((9, 25), (15, 5)),
 }
 
 
@@ -298,9 +307,16 @@ class UpdateOrchestrator:
 
     def _interval_loop(self, kind: str, seconds: int):
         """间隔型任务轮询（盘中快照等）：到点 submit，串行队列 + submit 去重
-        天然防堆积；交易时段门控在任务内部做（非时段幂等秒跳）。"""
+        天然防堆积；时段门控双保险——编排器按 INTERVAL_WINDOWS 不在窗口就不
+        提交（省掉盘后每 5 分钟一次的顶栏「盘中」闪现），任务内部仍保留交易
+        时段判断与幂等秒跳（手动触发路径）。"""
+        win = INTERVAL_WINDOWS.get(kind)
         while True:
             time.sleep(seconds)
+            if win is not None:
+                now = now_cst()
+                if not (win[0] <= (now.hour, now.minute) <= win[1]):
+                    continue
             try:
                 self.submit(kind, trigger="interval")
             except Exception:

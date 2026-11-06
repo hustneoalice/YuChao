@@ -77,7 +77,11 @@ export const authApi = {
 };
 
 /* ── F04 · 按用户设置云同步 ── */
-export interface WatchItem { symbol: string; name: string; group: string; groups?: string[]; ts?: string | null }
+export interface WatchNoteItem { id: string; date: string; text: string }
+export interface WatchItem {
+  symbol: string; name: string; group: string; groups?: string[];
+  ts?: string | null; notes?: WatchNoteItem[];
+}
 export interface CardItem { card_id: string; enabled: boolean; sort: number; mode: string }
 export const meApi = {
   prefs: () => req<{ prefs: Record<string, unknown> }>("/me/prefs"),
@@ -161,6 +165,9 @@ export interface TargetItem {
   trend_above_days: number;
   neg_run?: number;                       // 连续负柱收窄天数（绿柱缩短）
   neg_abs?: number | null;                // 当前负柱距零轴幅度 |STICKV|（正值时为 null）
+  money_date?: string | null;             // 最近一次钱袋子（ZigZag 低点）日期
+  money_ago?: number | null;              // 钱袋距今交易日数（0=今日；null=近20日未出现）
+  money_cnt?: number;                     // 近 20 个交易日钱袋出现次数
   trend_data_date: string; trend_provisional: boolean;
 }
 
@@ -168,6 +175,8 @@ export interface TargetScanOut {
   scanned: number; total_hits: number; as_of: string; provisional?: boolean;
   computed_at?: string;
   values?: Record<string, number>; items: TargetItem[];
+  /* 数据断更守卫：stale 为 true 时后端不计算，message 说明落后天数 */
+  stale?: boolean; data_date?: string; lag?: number | null; message?: string;
 }
 
 /* 目标页行内缩略图：近 N 根前复权日线 + MA45（中线趋势）+ STICKV 柱线 */
@@ -217,6 +226,7 @@ export interface BreadthOut {
 export interface ZyBlockRow {
   block_code: string; block_name: string; type_code: number;
   parent_code?: string | null;
+  total_members: number; children: number;
   members: number; up_count: number; down_count: number; flat_count: number;
   avg_change?: number | null; amount?: number | null;
   leader?: string | null; leader_change?: number | null;
@@ -224,7 +234,77 @@ export interface ZyBlockRow {
 export interface ZyBlocksOut { items: ZyBlockRow[]; total: number; type_code: number; as_of: string }
 export interface ZyBlockMembersOut { items: BoardRow[]; total: number; block_code: string; block_name: string; as_of: string }
 
+export interface ShareholderItem {
+  rank: number;
+  name: string;
+  shares: number | null;
+  ratio: number | null;
+  change: "进入" | "加仓" | "减仓" | "不变" | "无法比较";
+  share_change: number | null;
+  ratio_change: number | null;
+  is_social_security: boolean;
+}
+export interface ShareholdersOut {
+  symbol: string;
+  report_dates: string[];
+  report_date: string | null;
+  previous_report_date: string | null;
+  notice_date: string | null;
+  total_ratio: number | null;
+  ratio_change: number | null;
+  items: ShareholderItem[];
+  source: string;
+}
+
+/* ── 盘口（五档 + 逐笔成交） ── */
+export interface DepthLevel {
+  price: number;
+  volume: number;                 // 手
+  amount?: number | null;         // 元
+}
+export interface DepthQuote {
+  symbol: string;
+  name?: string | null;
+  applicable: boolean;
+  time?: string | null;
+  price?: number | null;
+  prev_close?: number | null;
+  open?: number | null;
+  high?: number | null;
+  low?: number | null;
+  chg?: number | null;
+  pct?: number | null;
+  avg_price?: number | null;
+  limit_up?: number | null;
+  limit_down?: number | null;
+  bids: DepthLevel[];
+  asks: DepthLevel[];
+  bid_total: number;
+  ask_total: number;
+  bid_ask_diff: number;
+  bid_ask_ratio?: number | null;
+  outer_vol?: number | null;
+  inner_vol?: number | null;
+  volume?: number | null;
+  amount?: number | null;
+  turnover_rate?: number | null;
+  vol_ratio?: number | null;
+  amplitude?: number | null;
+}
+export interface TradeItem {
+  time: string;
+  price: number;
+  volume: number;                 // 手
+  direction?: number | null;      // 1 买 / 2 卖 / 其他中性
+}
+export interface TradesOut { symbol: string; items: TradeItem[] }
+
 export const marketApi = {
+  shareholders: (symbol: string, reportDate?: string) => {
+    const p = new URLSearchParams({ symbol });
+    if (reportDate) p.set("report_date", reportDate);
+    return req<ShareholdersOut>(`/market/shareholders?${p}`);
+  },
   kline: (
     q: { symbol: string; adjust?: string; with?: string; limit?: number; start?: string; end?: string; freq?: string },
     opts?: { signal?: AbortSignal },
@@ -235,6 +315,12 @@ export const marketApi = {
     req<{ symbol: string; date: string; prev_close?: number; bars: (Bar & { avg: number; has_avg?: boolean })[] }>(`/market/minute?symbol=${encodeURIComponent(symbol)}`),
   quote: (symbol: string, opts?: { signal?: AbortSignal }) =>
     req<Quote>(`/market/quote?symbol=${encodeURIComponent(symbol)}`, { signal: opts?.signal }),
+  /* 五档盘口（腾讯实时，后端 3s 缓存） */
+  depth: (symbol: string) =>
+    req<DepthQuote>(`/market/depth?symbol=${encodeURIComponent(symbol)}`),
+  /* 逐笔成交明细（东财 details，后端 5s 缓存） */
+  trades: (symbol: string, limit = 20) =>
+    req<TradesOut>(`/market/trades?symbol=${encodeURIComponent(symbol)}&limit=${limit}`),
   /* 区间资金流：框选 [start,end] 后一次拉齐，合计由服务端代数和给出 */
   fundflow: (q: { symbol: string; start?: string; end?: string; limit?: number }) =>
     req<FundFlowRange>(`/market/fundflow?${new URLSearchParams(
@@ -264,8 +350,9 @@ export const marketApi = {
   indexBar: () => req<IndexBarItem[]>("/market/index_bar"),
   breadth: () => req<BreadthOut>("/market/breadth"),
   /* 众赢板块监测：板块清单聚合 / 板块成分 × 当日快照 */
-  zyBlocks: (q: { type_code: number; sort?: string; page?: number; size?: number; q?: string }) => {
+  zyBlocks: (q: { type_code: number; sort?: string; page?: number; size?: number; q?: string; parent_code?: string }) => {
     const p = new URLSearchParams({ type_code: String(q.type_code) });
+    if (q.parent_code) p.set("parent_code", q.parent_code);
     if (q.sort) p.set("sort", q.sort);
     if (q.page) p.set("page", String(q.page));
     if (q.size) p.set("size", String(q.size));
@@ -323,7 +410,15 @@ export interface Corepick {
   rank?: number; fund_score?: number; seg?: string;
   factors?: Record<string, unknown> | null;
 }
+export interface RotationMoney { net: number | null; participation?: number | null; ratio?: number | null }
+export interface RotationBlock { key: string; name: string; category: string; change_rate: number | null; change_rank: number; reason: string; main: RotationMoney }
+export interface RotationStock { fund_rank?: number; symbol: string; name: string; rank: number; mainboard: boolean; change_rate: number | null; main: RotationMoney; sources: { code: string; name: string; category: string; change_rank: number }[] }
+export interface RotationRun { id: string; date: string; created_at: string; trigger: string; status: string; message: string }
+export interface RotationResult extends RotationRun { groups?: {block:RotationBlock;items:RotationStock[];eligible_stocks:number}[]; items: RotationStock[]; selected_blocks: RotationBlock[]; candidates: RotationBlock[]; note: string; previous_date: string | null; previous_available: boolean; eligible_stocks: number; excluded_stock_records: number }
+export interface RotationResponse { result: RotationResult | null; latest_attempt: RotationRun | null; history: string[]; runs: RotationRun[] }
 export const corepicksApi = {
+  runRotation: (date?: string) => req(`/corepicks/rotation/run${date ? `?date=${encodeURIComponent(date)}` : ""}`, {method:"POST"}),
+  rotation: (date?: string) => req<RotationResponse>(`/corepicks/rotation${date ? `?date=${encodeURIComponent(date)}` : ""}`),
   list: (date?: string, pool?: string) => {
     const p = new URLSearchParams();
     if (date) p.set("date", date);

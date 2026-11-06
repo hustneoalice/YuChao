@@ -165,7 +165,10 @@ NEW_TABLES_DDL = """
         data_date   VARCHAR, trend_value DOUBLE,
         cross_date  VARCHAR, cross_ago INTEGER, above_days INTEGER,
         neg_run     INTEGER,   -- 连续负柱收窄天数（绿柱缩短，提前捕捉上穿零轴）
-        neg_abs     DOUBLE     -- 当前负柱距零轴幅度 |STICKV|（正值时为 NULL）
+        neg_abs     DOUBLE,    -- 当前负柱距零轴幅度 |STICKV|（正值时为 NULL）
+        money_date  VARCHAR,   -- 最近一次钱袋（ZigZag 低点）日期
+        money_ago   INTEGER,   -- 距今天数（0=今日；None=近20日未出现）
+        money_cnt   INTEGER    -- 近 20 个交易日出现次数
     );
 """
 
@@ -175,6 +178,9 @@ MIGRATIONS = (
     "ALTER TABLE sector_index ADD COLUMN IF NOT EXISTS kind VARCHAR DEFAULT 'industry'",
     "ALTER TABLE target_trend ADD COLUMN IF NOT EXISTS neg_run INTEGER",
     "ALTER TABLE target_trend ADD COLUMN IF NOT EXISTS neg_abs DOUBLE",
+    "ALTER TABLE target_trend ADD COLUMN IF NOT EXISTS money_date VARCHAR",
+    "ALTER TABLE target_trend ADD COLUMN IF NOT EXISTS money_ago INTEGER",
+    "ALTER TABLE target_trend ADD COLUMN IF NOT EXISTS money_cnt INTEGER",
 )
 
 _ADJUST_VIEW = {"qfq": "v_daily_ohlcv_qfq", "hfq": "v_daily_ohlcv_hfq", "raw": "daily_ohlcv"}

@@ -28,17 +28,20 @@ type Tab = "hsa" | "sha" | "sza" | "cyb" | "kc" | "fund_sh" | "fund_sz" | "block
 const TABS: { k: Tab; label: string }[] = [
   { k: "hsa", label: "沪深A股" }, { k: "sha", label: "沪市A股" }, { k: "sza", label: "深市A股" },
   { k: "cyb", label: "创业板" }, { k: "kc", label: "科创板" },
-  { k: "fund_sh", label: "上证基金" }, { k: "fund_sz", label: "深证基金" }, { k: "block", label: "板块监测" },
+  { k: "fund_sh", label: "上证基金" }, { k: "fund_sz", label: "深证基金" }, { k: "block", label: "板块" },
   { k: "index", label: "指数" },
 ];
 /* 板块监测二级类型（众赢 typeCode：1 地域 / 2 概念 / 4 行业 / 8 风格 / 9 题材） */
 const BTYPES: { code: number; label: string }[] = [
   { code: 2, label: "概念" }, { code: 4, label: "行业" }, { code: 9, label: "题材" },
   { code: 1, label: "地域" }, { code: 8, label: "风格" },
+  { code: 6, label: "雷达" },
 ];
 
 let tab: Tab = "hsa";
 let blockType = 2;                       // 板块监测当前类型（概念默认，众赢同款）
+let blockParent: { code: string; name: string } | null = null;
+let blockRevision = 0, memberRevision = 0;
 let curBlock: { code: string; name: string } | null = null;   // 板块监测：上方选中的板块
 let timer: ReturnType<typeof setInterval> | null = null;
 let pager: Pager | null = null;          // 非板块 tab 的分页器
@@ -85,6 +88,7 @@ const BLOCK_COLS: DataTableCol<ZyBlockRow>[] = [
   { label: "#", width: 34, mono: true, render: (_r, i) => `<span style="color:var(--faint)">${i + 1}</span>` },
   { label: "板块名称", sort: "block_code", render: (r) =>
       `<span style="font-weight:600">${esc(r.block_name)}</span>` },
+  { label: "子行业", render: (r) => r.children ? `<button class="hbtn" data-children>${r.children}个子级</button>` : "—" },
   { label: "均涨%", num: true, sort: "avg_change", title: "成分涨跌幅平均", render: (r) => pctCell(r.avg_change) },
   { label: "上涨", num: true, render: (r) => (r.up_count ? `<span class="up num">${r.up_count}</span>` : `<span style="color:var(--faint)">0</span>`) },
   { label: "下跌", num: true, render: (r) => (r.down_count ? `<span class="down num">${r.down_count}</span>` : `<span style="color:var(--faint)">0</span>`) },
@@ -92,7 +96,7 @@ const BLOCK_COLS: DataTableCol<ZyBlockRow>[] = [
       (r.members ? `${Math.round((r.up_count / r.members) * 100)}%` : "—") },
   { label: "领涨股", render: (r) => (r.leader
       ? `${esc(r.leader)} ${pctCell(r.leader_change, "")}` : `<span style="color:var(--faint)">—</span>`) },
-  { label: "成分数", num: true, title: "有当日行情的成分股数量", render: (r) => (r.members ? `<span class="num">${r.members}</span>` : `<span style="color:var(--faint)">0</span>`) },
+  { label: "成分 / 有行情", num: true, title: "全部成分数量 / 有当日快照的数量", render: (r) => `${r.total_members} / ${r.members}` },
   { label: "成交额", num: true, sort: "amount", render: (r) => fmtYi(r.amount) },
 ];
 
@@ -276,7 +280,13 @@ function ensureTable(): void {
     tbl = createDataTable<ZyBlockRow>(wrap, BLOCK_COLS, {
       defaultSort: { label: "均涨%", dir: -1 },
       onChange: () => { blkPager!.reset(); void loadBlocks(); },
-      onRow: (r, _ev, tr) => { selIdx = rowIndexOf(tr); selectBlock(r.block_code, r.block_name); },
+      onRow: (r, ev, tr) => {
+        if ((ev.target as HTMLElement).closest("[data-children]")) {
+          blockParent = { code: r.block_code, name: r.block_name };
+          curBlock = null; autoLink = true; blkPager?.reset(); syncHead(); void loadBlocks(); return;
+        }
+        selIdx = rowIndexOf(tr); selectBlock(r.block_code, r.block_name);
+      },
       rowKey: (r) => r.block_code,
     });
     ensureMemberTable();
@@ -299,7 +309,8 @@ function ensureMemberTable(): void {
     defaultSort: { label: "涨跌幅", dir: -1 },
     onChange: () => { memPager!.reset(); void loadMembers(); },
     onRow: (r) => void setLink(r.symbol, r.name || r.symbol, r),
-    empty: "该板块暂无成分股（非交易时段暂不提供）",
+    rowKey: (r) => r.symbol,
+    empty: "该板块暂无已导入的成分股",
   });
 }
 
@@ -326,6 +337,9 @@ function syncHead(): void {
   const inBlocks = tab === "block";
   document.getElementById("pan-btypes")!.hidden = !inBlocks;
   document.getElementById("pan-members")!.hidden = !inBlocks;
+  const back = document.getElementById("pan-parent") as HTMLButtonElement;
+  back.hidden = !inBlocks || !blockParent;
+  back.textContent = blockParent ? `← 一级行业 · ${blockParent.name}` : "";
   // 搜索框语义随模式切换：板块模式只筛板块名
   const q = document.getElementById("pan-q") as HTMLInputElement;
   q.placeholder = inBlocks ? "搜板块名称" : tab === "index" ? "搜指数名称" : "搜代码 / 名称";
@@ -365,6 +379,7 @@ async function load(): Promise<void> {
 
 /** 板块监测上半区：类型清单（概念/行业/…）；无选中时自动选第一条 */
 async function loadBlocks(): Promise<void> {
+  const revision = ++blockRevision;
   const count = document.getElementById("pan-count")!;
   try {
     if (!blkPager) blkPager = createPager(document.getElementById("pan-pager")!, "panorama_blocks", () => void loadBlocks());
@@ -372,7 +387,9 @@ async function loadBlocks(): Promise<void> {
     const q = (document.getElementById("pan-q") as HTMLInputElement).value.trim() || undefined;
     const r = await marketApi.zyBlocks({
       type_code: blockType, sort: blockSortParam(), page: blkPager.page, size: blkPager.size, q,
+      parent_code: blockParent?.code,
     });
+    if (revision !== blockRevision || tab !== "block") return;
     blkPager.update(r.total);
     (tbl as DataTable<ZyBlockRow>).render(r.items, (blkPager.page - 1) * blkPager.size);
     navRows = [];                             // 板块行不是个股：双击不跳详情
@@ -391,12 +408,14 @@ async function loadBlocks(): Promise<void> {
     markSelectedBlock();
     applyPending();                           // 键盘翻到页尾：新一页首行自动接上
   } catch {
+    if (revision !== blockRevision || tab !== "block") return;
     count.textContent = "加载失败";
   }
 }
 
 /** 板块监测下半区：选中板块的成分股（行点击 → 右栏分时/日K 联动） */
 async function loadMembers(): Promise<void> {
+  const revision = ++memberRevision;
   ensureMemberTable();
   const title = document.getElementById("pan-mem-title")!;
   const count = document.getElementById("pan-mem-count")!;
@@ -408,14 +427,21 @@ async function loadMembers(): Promise<void> {
     return;
   }
   try {
+    const code = curBlock.code;
     const r = await marketApi.zyBlockMembers(curBlock.code, {
       sort: memberSortParam(), page: memPager!.page, size: memPager!.size,
     });
+    if (revision !== memberRevision || curBlock?.code !== code || tab !== "block") return;
     memPager!.update(r.total);
     memTbl!.render(r.items, (memPager!.page - 1) * memPager!.size);
     title.textContent = `成分股 · ${curBlock.name}`;
     count.textContent = `共 ${r.total} 只`;
+    if (autoLink && r.items.length) {
+      autoLink = false;
+      void setLink(r.items[0].symbol, r.items[0].name || r.items[0].symbol, r.items[0]);
+    }
   } catch {
+    if (revision !== memberRevision || tab !== "block") return;
     count.textContent = "加载失败";
   }
 }
@@ -503,6 +529,9 @@ export function loadPanorama(): void {
 }
 
 export function initPanorama(): void {
+  document.getElementById("pan-parent")!.addEventListener("click", () => {
+    blockParent = null; curBlock = null; autoLink = true; blkPager?.reset(); syncHead(); void loadBlocks();
+  });
   document.getElementById("pan-refresh")!.addEventListener("click", loadAll);
   // 分时图头右上角「加自选」：未收藏→加默认分组；已收藏→打开分组面板（改组/移出）
   document.getElementById("pan-watch")!.addEventListener("click", () => {
@@ -534,6 +563,7 @@ export function initPanorama(): void {
     const b = (e.target as HTMLElement).closest<HTMLElement>("button[data-bt]");
     if (!b) return;
     blockType = Number(b.dataset.bt);
+    blockParent = null; autoLink = true;
     curBlock = null;                      // 换类型：清选中，下方自动跟首条
     document.querySelectorAll<HTMLElement>("#pan-btypes button").forEach((x) =>
       x.classList.toggle("on", x === b));

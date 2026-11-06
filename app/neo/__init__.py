@@ -1,0 +1,1 @@
+"""Private NEO delegation surface."""

@@ -45,6 +45,13 @@ CONDITIONS: tuple[dict[str, Any], ...] = (
      "op": "<=", "default": 20, "min": 2, "max": 100, "step": 1, "unit": "",
      "default_on": False, "dep": "trend",
      "title": "当前负柱幅度 |STICKV| 不超过阈值（越小越贴近零轴）；全市场 |STICKV| 中位数约 50"},
+    # 钱袋子（钱眼掘金 ZigZag 低点）：低点后反弹 6% 才确认，比趋势橙更早。
+    # 默认关闭——它和「短线/中线橙」逻辑相反（低点确认时价格通常还在 MA10 下方），
+    # 硬叠加会把命中数压到接近 0，适合单独筛选或配「40日均量」做反转确认。
+    {"key": "money", "label": "钱袋子", "kind": "value", "field": "money_ago",
+     "op": "<=", "default": 5, "min": 0, "max": 60, "step": 1, "unit": "日",
+     "default_on": False,
+     "title": "近 N 个交易日内出现过钱袋子（ZigZag 低点，反弹 6% 确认）；数值为距今天数，越小越新鲜"},
 )
 
 _KEYS = {c["key"] for c in CONDITIONS}

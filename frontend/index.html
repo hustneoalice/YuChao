@@ -54,6 +54,9 @@
   <nav class="rail" id="rail">
     <a class="on" data-page="market" data-ic="chart-line-up" data-t="行情" data-sz="21"></a>
     <a data-page="panorama" data-ic="trend-up" data-t="全景" data-sz="21"></a>
+    <a data-page="mainforce" data-ic="chart-line-up" data-t="主力军情" data-sz="21"></a>
+    <a data-page="motion" data-ic="lightning" data-t="主力动向" data-sz="21"></a>
+    <a data-page="chase" data-ic="trend-up" data-t="涨停追击" data-sz="21"></a>
     <a data-page="watchlist" data-ic="star" data-t="自选" data-sz="21"></a>
     <a data-page="targets" data-ic="funnel-simple" data-t="目标" data-sz="21"></a>
     <a data-page="sectors" data-ic="squares-four" data-t="板块" data-sz="21"></a>
@@ -78,6 +81,8 @@
             <!-- 个股信息条（最上）：名称/代码/行业 + 现价/涨跌幅/开高低昨收 + 收藏 -->
             <div class="kl-symbar" id="kl-symbar" hidden>
               <span class="ksy-head" id="kl-head"></span>
+              <!-- 自选标注：有标注时常显最新一条，悬停看全部，点击编辑 -->
+              <span class="ksy-notes" id="kl-notes"></span>
               <button class="cbtn" id="kl-watch" title="收藏 / 分组设置"><span data-ic="heart" data-sz="13"></span></button>
             </div>
             <div class="chartbar">
@@ -165,11 +170,12 @@
         <div class="pan-left">
           <div class="phead2">
             <span class="seg" id="pan-tabs">
-              <button class="on" data-t="hsa">沪深A股</button><button data-t="sha">沪市A股</button><button data-t="sza">深市A股</button><button data-t="cyb">创业板</button><button data-t="kc">科创板</button><button data-t="fund_sh">上证基金</button><button data-t="fund_sz">深证基金</button><button data-t="block">板块监测</button><button data-t="index">指数</button>
+              <button class="on" data-t="hsa">沪深A股</button><button data-t="sha">沪市A股</button><button data-t="sza">深市A股</button><button data-t="cyb">创业板</button><button data-t="kc">科创板</button><button data-t="fund_sh">上证基金</button><button data-t="fund_sz">深证基金</button><button data-t="block">板块</button><button data-t="index">指数</button>
             </span>
             <span class="seg" id="pan-btypes" hidden>
-              <button class="on" data-bt="2">概念</button><button data-bt="4">行业</button><button data-bt="9">题材</button><button data-bt="1">地域</button><button data-bt="8">风格</button>
+              <button class="on" data-bt="2">概念</button><button data-bt="4">行业</button><button data-bt="9">题材</button><button data-bt="1">地域</button><button data-bt="8">风格</button><button data-bt="6">雷达</button>
             </span>
+            <button class="hbtn" id="pan-parent" hidden></button>
             <span class="sub" id="pan-asof"></span>
             <span class="sp"></span>
             <span class="sub" id="pan-count"></span>
@@ -216,6 +222,68 @@
     </section>
 
     <!-- ═══════════ 目标 ═══════════ -->
+    <section class="page" id="page-mainforce">
+      <div class="mf-head"><h2>主力军情</h2><span class="mf-subtitle">收盘资金 · 板块与个股</span><span class="sp"></span><button class="hbtn" id="mf-refresh">刷新</button></div>
+      <div class="mf-controls">
+        <div id="mf-tabs" role="group" aria-label="资金视图"><button data-view="blocks" class="on" aria-pressed="true">板块</button><button data-view="stocks" aria-pressed="false">个股</button></div>
+        <select id="mf-types" aria-label="板块分类"><option value="4">行业</option><option value="2">概念</option><option value="1">地域</option></select>
+        <label>资金截止日 <input id="mf-date" type="date"></label><button class="hbtn" id="mf-latest">最新资金日</button>
+        <label>交易日周期 <select id="mf-period"><option value="1">1日</option><option value="3">3日</option><option value="5">5日</option><option value="10">10日</option><option value="34">34日</option><option value="55">55日</option></select></label>
+        <label><span id="mf-search-label">板块搜索</span><input id="mf-q" type="search" placeholder="搜索板块名称"></label>
+        <button class="hbtn" id="mf-back">返回全部板块</button>
+      </div>
+      <div class="mf-note">沿用资金卡口径：主力净额、中单净额（游资）、小单净额（散户）。介入度 = 累计净额 / 同期流通市值合计，占比 = 累计净额 / 同期成交额合计。净额单位：亿元；比例单位：%。</div>
+      <div class="mf-note">使用当前成分回看历史，不能还原历史成分。资金覆盖 = 有资金记录的成分股日 / 预期成分股日；分母不完整的比例与缺失数据均显示 —，不视为 0。涨幅、涨停家数使用资金截至日行情。</div>
+      <div class="mf-statusbar"><span id="mf-scope">全部板块</span><span id="mf-status" role="status" aria-live="polite">请选择条件</span><button class="hbtn" id="mf-retry" hidden>重试</button></div>
+      <div id="mf-meta"></div>
+      <div id="mf-wrap" aria-label="主力军情资金表" aria-busy="false"></div>
+      <div class="pager" id="mf-pager"></div>
+    </section>
+
+    <section class="page" id="page-motion">
+      <div class="tp-head"><h2>主力动向</h2><span class="tp-sub">试验版 · 近似力度榜</span><span class="sp"></span>
+        <button class="hbtn" id="motion-refresh">刷新</button></div>
+      <div class="tp-bar">
+        <label>评分日期 <input id="motion-date" type="date"></label>
+        <button class="hbtn" id="motion-latest">最新资金日</button>
+        <span class="tp-sep"></span>
+      </div>
+      <div class="tp-note" id="motion-note">试验模型，非众赢原公式。</div>
+      <div class="tp-note">资金净额＋当日占比＋相对20日放量。沪深A股统一评分，只纳入主力净流入为正且同日成交额、此前20日成交量齐全的股票。榜单最多50只；表头排序仅作用于榜内股票。</div>
+      <div class="tp-status"><span id="motion-status" role="status" aria-live="polite"></span>
+        <span id="motion-meta" class="tp-meta"></span></div>
+      <div class="tp-table" id="motion-wrap" aria-label="主力动向近似力度榜" aria-busy="false"></div>
+      <details class="tp-help"><summary>评分说明</summary><p>三项因子经固定参数拟合，贡献可能为负；不是手工百分比权重。分数仅供比较，不是买入概率，未限定0～1000范围。“查看贡献”可核对各项与基准分的加总。</p></details>
+    </section>
+
+    <section class="page" id="page-chase">
+      <div class="tp-head"><h2>涨停追击</h2><span class="tp-sub">收盘版 · 留存快照统计</span><span class="sp"></span>
+        <button class="hbtn" id="chase-refresh">刷新</button></div>
+      <div class="tp-bar">
+        <label>行情日期 <input type="date" id="chase-date" list="chase-dates"></label><datalist id="chase-dates"></datalist>
+        <button class="hbtn" id="chase-latest">最新快照日</button>
+        <span class="tp-sep"></span>
+        <span id="chase-markets" class="tp-checks" role="group" aria-label="市场筛选"><label><input type="checkbox" value="main" checked>沪深主板</label><label><input type="checkbox" value="chi" checked>创业板</label><label><input type="checkbox" value="star" checked>科创板</label><label><input type="checkbox" value="bj" checked>北交所</label></span>
+        <label><input type="checkbox" id="chase-st">显示ST股票</label>
+      </div>
+      <div class="tp-kpis" id="chase-cards"></div>
+      <div class="tp-bar">
+        <div class="seg" id="chase-tabs" role="group" aria-label="涨停追击模块"><button class="on" data-view="stocks" aria-pressed="true">涨停个股</button><button data-view="ladder" aria-pressed="false">连板天梯</button><button data-view="blocks" aria-pressed="false">强势板块</button></div>
+        <span id="chase-stock-controls"><label>股票池 <select id="chase-pool"><option value="today">当日涨停</option><option value="yesterday">昨日涨停</option><option value="broken">触板未封</option></select></label> <label>封板形态 <select id="chase-type"><option value="">全部</option><option value="sealed">非一字封板</option><option value="one">一字封板</option></select></label></span>
+        <span id="chase-ladder-controls" hidden><label>连板高度 <select id="chase-height"><option value="">全部</option><option value="1">已确认首板</option><option value="2">二板</option><option value="3">三板</option><option value="4">四板</option><option value="5">至少五板</option><option value="unknown">历史不足</option></select></label></span>
+        <span id="chase-block-controls" hidden><label>板块分类 <select id="chase-category"><option value="">全部</option><option>行业</option><option>概念</option><option>地域</option><option>题材</option></select></label> <label>区间涨幅 <select id="chase-period"><option value="3">3日</option><option value="5">5日</option><option value="10">10日</option></select></label></span>
+        <label>榜内搜索 <input type="search" id="chase-q" placeholder="股票代码、名称或板块"></label>
+        <button class="hbtn" id="chase-back" hidden>返回板块列表</button>
+      </div>
+      <div class="tp-note" id="chase-note">首次涨停时间、最终封板时间、最大封单额需要盘中事件记录，暂不推测。连板历史不全标≥N板；有效样本封板率排除涨停价/行情未知的股票。</div>
+      <div class="tp-status"><b id="chase-scope" class="tp-scope"></b>
+        <span id="chase-status" role="status" aria-live="polite"></span>
+        <span id="chase-meta" class="tp-meta"></span></div>
+      <div class="tp-table" id="chase-wrap" aria-label="涨停追击数据表" aria-busy="false"></div>
+      <div class="pager" id="chase-pager"></div>
+      <details class="tp-help"><summary>本版统计口径</summary><p>当前快照价达到同日精确涨停价判定封板；最高触及但当前未封为触板未封。一字封板要求开、高、低均为涨停价。封单量按同日买一手数×100换为股，仅买一价等于涨停价时取值；封单额=买一价×封单股数。封成比=封单额/同日成交额，封流比=封单额/流通市值，均显示原始比值。市场和ST筛选同时作用于本版摘要与列表。历史快照不足时仅展示已确认数量，≥表示下限。</p></details>
+    </section>
+
     <section class="page" id="page-targets">
       <div class="phead">
         <span class="crumb">目标 /</span><h1>目标监控</h1>
@@ -231,11 +299,26 @@
           <span class="sub" id="tgt-status"></span>
         </div>
         <div id="tgt-conds"></div>
+        <!-- 六分段理论示意图：示意 K 线 + 短线操盘叠加，六段各拉线说明（可收起） -->
+        <div class="segmap" id="tgt-segmap">
+          <div class="segmap-head">
+            <b>六分段理论示意图</b>
+            <span class="segmap-sub">围绕日线短线趋势线（MA7 快 / MA10 慢）的六个位置 · 超跌 → 反弹 → 突破 → 超涨 → 回踩 → 跌破</span>
+            <span class="sp"></span>
+            <span class="segmap-lg" id="tgt-segmap-lg"></span>
+            <button class="hbtn" id="tgt-segmap-btn" aria-expanded="true">收起</button>
+          </div>
+          <div class="segmap-body" id="tgt-segmap-body"></div>
+        </div>
         <div class="tblwrap" style="flex:1" id="tgt-wrap"></div>
         <div id="tgt-pager" class="pager"></div>
         <div class="empty" id="tgt-empty" style="display:none;padding:44px 20px">
           <b>没有满足当前勾选条件的标的</b>
-          <span>放宽条件勾选后即时重筛。</span>
+          <span>当前 <span id="tgt-empty-conds">0</span> 个条件同时满足 · ST 已剔除</span>
+          <span class="tgt-empty-acts">
+            <button type="button" class="chip" id="tgt-empty-money">只看钱袋</button>
+            <button type="button" class="chip" id="tgt-empty-clear">清空条件</button>
+          </span>
         </div>
       </div>
     </section>
@@ -270,33 +353,63 @@
 
     <!-- ═══════════ 板块 ═══════════ -->
     <section class="page" id="page-sectors">
-      <div class="phead">
-        <span class="crumb">板块 /</span><h1>板块热力</h1>
+      <div class="tp-head">
+        <span class="tp-crumb">板块 /</span><h2>板块全景</h2>
+        <span class="tp-sub">涨跌榜 · 热度榜 · 热力图 · 点击板块联动成分股</span>
         <span class="sp"></span>
-        <input id="sec-q" type="search" placeholder="搜板块…" style="width:130px">
-        <span class="seg" id="sec-view">
-          <button class="on" data-v="heat">热力</button><button data-v="rank">排行</button>
-        </span>
-        <span class="seg" id="sec-type">
-          <button class="on" data-t="industry">行业</button><button data-t="concept">概念</button>
-        </span>
-        <span class="seg" id="sec-look">
-          <button data-l="5">5日</button><button data-l="10">10日</button><button class="on" data-l="20">20日</button>
-        </span>
+        <button class="hbtn" id="sec-refresh" data-ic="arrows-clockwise" data-sz="13">刷新</button>
       </div>
-      <div style="display:flex;gap:12px;flex:1;min-height:0">
-        <div class="panel" style="flex:1.4;min-height:0;display:flex;flex-direction:column">
-          <div class="phead2"><h3 id="sec-title">行业热力</h3><span class="sub" id="sec-sub">色深 = 涨跌幅强度 · 点击查看成分股</span></div>
-          <div class="tblwrap" style="flex:1;padding:14px" id="sec-heatwrap"><div class="heat" id="heat"></div></div>
-          <div class="tblwrap" style="flex:1;display:none" id="sec-rankwrap"></div>
-          <div class="pager" id="sec-rank-pager" style="display:none"></div>
-        </div>
-        <div class="panel" style="flex:1;min-width:0;display:flex;flex-direction:column" id="sec-members">
+      <div class="tp-bar">
+        <span class="seg" id="sec-type">
+          <button class="on" data-t="4">行业</button><button data-t="2">概念</button><button data-t="9">题材</button><button data-t="1">地域</button><button data-t="8">风格</button><button data-t="6">雷达</button>
+        </span>
+        <span class="seg" id="sec-view">
+          <button class="on" data-v="heat">热力图</button><button data-v="rank">涨幅榜</button><button data-v="hot">热度榜</button>
+        </span>
+        <input id="sec-q" type="search" placeholder="搜板块名称 / 代码">
+        <span class="tp-sep"></span>
+        <span class="tp-meta" id="sec-asof" style="flex:0 0 auto"></span>
+      </div>
+      <div class="tp-status">
+        <b class="tp-scope" id="sec-scope">行业板块</b>
+        <span id="sec-status" role="status" aria-live="polite">加载中…</span>
+        <span class="tp-meta" id="sec-note"></span>
+      </div>
+      <div class="sec-split">
+        <div class="panel sec-main">
           <div class="phead2">
-            <h3 id="mem-title">成分股</h3>
-            <span class="sub" id="mem-date"></span>
+            <h3 id="sec-viewtitle">行业热力图</h3>
+            <span class="sub" id="sec-views">面积按成交额分档 · 色深 = 均涨强弱</span>
+            <span class="sp"></span>
+            <span class="sub" id="sec-total"></span>
           </div>
-          <div class="tblwrap" style="flex:1" id="mem-wrap"></div>
+          <div class="sec-body" id="sec-heatwrap"><div class="blk-heat" id="blk-heat"></div></div>
+          <div class="tp-table" id="sec-rankwrap" hidden></div>
+          <div class="sec-body" id="sec-hotwrap" hidden><div class="blk-hotlist" id="blk-hot"></div></div>
+          <div class="pager" id="sec-rank-pager" hidden></div>
+          <div class="pager" id="sec-hot-pager" hidden></div>
+        </div>
+        <div class="panel sec-detail">
+          <div class="sec-dhead">
+            <div class="sec-dtitle">
+              <span class="sec-code num" id="sec-code">—</span>
+              <h3 id="sec-name">选择板块</h3>
+              <span class="sec-tag" id="sec-tag"></span>
+            </div>
+            <div class="sec-dchg">
+              <b id="sec-avg">—</b>
+              <span>板块均涨</span>
+            </div>
+          </div>
+          <div class="sec-kpis" id="sec-kpis"></div>
+          <div class="sec-breadth" id="sec-breadth"></div>
+          <div class="phead2 sec-memhead">
+            <h3>成分股</h3>
+            <span class="sub" id="mem-sub">点击表头排序 · 点击行查看个股</span>
+            <span class="sp"></span>
+            <span class="sub" id="mem-count"></span>
+          </div>
+          <div class="tp-table" id="mem-wrap"></div>
           <div class="pager" id="mem-pager"></div>
         </div>
       </div>
@@ -304,44 +417,27 @@
 
     <!-- ═══════════ 核心标 ═══════════ -->
     <section class="page" id="page-corepicks">
-      <div class="phead">
-        <span class="crumb">核心标 /</span><h1>核心标 · 追涨 / 低吸</h1>
+      <div class="tp-head"><span class="tp-crumb">核心标 /</span><h2>量化核心模型 · 强轮动</h2>
+        <span class="tp-sub">交易日 20:00 自动计算</span><span class="sp"></span>
+        <button class="hbtn" id="cp-refresh">刷新</button>
+        <button class="hbtn primary" id="cp-run">立即计算</button></div>
+      <div class="tp-bar">
+        <label>结果日期 <input id="cp-date" type="date" aria-label="核心标结果日期"></label>
+        <button class="hbtn" id="cp-latest">最新结果</button>
+        <label>已存结果 <select id="cp-history" aria-label="已保存结果日期"><option value="">最新结果</option></select></label>
       </div>
-      <div style="display:flex;gap:8px;align-items:center;flex-wrap:wrap">
-        <span class="chip on num" id="cp-date">—</span>
-        <span class="chip" id="cp-follow" data-ic="star" data-sz="11" style="cursor:default">仅看自选</span>
-        <span class="seg" id="cp-tabs">
-          <button class="on" data-t="chase">追涨池</button><button data-t="dip">低吸池</button><button data-t="all">全部</button>
-        </span>
-        <span class="sp" style="flex:1"></span>
-        <span style="font-size:11px;color:var(--faint)">仅提供基于公开数据的规则化分析，不构成投资建议</span>
-      </div>
-      <div class="panel" style="flex:1;min-height:0;display:flex;flex-direction:column">
-        <section data-core-state="data" class="on">
-          <div class="tblwrap" style="flex:1" id="cp-wrap"></div>
-          <div class="pager" id="cp-pager"></div>
-          <div style="padding:10px 14px;border-top:1px solid var(--border);display:flex;gap:16px;align-items:center;font-size:11px;color:var(--faint)">
-            <span>资金分公开展示 · 趋势 / 位置 / 六分段属 VIP 三因子明细（服务端计算）</span>
-            <span class="sp" style="flex:1"></span>
-            <span>共 <b class="num" id="cp-total">0</b> 只</span>
-          </div>
-        </section>
-        <section data-core-state="empty"><div class="empty">
-          <span data-ic="target" data-sz="34" style="color:var(--faint)"></span>
-          <b>所选日期没有核心标</b>
-          <span>当日未触发任何「追涨 / 低吸」信号，换个池范围或稍后再看。</span>
-        </div></section>
-        <section data-core-state="loading"><div class="loading">
-          <div style="width:100%"><div class="skel"></div><div class="skel"></div><div class="skel" style="width:64%"></div></div>
-          <span>正在读取核心标信号</span>
-        </div></section>
-        <section data-core-state="error"><div class="error">
-          <span data-ic="warning" data-sz="34" style="color:var(--up)"></span>
-          <b>核心标服务无响应</b>
-          <span id="cp-err-msg">请求失败，点击重试。</span>
-          <button class="hbtn" id="cp-retry" data-ic="arrows-clockwise" data-sz="12">重试</button>
-        </div></section>
-      </div>
+      <div class="tp-note">行业 / 题材 / 地域全部涨幅 >2% 且主力净流入为正的板块，排除昨日优选板块。每个板块先取主力净流入前12名，再按当日主力占比降序选最多4只（全部A股统一排名）；同股可入选多个板块，不足4只不自动放宽。</div>
+      <div class="tp-note" id="cp-note"></div>
+      <div class="tp-status"><span id="cp-status" role="status" aria-live="polite"></span><span id="cp-meta" class="tp-meta"></span></div>
+      <div class="tp-status"><b class="tp-scope">核心标名单</b><span>每个合格板块最多 4 只</span>
+        <span id="cp-empty" class="tp-meta"></span></div>
+      <div class="tp-table" id="cp-wrap" aria-label="核心标名单"></div>
+      <details class="tp-help"><summary>优选板块与入选依据</summary><div id="cp-selected"></div></details>
+      <details class="tp-help"><summary>板块筛选过程 · 全部板块</summary>
+        <div class="seg" id="cp-kinds"><button class="on" data-kind="行业">行业</button><button data-kind="题材">题材</button><button data-kind="地域">地域</button></div>
+        <div class="tblwrap" id="cp-candidates"></div>
+      </details>
+      <details class="tp-help"><summary>运行记录</summary><div id="cp-runs"></div></details>
     </section>
 
     <!-- ═══════════ 功能卡片 ═══════════ -->
@@ -377,6 +473,9 @@
 <nav class="mtabs" id="mtabs">
   <a class="on" data-page="market"><span data-ic="chart-line-up" data-sz="19"></span><span>行情</span></a>
   <a data-page="panorama"><span data-ic="trend-up" data-sz="19"></span><span>全景</span></a>
+  <a data-page="mainforce"><span data-ic="chart-line-up" data-sz="19"></span><span>主力军情</span></a>
+  <a data-page="motion"><span data-ic="lightning" data-sz="19"></span><span>主力动向</span></a>
+  <a data-page="chase"><span data-ic="trend-up" data-sz="19"></span><span>涨停追击</span></a>
   <a data-page="watchlist"><span data-ic="star" data-sz="19"></span><span>自选</span></a>
   <a data-page="targets"><span data-ic="funnel-simple" data-sz="19"></span><span>目标</span></a>
   <a data-page="sectors"><span data-ic="squares-four" data-sz="19"></span><span>板块</span></a>
@@ -438,7 +537,7 @@
     <div style="display:flex;align-items:center;gap:8px;font-size:12px;color:var(--dim);margin-bottom:2px">
       <span>六分段位置</span><span class="sp" style="flex:1"></span><b class="num" style="color:var(--text)" id="dt-seg-v"></b></div>
     <div class="sixseg" id="dt-sixseg"></div>
-    <div class="sixlab"><span>超卖</span><span>低位</span><span>弱势</span><span>回升</span><span>强势</span><span>超买</span></div>
+    <div class="sixlab"><span>超跌</span><span>反弹</span><span>突破</span><span>超涨</span><span>回踩</span><span>跌破</span></div>
   </div>
   <div class="kv" id="dt-kv"></div>
   <div class="acts">
@@ -467,6 +566,36 @@
     <button class="hbtn" data-close>取消</button>
     <button class="hbtn primary" id="wm-ok">确定</button>
   </div>
+</div>
+
+<div class="modal" id="modal-groups">
+  <div class="mhead"><h3>自选分组管理</h3><span class="sp"></span>
+    <span class="tag" id="gm-count"></span>
+    <button class="mclose" data-close><span data-ic="x" data-sz="13"></span></button></div>
+  <p class="mdesc">默认分组不可改名 / 删除；删除分组后，组内股票自动回到「默认」。</p>
+  <div class="gm-list" id="gm-list"></div>
+  <div class="gm-add">
+    <input class="field" id="gm-new" placeholder="新分组名称" maxlength="16">
+    <button class="hbtn primary" id="gm-add" data-ic="plus" data-sz="12">添加</button>
+  </div>
+  <div class="acts"><button class="hbtn" data-close>完成</button></div>
+</div>
+
+<div class="modal" id="modal-wl-note" style="width:min(560px,94vw)">
+  <div class="mhead"><h3 id="wn-title">标注</h3><span class="sp"></span>
+    <span class="tag flat" id="wn-count">暂无</span>
+    <button class="mclose" data-close><span data-ic="x" data-sz="13"></span></button></div>
+  <p class="mdesc">按日期记录你的操作策略 / 提醒，一只股票可多条；悬停自选列表的「标注」即可快速查看。</p>
+  <div class="wn-list" id="wn-list"></div>
+  <div class="wn-add">
+    <div class="wn-add-top">
+      <input class="field wn-d" id="wn-date" type="date" title="标注日期">
+      <span class="sp" style="flex:1"></span>
+      <button class="hbtn primary" id="wn-add-btn" data-ic="plus" data-sz="12">添加</button>
+    </div>
+    <textarea class="wn-new" id="wn-text" rows="2" maxlength="500" placeholder="操作策略 / 提醒，例如：跌破 20 日线减仓（⌘/Ctrl + Enter 添加）"></textarea>
+  </div>
+  <div class="acts"><button class="hbtn" data-close>完成</button></div>
 </div>
 
 <div class="modal" id="modal-pay-ok" style="width:min(380px,92vw);text-align:center">

@@ -2,8 +2,7 @@
 
 清单 1075 个（地域/概念/行业/风格/题材）匿名 GET 一次拉齐；成分逐板块
 拉（~1075 请求/天，低频日级）。行情不在此采——查询时成分 × market_snapshot
-本地聚合。非交易日清单照拉（静态），成分接口返回空则该板块跳过（容忍，
-周一交易时段自动补齐）。
+本地聚合。优先使用Windows本地分类快照；远端空响应保留原板块成分。
 """
 from __future__ import annotations
 
@@ -12,6 +11,7 @@ import time
 
 from ..writer import writer
 from . import zy_source
+from .zy_local import LOCAL_CONFIG, import_config
 
 logger = logging.getLogger("yuchao.updater")
 
@@ -23,12 +23,17 @@ def update_zy_blocks(progress=None, ctx=None) -> dict:
     progress = progress or (lambda **k: None)
     try:
         conn = writer.conn()
+        if LOCAL_CONFIG and LOCAL_CONFIG.exists():
+            detail = import_config(conn, LOCAL_CONFIG)
+            result.update(status="success", rows=detail['members'],
+                          detail=f"Windows板块快照：{detail['blocks']}板块 / {detail['members']}关系 / {detail['stocks']}只股票")
+            result['elapsed'] = round(time.time() - start, 1)
+            return result
         blocks = zy_source.fetch_zy_blocks(progress=progress, cancel=cancel)
         if not blocks:
             raise RuntimeError("板块清单为空（接口可能变更/被限流）")
         progress(stage="写板块清单", total=len(blocks), done=len(blocks),
                  message=f"众赢板块清单 {len(blocks)} 个")
-        conn.execute("DELETE FROM zy_block")
         conn.executemany(
             "INSERT OR REPLACE INTO zy_block "
             "(block_code, block_name, type_code, parent_code, sort_no) "
@@ -43,14 +48,20 @@ def update_zy_blocks(progress=None, ctx=None) -> dict:
         rows = [(code, m["symbol"], m.get("stock_name"))
                 for code, ms in members.items() for m in ms]
         if rows:
-            conn.execute("DELETE FROM zy_block_member")
-            conn.executemany(
-                "INSERT OR REPLACE INTO zy_block_member "
-                "(block_code, symbol, stock_name) VALUES (?,?,?)", rows)
-            conn.commit()
+            conn.execute("BEGIN TRANSACTION")
+            try:
+                for code in members:
+                    if members[code]:
+                        conn.execute("DELETE FROM zy_block_member WHERE block_code=?", [code])
+                conn.executemany(
+                    "INSERT OR REPLACE INTO zy_block_member "
+                    "(block_code, symbol, stock_name) VALUES (?,?,?)", rows)
+                conn.execute("COMMIT")
+            except Exception:
+                conn.execute("ROLLBACK")
+                raise
         else:
-            # 非交易日上游返回空数组：保留上一版映射，避免把本地成分清空
-            logger.warning("[ZyBlocks] 上游成分全为空（非交易日？），保留上一版成分映射")
+            logger.warning("[ZyBlocks] 上游成分全为空，保留上一版成分映射")
         n_by_type: dict[int, int] = {}
         for b in blocks:
             n_by_type[b["type_code"]] = n_by_type.get(b["type_code"], 0) + 1

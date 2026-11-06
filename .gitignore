@@ -13,6 +13,8 @@ data/*.duckdb
 data/*.duckdb.wal
 data/*.wal
 data/*.bak*
+data/zy_block_config.xml
+data/zy_block_import.json
 
 # updater 运行时产物（进度快照 / 事件总线 / 控制通道 / 自愈账本）
 data/update_progress.json

@@ -45,6 +45,36 @@ export function stockSearch(o: StockSearchOpts): StockSearchHandle {
   const limit = o.limit ?? 10;
   let seq = 0;
   let hits: SearchHit[] = [];
+  let active = -1;                            // 键盘选中项（-1 = 未选中，回车走第一行）
+
+  /* 一键清空：输入框外包一层，右侧浮出 ×（有内容才出现），点后回到最近搜索 */
+  const wrap = document.createElement("span");
+  wrap.className = "sfield";
+  o.input.parentElement?.insertBefore(wrap, o.input);
+  wrap.appendChild(o.input);
+  const clr = document.createElement("button");
+  clr.type = "button";
+  clr.className = "s-clear";
+  clr.title = "清空";
+  clr.setAttribute("aria-label", "清空搜索");
+  clr.textContent = "✕";
+  wrap.appendChild(clr);
+  const syncClear = (): void => { clr.classList.toggle("on", !!o.input.value); };
+  o.input.addEventListener("input", syncClear);
+  o.input.addEventListener("focus", syncClear);
+  o.input.addEventListener("blur", syncClear);
+  clr.addEventListener("mousedown", (e) => e.preventDefault());   // 保持焦点，不闪下拉
+  clr.addEventListener("click", () => {
+    o.input.value = "";
+    window.clearTimeout(debounce);
+    hits = [];
+    seq++;
+    active = -1;
+    syncClear();
+    o.input.focus();
+    drawHist();
+  });
+  syncClear();
 
   const itemHtml = (u: PickHit, tailHtml = ""): string => {
     const chg = chgCache.get(u.symbol);
@@ -89,7 +119,25 @@ export function stockSearch(o: StockSearchOpts): StockSearchHandle {
 
   const draw = (html: string): void => {
     o.list.innerHTML = html;
+    active = -1;                              // 结果/历史重绘后从第一行重新开始
     o.setVisible?.(true);
+  };
+
+  /* 键盘选中：↑↓ 在结果间移动并高亮，回车打开当前项（未选中则第一行） */
+  const itemsOf = (): HTMLElement[] =>
+    Array.from(o.list.querySelectorAll<HTMLElement>(".sitem[data-c]"));
+  const mark = (i: number): void => {
+    const els = itemsOf();
+    if (!els.length) { active = -1; return; }
+    active = i < 0 ? 0 : i >= els.length ? els.length - 1 : i;
+    els.forEach((el, k) => el.classList.toggle("on", k === active));
+    els[active].scrollIntoView({ block: "nearest" });
+  };
+  const step = (dir: 1 | -1): void => {
+    const els = itemsOf();
+    if (!els.length) return;
+    if (dir === 1) mark(active < 0 ? 0 : active + 1 < els.length ? active + 1 : 0);
+    else mark(active <= 0 ? els.length - 1 : active - 1);
   };
 
   /* 缓存命中的涨跌幅随绘制同步带上，未命中的异步补（mySeq 传当前序号，不推进） */
@@ -125,11 +173,27 @@ export function stockSearch(o: StockSearchOpts): StockSearchHandle {
   });
   o.input.addEventListener("focus", () => { if (!o.input.value.trim()) drawHist(); });
   o.input.addEventListener("keydown", (e) => {
+    if (e.key === "ArrowDown" || e.key === "ArrowUp") {
+      e.preventDefault();                     // 不让光标在输入框里乱跳
+      step(e.key === "ArrowDown" ? 1 : -1);
+      return;
+    }
     if (e.key === "Enter") {
-      const f = o.list.querySelector<HTMLElement>(".sitem[data-c]");
+      const els = itemsOf();
+      const f = (active >= 0 && els[active]) || els[0];
       if (f) f.click();
     }
     if (e.key === "Escape") o.setVisible?.(false);
+  });
+  /* 鼠标悬停同步键盘选中，避免「指着一行、回车却开了第一行」 */
+  o.list.addEventListener("mousemove", (e) => {
+    const it = (e.target as HTMLElement).closest<HTMLElement>(".sitem[data-c]");
+    if (!it) return;
+    const i = itemsOf().indexOf(it);
+    if (i >= 0 && i !== active) {
+      active = i;
+      itemsOf().forEach((el, k) => el.classList.toggle("on", k === i));
+    }
   });
   if (o.setVisible && o.scope)
     document.addEventListener("click", (e) => {

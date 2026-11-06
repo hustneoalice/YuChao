@@ -1,5 +1,6 @@
 /* 入口：导航 / 全局搜索 / 主题 / SSE 接线 / 启动 */
 import "./styles.css";
+import "./mainforce.css";
 import { ic, injectIcons } from "./icons";
 import { authApi, getToken } from "./api";
 import { applyAppearance, getState, patch, setUser, subscribe } from "./store";
@@ -8,6 +9,9 @@ import { stockSearch } from "./searchbox";
 import { initAuth, refreshVipUI } from "./auth";
 import { initMarket, klResize, openStock, renderKline, renderRight } from "./pages/market";
 import { initPanorama, loadPanorama } from "./pages/panview";
+import { initMainforce, loadMainforce } from "./pages/mainforce";
+import { loadMotion } from "./pages/motion";
+import { loadChase } from "./pages/chase";
 import { initWatchlist, renderWatchlist } from "./pages/watchlist";
 import { initTargets, loadTargets } from "./pages/targets";
 import { initSectors, jumpSector, loadSectors } from "./pages/sectors";
@@ -26,6 +30,9 @@ function goPage(p: string): void {
   document.querySelectorAll("#mtabs a").forEach((a) => a.classList.toggle("on", (a as HTMLElement).dataset.page === p));
   if (p === "market") renderKline();
   if (p === "panorama") loadPanorama();
+  if (p === "mainforce") void loadMainforce();
+  if (p === "motion") void loadMotion();
+  if (p === "chase") void loadChase();
   if (p === "watchlist") renderWatchlist();   // 每次进入重画：与其他入口（收藏浮层/卡片）的分组选择保持同步
   if (p === "targets") loadTargets();
   if (p === "sectors" && !loaded.sectors) { loaded.sectors = true; void loadSectors(); }
@@ -149,6 +156,7 @@ function boot(): void {
   initAuth();
   initMarket();
   initPanorama();
+  initMainforce();
   initWatchlist();
   initTargets();
   initSectors();

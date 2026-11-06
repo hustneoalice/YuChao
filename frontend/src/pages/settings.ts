@@ -638,7 +638,6 @@ type ChipFace = { text: string; cls: string; title: string };
 /** 任务名在顶栏用日常说法（后端 label 是给数据页/日志看的技术名，含「快照」这类黑话）；
  *  以 kind 为键，比按字符串替换稳 —— 「行情快照」「库快照备份」替换成「行情」会出洋相。 */
 const PLAIN_KIND: Record<string, string> = {
-  market_snapshot: "盘中行情",
   quotes: "实时行情",
   sector_index: "板块行情",
   kline_update: "日K线",
@@ -646,7 +645,20 @@ const PLAIN_KIND: Record<string, string> = {
   valuation: "全市场估值",
   capital_flow: "资金流",
 };
-const plainLabel = (kind: string, label: string): string => PLAIN_KIND[kind] ?? label;
+/** 北京时间 HHMM（与会话时区无关）：A 股开盘口径不能跟用户本地钟点走 */
+function bjHHMM(): number {
+  const bj = new Date(Date.now() + (new Date().getTimezoneOffset() + 480) * 60_000);
+  return bj.getHours() * 100 + bj.getMinutes();
+}
+/** market_snapshot 按时段换词：15:05 后收盘快照还会补一轮（expected_asof 15:10 才切
+ *  当日），顶着「盘中行情」跑到 15:2x，盘后看着像还在盘中（2026-11-03 反馈）。 */
+const plainLabel = (kind: string, label: string): string => {
+  if (kind === "market_snapshot") {
+    const hhmm = bjHHMM();
+    return hhmm >= 925 && hhmm < 1505 ? "盘中行情" : hhmm < 925 ? "盘前行情" : "收盘行情";
+  }
+  return PLAIN_KIND[kind] ?? label;
+};
 /** 采集阶段名同规范化：「采集行情快照」→「采集行情」、「拉取快照」→「拉取行情」 */
 const plainStage = (s: string): string => s.replace(/行情快照/g, "行情").replace(/快照/g, "行情");
 let chipIdle: ChipFace = { text: "行情数据 · 检测中", cls: "", title: "正在检测行情数据状态" };
