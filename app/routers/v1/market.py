@@ -620,6 +620,8 @@ def targets(conds: str = Query(default="vol,short,mid,up20",
             trend_recent: int = Query(default=5, ge=1, le=250),
             trend_still_above: bool = True,
             trend_above_days: int = Query(default=1, ge=1, le=250),
+            tail: bool = Query(default=False,
+                               description="尾盘估算：14:50 后用快照价估算钱袋/地雷（收盘前可能变化）"),
             conn=Depends(get_conn)):
     """指标层后台定时预计算（target_scan / target_trend），条件层即时过滤：
     改条件或阈值即刻重筛（毫秒级），只有数据更新才重算指标层。
@@ -637,31 +639,59 @@ def targets(conds: str = Query(default="vol,short,mid,up20",
                              message=gate["message"])
     items, meta, vals, provisional = _target_scan(
         conn, conds, values, trend_mode, trend_recent,
-        trend_still_above, trend_above_days)
+        trend_still_above, trend_above_days, tail)
     return TargetScanOut(items=items[:limit], total_hits=len(items), values=vals,
                          provisional=provisional,
                          scanned=meta["scanned"], as_of=meta["as_of"],
                          computed_at=meta.get("computed_at", ""),
+                         tail_mode=bool(meta.get("tail_mode")),
+                         tail_at=meta.get("tail_at", ""),
                          data_date=gate["data_date"], lag=gate["lag"])
 
 
 def _target_scan(conn, conds: str, values: Optional[str],
                  trend_mode: str, trend_recent: int,
-                 trend_still_above: bool, trend_above_days: int):
+                 trend_still_above: bool, trend_above_days: int,
+                 tail: bool = False):
     """目标页条件叠加（端点与 Excel 导出共用）：返回 (items, meta, vals, provisional)。"""
     from ...foundation.target_trend import trend_matches
 
     want = screening.enabled_keys(conds)
     vals = screening.parse_values(values, want)
     rows, meta = repo.market.stock_targets_universe(conn)
+    meta = {**meta}                          # 预计算缓存 meta 不就地改
     trend_as_of = meta.get("trend_as_of") or meta["as_of"]
     provisional = bool(meta.get("provisional"))
     # 趋势字段常拼：负柱收敛/距零轴依赖 STICKV，钱袋子列（money_ago/money_cnt）
     # 无论是否勾选条件都要展示，所以这里不做条件判断（target_trend 行数仅几千，join 开销可忽略）
     trends = repo.market.stock_target_trends(conn) or {}
     rows = [{**row, **trends.get(row['symbol'], {}),
-             "trend_provisional": provisional}
+             "trend_provisional": provisional, "tail_provisional": False}
             for row in rows]
+
+    # 尾盘估算覆盖：仅当估算日新于正式 target_trend 且与最新快照日一致才采用；
+    # 正式数据（收盘 17:15）一旦追上当日，自动回到正式口径。
+    if tail:
+        tdata = repo.market.target_tail_snapshot(conn)
+        if tdata is not None:
+            try:
+                formal = conn.execute(
+                    "SELECT MAX(data_date) FROM target_trend").fetchone()[0]
+            except Exception:
+                formal = None
+            snap_day = conn.execute(
+                "SELECT MAX(trade_date) FROM market_snapshot WHERE kind = 'stock'"
+            ).fetchone()[0]
+            if (tdata["data_date"] > str(formal or "")
+                    and str(snap_day or "") == tdata["data_date"]):
+                trows = tdata["rows"]
+                for row in rows:
+                    hit = trows.get(row["symbol"])
+                    if hit:
+                        row.update(hit)
+                        row["tail_provisional"] = True
+                meta["tail_mode"] = True
+                meta["tail_at"] = str(tdata.get("snapshot_at") or "")
 
     def trend_hit(t: dict) -> bool:
         return (t.get('trend_data_date') == trend_as_of and
@@ -677,6 +707,11 @@ def _target_scan(conn, conds: str, values: Optional[str],
         items.sort(key=lambda t: (
             t.get('money_ago') if t.get('money_ago') is not None else 1e9,
             -(t.get('money_cnt') or 0), -seg_rank(t)))
+    elif "mine" in want:
+        # 地雷榜：风险信号同样按新鲜度排序（越近越靠前）
+        items.sort(key=lambda t: (
+            t.get('mine_ago') if t.get('mine_ago') is not None else 1e9,
+            -(t.get('mine_cnt') or 0), -seg_rank(t)))
     elif "negshrink" in want or "nearzero" in want:
         # 负柱收敛榜：越贴近零轴越靠前（neg_abs 升序），同幅度再按收敛天数/操作优先级
         items.sort(key=lambda t: (

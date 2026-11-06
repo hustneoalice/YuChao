@@ -26,6 +26,9 @@ const FALLBACK_CONDS: TargetCond[] = [
   { key: "money", label: "钱袋子", kind: "value", op: "<=", default: 5,
     min: 0, max: 60, step: 1, unit: "日", default_on: false,
     title: "近 N 个交易日内出现过钱袋子（ZigZag 低点，反弹 6% 确认）；数值为距今天数，越小越新鲜" },
+  { key: "mine", label: "地雷", kind: "value", op: "<=", default: 5,
+    min: 0, max: 60, step: 1, unit: "日", default_on: false,
+    title: "近 N 个交易日内出现过地雷（ZigZag 高点回落 6% 确认）；数值为距今天数，越小越新鲜（风险信号）" },
 ];
 
 function readJSON<T>(key: string, fallback: T): T {
@@ -77,6 +80,11 @@ try {
 } catch { /* 损坏设置回默认 */ }
 let totalHits = 0;
 
+/* 尾盘估算模式：14:50 后后端用实时快照价估算钱袋/地雷，当天就能看到信号。
+   开关本地记忆；估算值收盘前可能变化，正式数据落库后自动让位。 */
+let tailOn = false;
+try { tailOn = localStorage.getItem("yc_tgt_tail") === "1"; } catch { /* 默认关闭 */ }
+
 /* ── 行内缩略图 ──
  * 上：K 线 + 中线趋势（MA45，站上=橙/跌破=蓝）；下：趋势柱线 STICKV。
  * 三挡范围（小 30 / 中 60 / 大 120 日）；开关与范围本地记忆，默认开启。
@@ -122,7 +130,7 @@ async function load(resetPage = false): Promise<void> {
   const st = document.getElementById("tgt-status")!;
   st.textContent = "计算中…";
   try {
-    const r = await marketApi.targets(condsParam(), 10000, trend, valuesParam());
+    const r = await marketApi.targets(condsParam(), 10000, trend, valuesParam(), tailOn);
     if (request !== revision) return;
     totalHits = r.total_hits;
     items = r.items;
@@ -139,12 +147,21 @@ async function load(resetPage = false): Promise<void> {
       return;
     }
     st.style.color = "";
+    /* 尾盘估算：钱袋/地雷用快照价暂估，必须显式标注「收盘前可能变化」 */
+    if (r.tail_mode) {
+      st.style.color = "var(--warn)";
+      st.textContent = `尾盘估算 · 快照 ${r.tail_at || "—"} · 收盘前可能变化` +
+        (at ? `｜计算于 ${at}` : "") + `｜数据截至 ${r.as_of}`;
+      return;
+    }
     /* 日线断更时，钱袋/地雷仍是旧口径；必须写明，避免与"数据截至"混淆 */
-    const moneyDay = items.reduce((m, t) => (t.money_date && t.money_date > m ? t.money_date : m), "");
-    const moneyNote = moneyDay && moneyDay !== r.as_of ? `｜钱袋/地雷基于日线 ${moneyDay}` : "";
+    const signalDay = items.reduce((m, t) =>
+      [m, t.money_date || "", t.mine_date || ""].reduce((a, b) => (b > a ? b : a)), "");
+    const moneyNote = signalDay && signalDay !== r.as_of ? `｜钱袋/地雷基于日线 ${signalDay}` : "";
+    const tailNote = tailOn ? "｜尾盘估算待生成（14:50 后自动计算）" : "";
     st.textContent = at
-      ? `计算于 ${at}｜数据截至 ${r.as_of}${r.provisional ? "（含实时快照）" : ""}${moneyNote}`
-      : (r.as_of ? `数据截至 ${r.as_of}${r.provisional ? "（今日日线还没入库，按实时行情暂估）" : ""}${moneyNote}` : "");
+      ? `计算于 ${at}｜数据截至 ${r.as_of}${r.provisional ? "（含实时快照）" : ""}${moneyNote}${tailNote}`
+      : (r.as_of ? `数据截至 ${r.as_of}${r.provisional ? "（今日日线还没入库，按实时行情暂估）" : ""}${moneyNote}${tailNote}` : "");
   } catch {
     if (request !== revision) return;
     st.textContent = "计算失败，稍后自动重试";
@@ -349,6 +366,11 @@ function renderSegMap(): void {
   applySegMapState();
 }
 
+const tailFlag = (t: TargetItem): string =>
+  t.tail_provisional
+    ? `<small class="tgt-tail-flag" title="尾盘估算值：用实时快照价暂估，收盘前可能变化">估</small>`
+    : "";
+
 const TGT_COLS: DataTableCol<TargetItem>[] = [
   { label: "#", width: 34, mono: true, render: (_t, i) => `<span style="color:var(--faint)">${i + 1}</span>` },
   { label: "代码", mono: true, sort: "symbol", render: (t) => t.symbol },
@@ -382,7 +404,14 @@ const TGT_COLS: DataTableCol<TargetItem>[] = [
     sort: (t) => t.money_ago ?? 9999,
     render: (t) => t.money_date == null ? `<span style="color:var(--faint)">—</span>` :
       `<span style="color:${(t.money_ago ?? 9) <= 3 ? PAL.o : "var(--text)"}">${t.money_date.slice(5)}</span>` +
-      ((t.money_cnt ?? 0) > 1 ? `<small style="color:var(--faint)"> · ${t.money_cnt}次</small>` : "") },
+      ((t.money_cnt ?? 0) > 1 ? `<small style="color:var(--faint)"> · ${t.money_cnt}次</small>` : "") +
+      tailFlag(t) },
+  { label: "地雷", num: true, title: "近 20 日地雷（ZigZag 高点回落 6% 确认）的信号日期 · 出现次数；越新鲜越靠前，属风险信号",
+    sort: (t) => t.mine_ago ?? 9999,
+    render: (t) => t.mine_date == null ? `<span style="color:var(--faint)">—</span>` :
+      `<span style="color:${(t.mine_ago ?? 9) <= 3 ? "var(--down)" : "var(--text)"}">${t.mine_date.slice(5)}</span>` +
+      ((t.mine_cnt ?? 0) > 1 ? `<small style="color:var(--faint)"> · ${t.mine_cnt}次</small>` : "") +
+      tailFlag(t) },
   { label: "六分段", sort: "seg", title: "六分段理论：围绕日线短线趋势线（MA7 快 / MA10 慢）的六个位置，1 趋势线超跌 → 2 反弹趋势线 → 3 趋势线突破 → 4 趋势线超涨 → 5 回踩趋势线 → 6 趋势线跌破；亮格为当前所在位置",
     render: (t) => (t.seg ? segMeter(t.seg, t.seg_name) : `<span style="color:var(--faint)">—</span>`) },
   { label: "短线状态", sort: (t) => (t.pullback ? 0 : 1), render: (t) =>
@@ -599,15 +628,16 @@ function showSparkPop(cv: HTMLCanvasElement, ev: MouseEvent): void {
 const COND_GROUPS: [string, string[]][] = [
   ["量能", ["vol"]],
   ["价格结构", ["short", "mid", "up20"]],
-  ["信号", ["trend", "negshrink", "nearzero", "money"]],
+  ["信号", ["trend", "negshrink", "nearzero", "money", "mine"]],
 ];
-/* 钱袋子阈值用自然语言，避免「≤5 日」这种要心算的口径 */
-const MONEY_PILLS: [string, number][] = [["今日", 0], ["3日", 3], ["5日", 5], ["10日", 10]];
+/* 钱袋/地雷阈值用自然语言，避免「≤5 日」这种要心算的口径 */
+const SIGNAL_PILLS: [string, number][] = [["今日", 0], ["3日", 3], ["5日", 5], ["10日", 10]];
 
 function presetKeys(): Record<string, string[]> {
   return {
     all: meta.filter((d) => d.default_on).map((d) => d.key),
     money: ["money"],
+    mine: ["mine"],
     trend: ["trend"],
     none: [],
   };
@@ -626,10 +656,11 @@ function condControl(d: TargetCond): string {
   const on = !!conds[d.key];
   const chip = `<button type="button" class="chip${on ? " on" : ""}" aria-pressed="${on}" data-c="${d.key}" title="${esc(d.title || "")}">${esc(d.label)}</button>`;
   if (d.kind !== "value") return chip;
-  if (d.key === "money") {
+  if (d.key === "money" || d.key === "mine") {
     const cur = Number(tvals[d.key]);
-    return `<span class="tgt-val${on ? "" : " off"}">${chip}<span class="tgt-money-seg" role="group" aria-label="钱袋子时间范围">` +
-      MONEY_PILLS.map(([label, v]) => `<i data-mv="${v}" class="${cur === v ? "on" : ""}">${label}</i>`).join("") +
+    const cls = d.key === "money" ? "tgt-money-seg" : "tgt-mine-seg";
+    return `<span class="tgt-val${on ? "" : " off"}">${chip}<span class="${cls}" role="group" aria-label="${esc(d.label)}时间范围">` +
+      SIGNAL_PILLS.map(([label, v]) => `<i data-k="${d.key}" data-mv="${v}" class="${cur === v ? "on" : ""}">${label}</i>`).join("") +
       `</span></span>`;
   }
   const unit = d.unit ? ` ${esc(d.unit)}` : "";
@@ -652,16 +683,15 @@ function renderConds(): void {
       if (!ds.length) return "";
       return `<div class="tgt-grp"><span class="tgt-grp-label">${label}</span><div class="tgt-grp-body">${ds.map(condControl).join("")}</div></div>`;
     }).join("");
-  const conflict = !!conds["money"] && (!!conds["short"] || !!conds["mid"]);
+  const conflict = (!!conds["money"] || !!conds["mine"]) && (!!conds["short"] || !!conds["mid"]);
   el.innerHTML =
     `<div class="tgt-presets">` +
-    ([["all", "全部条件"], ["money", "只看钱袋"], ["trend", "只看趋势"], ["none", "清空"]] as [string, string][])
+    ([["all", "全部条件"], ["money", "只看钱袋"], ["mine", "只看地雷"], ["trend", "只看趋势"], ["none", "清空"]] as [string, string][])
       .map(([p, label]) => `<button type="button" class="tgt-preset${active === p ? " on" : ""}" data-p="${p}" aria-pressed="${active === p}">${label}</button>`).join("") +
-    `<button type="button" class="tgt-preset" disabled title="地雷信号尚未接入数据层">只看地雷 <i>待接入</i></button>` +
     `<span class="tgt-preset-count">已启用 <b>${onKeys.length}</b>/${meta.length}</span></div>` +
     groups +
     `<div class="tgt-grp-hint">所有勾选条件同时满足 · ST 已剔除 · 未勾选不参与判定</div>` +
-    (conflict ? `<div class="tgt-conflict">钱袋子是低点确认，价格通常在 MA10 下方，与趋势橙方向相反；叠加后命中极少。<button type="button" class="tgt-conflict-fix" data-p="money">只保留钱袋</button></div>` : "");
+    (conflict ? `<div class="tgt-conflict">钱袋/地雷是 ZigZag 拐点确认，价格通常在 MA10 另一侧，与趋势橙方向相反；叠加后命中极少。<button type="button" class="tgt-conflict-fix" data-p="${conds["mine"] && !conds["money"] ? "mine" : "money"}">只看信号</button></div>` : "");
   if (conds["trend"]) {
     el.insertAdjacentHTML("beforeend", `<div class="tgt-trend-set">
       <label>趋势柱线 <select id="tgt-trend-mode"><option value="cross" ${trend.mode === "cross" ? "selected" : ""}>负转正</option><option value="above" ${trend.mode === "above" ? "selected" : ""}>零轴上方</option></select></label>
@@ -704,11 +734,12 @@ function renderConds(): void {
   /* 快捷预设：一键切换条件组合（默认全条件 / 只看钱袋 / 只看趋势 / 清空） */
   el.querySelectorAll<HTMLElement>("[data-p]").forEach((b) =>
     b.addEventListener("click", () => applyPreset(b.dataset.p!)));
-  /* 钱袋子时间范围：点选即启用并重筛 */
-  el.querySelectorAll<HTMLElement>(".tgt-money-seg i").forEach((b) =>
+  /* 钱袋/地雷时间范围：点选即启用并重筛 */
+  el.querySelectorAll<HTMLElement>(".tgt-money-seg i, .tgt-mine-seg i").forEach((b) =>
     b.addEventListener("click", () => {
-      tvals["money"] = Number(b.dataset.mv);
-      conds["money"] = true;
+      const key = b.dataset.k || "money";
+      tvals[key] = Number(b.dataset.mv);
+      conds[key] = true;
       localStorage.setItem("yc_tgt_vals", JSON.stringify(tvals));
       localStorage.setItem("yc_tgt_conds", JSON.stringify(conds));
       renderConds();
@@ -752,8 +783,23 @@ export function loadTargets(): void {
 export function initTargets(): void {
   document.getElementById("tgt-refresh")!.addEventListener("click", () => void load());
   document.getElementById("tgt-export")!.addEventListener("click", () => void exportExcel());
+  /* 尾盘估算开关：打开后 14:50 起用快照价暂估钱袋/地雷，当天可见信号 */
+  const tailBtn = document.getElementById("tgt-tail") as HTMLButtonElement | null;
+  const syncTail = (): void => {
+    if (!tailBtn) return;
+    tailBtn.classList.toggle("on", tailOn);
+    tailBtn.setAttribute("aria-pressed", String(tailOn));
+  };
+  tailBtn?.addEventListener("click", () => {
+    tailOn = !tailOn;
+    try { localStorage.setItem("yc_tgt_tail", tailOn ? "1" : "0"); } catch { /* 隐私模式 */ }
+    syncTail();
+    void load(true);
+  });
+  syncTail();
   /* 空结果引导：直接切到最可能的预设，避免在七个条件里反复试 */
   document.getElementById("tgt-empty-money")!.addEventListener("click", () => applyPreset("money"));
+  document.getElementById("tgt-empty-mine")!.addEventListener("click", () => applyPreset("mine"));
   document.getElementById("tgt-empty-clear")!.addEventListener("click", () => applyPreset("none"));
   /* 六分段示意图：静态内容只在启动渲染一次，展开/收起状态本地记忆 */
   renderSegMap();

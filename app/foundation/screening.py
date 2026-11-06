@@ -52,6 +52,12 @@ CONDITIONS: tuple[dict[str, Any], ...] = (
      "op": "<=", "default": 5, "min": 0, "max": 60, "step": 1, "unit": "日",
      "default_on": False,
      "title": "近 N 个交易日内出现过钱袋子（ZigZag 低点，反弹 6% 确认）；数值为距今天数，越小越新鲜"},
+    # 地雷（钱眼掘金 ZigZag 高点回落）：与钱袋同源、方向相反的风险信号。
+    # 默认关闭——地雷确认时价格通常已跌破短线趋势，与趋势橙叠加会把命中压到 0。
+    {"key": "mine", "label": "地雷", "kind": "value", "field": "mine_ago",
+     "op": "<=", "default": 5, "min": 0, "max": 60, "step": 1, "unit": "日",
+     "default_on": False,
+     "title": "近 N 个交易日内出现过地雷（ZigZag 高点回落 6% 确认）；数值为距今天数，越小越新鲜（风险信号）"},
 )
 
 _KEYS = {c["key"] for c in CONDITIONS}

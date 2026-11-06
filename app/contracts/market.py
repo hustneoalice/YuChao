@@ -216,8 +216,12 @@ class TargetItem(BaseModel):
     money_date: Optional[str] = Field(default=None, description="最近一次钱袋子（ZigZag 低点）日期")
     money_ago: Optional[int] = Field(default=None, description="钱袋距今交易日数（0=今日；null=近20日未出现）")
     money_cnt: int = Field(default=0, description="近 20 个交易日钱袋出现次数")
+    mine_date: Optional[str] = Field(default=None, description="最近一次地雷（ZigZag 高点回落）日期")
+    mine_ago: Optional[int] = Field(default=None, description="地雷距今交易日数（0=今日；null=近20日未出现）")
+    mine_cnt: int = Field(default=0, description="近 20 个交易日地雷出现次数")
     trend_data_date: str = ""
     trend_provisional: bool = False
+    tail_provisional: bool = Field(default=False, description="该行钱袋/地雷来自尾盘估算（收盘前可能变化）")
 
 
 class TargetCondItem(BaseModel):
@@ -250,6 +254,8 @@ class TargetScanOut(BaseModel):
     data_date: str = Field(default="", description="实际使用的日线日期")
     lag: Optional[int] = Field(default=None, description="日线落后快照日的交易日数")
     message: str = Field(default="", description="不可计算的原因（stale 时非空）")
+    tail_mode: bool = Field(default=False, description="是否已用尾盘估算覆盖钱袋/地雷")
+    tail_at: str = Field(default="", description="尾盘估算所用快照时刻（HH:MM）")
     items: list[TargetItem] = Field(default_factory=list, description="命中列表（按六分段操作优先级排序，截断至 limit）")
 
 

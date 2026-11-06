@@ -872,7 +872,8 @@ def target_trend_snapshot(conn) -> Optional[dict]:
             return None
         rows = conn.execute(
             "SELECT symbol, data_date, trend_value, cross_date, cross_ago, above_days,"
-            " neg_run, neg_abs, money_date, money_ago, money_cnt FROM target_trend").fetchall()
+            " neg_run, neg_abs, money_date, money_ago, money_cnt,"
+            " mine_date, mine_ago, mine_cnt FROM target_trend").fetchall()
         return {r[0]: dict(trend_data_date=r[1], trend_value=r[2],
                            trend_cross_date=r[3], trend_cross_ago=r[4],
                            trend_above_days=r[5],
@@ -880,7 +881,10 @@ def target_trend_snapshot(conn) -> Optional[dict]:
                            neg_run=r[6] or 0, neg_abs=r[7],
                            money_date=r[8], money_ago=r[9],
                            # 旧行（补列前算的）money_cnt 为 NULL，统一成 0 才能过契约校验
-                           money_cnt=r[10] or 0)
+                           money_cnt=r[10] or 0,
+                           mine_date=r[11], mine_ago=r[12],
+                           # 旧行（地雷补列前算的）mine_cnt 为 NULL，统一成 0
+                           mine_cnt=r[13] or 0)
                 for r in rows}
     except Exception:
         return None
@@ -900,7 +904,7 @@ def compute_target_trends(conn):
     分块是硬约束——一次查全市场 5550×2000 根会让 DuckDB 撞内存上限 OOM
     （2026-11-02 线上实测，连带后续 quotes 请求一起 500）。"""
     from itertools import groupby
-    from ..target_trend import qyjj_money_summary, trend_histogram, trend_summary
+    from ..target_trend import qyjj_summary, trend_histogram, trend_summary
 
     with _TGT_TREND_LOCK:
         fingerprints = conn.execute("""
@@ -938,7 +942,7 @@ def compute_target_trends(conn):
                         bars = [dict(high=r[2], low=r[3], close=r[4]) for r in rows]
                         summary = trend_summary(
                             [str(r[1]) for r in rows], trend_histogram(bars), calendar)
-                        summary.update(qyjj_money_summary(
+                        summary.update(qyjj_summary(
                             [str(r[1]) for r in rows], bars))
                         _TGT_TREND_CACHE['rows'][symbol] = summary
                     for symbol in part:                    # 分块完成即记账，重跑不重复
@@ -946,6 +950,100 @@ def compute_target_trends(conn):
             finally:
                 cursor.close()
         return {symbol: row for symbol, row in _TGT_TREND_CACHE['rows'].items() if symbol in keys}
+
+
+_TAIL_CHUNK = 150       # 与 target_trend 同分块：全市场一次窗口会打满 1.5GiB 内存
+_TAIL_HISTORY = 800     # ZigZag 极值判定只依赖近端拐点，800 根足够且显著省内存
+
+
+def compute_target_tail(conn, live: Optional[dict] = None) -> tuple[list[dict], dict]:
+    """尾盘估算：把实时快照价当作「今日收盘」，算钱袋/地雷六字段。
+
+    只在 14:50 之后的盘中任务里调用（收盘前最后 15 分钟价格基本定型）。
+    历史取最近 800 根 qfq + 当日快照 close，再跑与正式口径同一个 qyjj；
+    ST / 北交所与 target_scan 同规则剔除，快照无成交的标的跳过（无法估算）。
+    返回 (rows, meta)，rows 直接写 target_tail；meta 用于审计与展示。"""
+    from itertools import groupby
+    from ..target_trend import qyjj_summary
+
+    if live is None:
+        live = _live_overlay(conn, force=True)
+    if live is None:
+        return [], {"as_of": "", "snapshot_at": "", "computed_at": "", "scanned": 0}
+    day = str(live["date"])
+    names = dict(conn.execute("SELECT symbol, name FROM stock_universe").fetchall())
+    bj = settings.bj_enabled
+    symbols = [s for s, n in names.items()
+               if n and "ST" not in str(n).upper() and (bj or not is_bj(s))]
+    snap = {r[0]: float(r[1]) for r in conn.execute(
+        "SELECT symbol, current FROM market_snapshot"
+        " WHERE trade_date = ? AND kind = 'stock'"
+        " AND current IS NOT NULL AND volume > 0", [day]).fetchall()}
+    if not snap:
+        return [], {"as_of": day, "snapshot_at": str(live["updated_at"])[11:16],
+                    "computed_at": datetime.now().strftime("%Y-%m-%d %H:%M"),
+                    "scanned": 0}
+    symbols = [s for s in symbols if s in snap]
+    snap_at = str(live["updated_at"])[11:16]
+    computed_at = datetime.now().strftime("%Y-%m-%d %H:%M")
+    out: list[dict] = []
+    cursor = conn.cursor()
+    try:
+        for i in range(0, len(symbols), _TAIL_CHUNK):
+            part = symbols[i:i + _TAIL_CHUNK]
+            placeholders = ','.join('?' for _ in part)
+            cursor.execute(f"""
+                SELECT symbol, date, close FROM v_daily_ohlcv_qfq
+                WHERE symbol IN ({placeholders}) AND date < ?
+                QUALIFY ROW_NUMBER() OVER (PARTITION BY symbol ORDER BY date DESC) <= {_TAIL_HISTORY}
+                ORDER BY symbol, date
+            """, [*part, day])
+
+            def records():
+                while batch := cursor.fetchmany(8192):
+                    yield from batch
+
+            for symbol, group in groupby(records(), key=lambda row: row[0]):
+                rows = list(group)
+                if not rows or any(row[2] is None for row in rows):
+                    continue
+                dates = [str(r[1]) for r in rows] + [day]
+                bars = [{"close": float(r[2])} for r in rows] + [{"close": snap[symbol]}]
+                out.append({"symbol": symbol, "data_date": day,
+                            "snapshot_at": snap_at, "computed_at": computed_at,
+                            **qyjj_summary(dates, bars)})
+    finally:
+        cursor.close()
+    return out, {"as_of": day, "snapshot_at": snap_at,
+                 "computed_at": computed_at, "scanned": len(out)}
+
+
+def target_tail_snapshot(conn) -> Optional[dict]:
+    """尾盘估算表最新一日；None = 未生成 / 覆盖不足 / 旧库无表。
+
+    是否采用由调用方判定（估算日必须新于正式 target_trend 且等于快照日），
+    这里只负责取数。"""
+    try:
+        head = conn.execute(
+            "SELECT MAX(data_date), MAX(snapshot_at), MAX(computed_at) FROM target_tail"
+        ).fetchone()
+        if not head or not head[0]:
+            return None
+        cnt = conn.execute("SELECT COUNT(*) FROM target_tail WHERE data_date = ?",
+                           [head[0]]).fetchone()[0]
+        if int(cnt or 0) < 500:
+            return None
+        rows = conn.execute(
+            "SELECT symbol, money_date, money_ago, money_cnt,"
+            " mine_date, mine_ago, mine_cnt FROM target_tail WHERE data_date = ?",
+            [head[0]]).fetchall()
+        return {"data_date": str(head[0]), "snapshot_at": head[1] or "",
+                "computed_at": head[2] or "",
+                "rows": {r[0]: dict(money_date=r[1], money_ago=r[2], money_cnt=r[3] or 0,
+                                    mine_date=r[4], mine_ago=r[5], mine_cnt=r[6] or 0)
+                         for r in rows}}
+    except Exception:
+        return None
 
 
 def target_sparks(conn, symbols, bars: int = 60) -> dict:

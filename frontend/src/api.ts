@@ -169,7 +169,11 @@ export interface TargetItem {
   money_date?: string | null;             // 最近一次钱袋子（ZigZag 低点）日期
   money_ago?: number | null;              // 钱袋距今交易日数（0=今日；null=近20日未出现）
   money_cnt?: number;                     // 近 20 个交易日钱袋出现次数
+  mine_date?: string | null;              // 最近一次地雷（ZigZag 高点回落）日期
+  mine_ago?: number | null;               // 地雷距今交易日数（0=今日；null=近20日未出现）
+  mine_cnt?: number;                      // 近 20 个交易日地雷出现次数
   trend_data_date: string; trend_provisional: boolean;
+  tail_provisional?: boolean;             // 钱袋/地雷来自尾盘估算（收盘前可能变化）
 }
 
 export interface TargetScanOut {
@@ -178,6 +182,8 @@ export interface TargetScanOut {
   values?: Record<string, number>; items: TargetItem[];
   /* 数据断更守卫：stale 为 true 时后端不计算，message 说明落后天数 */
   stale?: boolean; data_date?: string; lag?: number | null; message?: string;
+  /* 尾盘估算：tail_mode=true 时钱袋/地雷按快照价暂估（收盘前可能变化） */
+  tail_mode?: boolean; tail_at?: string;
 }
 
 /* 目标页行内缩略图：近 N 根前复权日线 + MA45（中线趋势）+ STICKV 柱线 */
@@ -329,8 +335,8 @@ export const marketApi = {
   /* 批量快照（自选股卡片：N 只一次渲染，一次腾讯实时 HTTP；≤50 只） */
   quotes: (symbols: string[]) =>
     req<{ items: Quote[]; missing: string[] }>(`/market/quotes?symbols=${encodeURIComponent(symbols.join(","))}`),
-  targets: (conds: string, limit = 10000, trend: { mode: string; recent: number; stillAbove: boolean; aboveDays: number } = { mode: "cross", recent: 5, stillAbove: true, aboveDays: 1 }, values: Record<string, number> = {}) =>
-    req<TargetScanOut>(`/market/targets?conds=${encodeURIComponent(conds)}&limit=${limit}&trend_mode=${trend.mode}&trend_recent=${trend.recent}&trend_still_above=${trend.stillAbove}&trend_above_days=${trend.aboveDays}${Object.keys(values).length ? `&values=${encodeURIComponent(JSON.stringify(values))}` : ""}`),
+  targets: (conds: string, limit = 10000, trend: { mode: string; recent: number; stillAbove: boolean; aboveDays: number } = { mode: "cross", recent: 5, stillAbove: true, aboveDays: 1 }, values: Record<string, number> = {}, tail = false) =>
+    req<TargetScanOut>(`/market/targets?conds=${encodeURIComponent(conds)}&limit=${limit}&trend_mode=${trend.mode}&trend_recent=${trend.recent}&trend_still_above=${trend.stillAbove}&trend_above_days=${trend.aboveDays}${tail ? "&tail=1" : ""}${Object.keys(values).length ? `&values=${encodeURIComponent(JSON.stringify(values))}` : ""}`),
   /* 目标监控导出：同条件全量命中，返回 xlsx 原始 Response（前端转 blob 下载） */
   targetExport: (conds: string, trend: { mode: string; recent: number; stillAbove: boolean; aboveDays: number } = { mode: "cross", recent: 5, stillAbove: true, aboveDays: 1 }, values: Record<string, number> = {}) =>
     req<Response>(`/market/targets/export?conds=${encodeURIComponent(conds)}&trend_mode=${trend.mode}&trend_recent=${trend.recent}&trend_still_above=${trend.stillAbove}&trend_above_days=${trend.aboveDays}${Object.keys(values).length ? `&values=${encodeURIComponent(JSON.stringify(values))}` : ""}`, { raw: true }),

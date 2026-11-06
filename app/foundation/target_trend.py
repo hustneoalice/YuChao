@@ -122,18 +122,33 @@ def money_indexes(bars):
     return [i for i, kind in qyjj_signals(bars) if kind == 'money']
 
 
-def qyjj_money_summary(dates, bars, window=_MONEY_WINDOW):
-    """近 window 个交易日的钱袋：最近一次日期 / 距今天数 / 出现次数。
+def qyjj_summary(dates, bars, window=_MONEY_WINDOW):
+    """近 window 个交易日的钱袋与地雷：最近日期 / 距今天数 / 出现次数。
 
-    钱袋是「低点确认」的早期信号，目标页按距今天数排序比按强度更实用。"""
+    钱袋是「低点反弹确认」的早期信号，地雷是「高点回落确认」的风险信号；
+    目标页按距今天数排序比按强度更实用。"""
     n = len(bars)
-    recent = [i for i in money_indexes(bars) if i >= n - window]
-    if not recent:
-        return dict(money_date=None, money_ago=None, money_cnt=0)
-    last = recent[-1]
-    return dict(money_date=dates[last],
-                money_ago=n - 1 - last,
-                money_cnt=len(recent))
+    buckets: dict[str, list[int]] = {"money": [], "mine": []}
+    for i, kind in qyjj_signals(bars):
+        if i >= n - window:
+            buckets[kind].append(i)
+
+    def pack(idx: list[int]):
+        if not idx:
+            return None, None, 0
+        last = idx[-1]
+        return dates[last], n - 1 - last, len(idx)
+
+    money_date, money_ago, money_cnt = pack(buckets["money"])
+    mine_date, mine_ago, mine_cnt = pack(buckets["mine"])
+    return dict(money_date=money_date, money_ago=money_ago, money_cnt=money_cnt,
+                mine_date=mine_date, mine_ago=mine_ago, mine_cnt=mine_cnt)
+
+
+def qyjj_money_summary(dates, bars, window=_MONEY_WINDOW):
+    """兼容旧调用：只取钱袋子三字段。"""
+    full = qyjj_summary(dates, bars, window)
+    return {k: full[k] for k in ("money_date", "money_ago", "money_cnt")}
 
 
 # -- 六分段（趋势线六位置，与前端 indicators.ts 同口径：MA7 快 / MA10 慢 + ATR14） --

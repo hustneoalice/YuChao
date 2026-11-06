@@ -168,7 +168,23 @@ NEW_TABLES_DDL = """
         neg_abs     DOUBLE,    -- 当前负柱距零轴幅度 |STICKV|（正值时为 NULL）
         money_date  VARCHAR,   -- 最近一次钱袋（ZigZag 低点）日期
         money_ago   INTEGER,   -- 距今天数（0=今日；None=近20日未出现）
-        money_cnt   INTEGER    -- 近 20 个交易日出现次数
+        money_cnt   INTEGER,   -- 近 20 个交易日出现次数
+        mine_date   VARCHAR,   -- 最近一次地雷（ZigZag 高点回落）日期
+        mine_ago    INTEGER,   -- 距今天数（0=今日；None=近20日未出现）
+        mine_cnt    INTEGER    -- 近 20 个交易日出现次数
+    );
+
+    -- 尾盘估算（14:50 后用实时快照价充当当日收盘算钱袋/地雷，按日留档）。
+    -- 只供目标页「尾盘估算」开关展示，收盘后正式 target_trend 一旦追上当日
+    -- 自动让位；PK 保证同日多轮（14:50/14:55/15:00/15:05）覆盖不叠加。
+    CREATE TABLE IF NOT EXISTS target_tail (
+        symbol       VARCHAR NOT NULL,
+        data_date    VARCHAR NOT NULL,   -- 估算所用日线槽位（快照 trade_date）
+        snapshot_at  VARCHAR,            -- 快照抓取时刻 HH:MM（审计）
+        computed_at  VARCHAR,            -- 估算写入时刻（审计）
+        money_date   VARCHAR, money_ago INTEGER, money_cnt INTEGER,
+        mine_date    VARCHAR, mine_ago  INTEGER, mine_cnt INTEGER,
+        PRIMARY KEY (symbol, data_date)
     );
 """
 
@@ -181,6 +197,9 @@ MIGRATIONS = (
     "ALTER TABLE target_trend ADD COLUMN IF NOT EXISTS money_date VARCHAR",
     "ALTER TABLE target_trend ADD COLUMN IF NOT EXISTS money_ago INTEGER",
     "ALTER TABLE target_trend ADD COLUMN IF NOT EXISTS money_cnt INTEGER",
+    "ALTER TABLE target_trend ADD COLUMN IF NOT EXISTS mine_date VARCHAR",
+    "ALTER TABLE target_trend ADD COLUMN IF NOT EXISTS mine_ago INTEGER",
+    "ALTER TABLE target_trend ADD COLUMN IF NOT EXISTS mine_cnt INTEGER",
 )
 
 _ADJUST_VIEW = {"qfq": "v_daily_ohlcv_qfq", "hfq": "v_daily_ohlcv_hfq", "raw": "daily_ohlcv"}

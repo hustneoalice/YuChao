@@ -52,14 +52,16 @@ def update_target_scan(progress=None, ctx=None) -> dict:
         tr_rows = [(sym, r.get("trend_data_date"), r.get("trend_value"),
                     r.get("trend_cross_date"), r.get("trend_cross_ago"),
                     r.get("trend_above_days"), r.get("neg_run"), r.get("neg_abs"),
-                    r.get("money_date"), r.get("money_ago"), r.get("money_cnt"))
+                    r.get("money_date"), r.get("money_ago"), r.get("money_cnt"),
+                    r.get("mine_date"), r.get("mine_ago"), r.get("mine_cnt"))
                    for sym, r in trend.items()]
         if tr_rows:
             conn.executemany(
                 "INSERT OR REPLACE INTO target_trend "
                 "(symbol,data_date,trend_value,cross_date,cross_ago,above_days,"
-                "neg_run,neg_abs,money_date,money_ago,money_cnt) "
-                "VALUES (?,?,?,?,?,?,?,?,?,?,?)", tr_rows)
+                "neg_run,neg_abs,money_date,money_ago,money_cnt,"
+                "mine_date,mine_ago,mine_cnt) "
+                "VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?)", tr_rows)
         conn.commit()
         result.update(status="completed", rows=len(scan), trend_rows=len(tr_rows), as_of=as_of,
                       detail=f"{as_of}：目标指标 {len(scan)} 只，趋势柱线 {len(tr_rows)} 只")
@@ -109,6 +111,30 @@ def update_target_scan_live(progress=None, ctx=None) -> dict:
         conn.commit()
         result.update(status="completed", rows=len(scan), as_of=meta["as_of"],
                       detail=f"盘中快照 {live['updated_at'][:16]}：目标指标 {len(scan)} 只")
+        # 尾盘估算（14:50 起）：价格基本定型，提前把今日快照当收盘算钱袋/地雷，
+        # 写 target_tail 留档（同一日多轮覆盖）。正式 target_trend 收盘后追上当日，
+        # API 自动优先正式口径。失败只告警，不影响已完成的指标层。
+        if datetime.now().time() >= dtime(14, 50):
+            try:
+                tail, tmeta = repo.compute_target_tail(conn, live=live)
+                if tail:
+                    conn.execute("DELETE FROM target_tail WHERE data_date = ?",
+                                 [tmeta["as_of"]])
+                    tail_cols = ("symbol", "data_date", "snapshot_at", "computed_at",
+                                 "money_date", "money_ago", "money_cnt",
+                                 "mine_date", "mine_ago", "mine_cnt")
+                    conn.executemany(
+                        "INSERT OR REPLACE INTO target_tail ("
+                        + ",".join(tail_cols) + ") VALUES (?,?,?,?,?,?,?,?,?,?)",
+                        [tuple(r.get(c) for c in tail_cols) for r in tail])
+                    conn.commit()
+                    result["tail_rows"] = len(tail)
+                    result["snapshot_at"] = tmeta["snapshot_at"]
+                    result["detail"] += (f"，尾盘估算 {len(tail)} 只"
+                                         f"（快照 {tmeta['snapshot_at']}）")
+            except Exception as e:
+                logger.warning("[TargetsLive] 尾盘估算失败（不影响指标层）：%s",
+                               f"{type(e).__name__}: {e}")
         logger.info("[TargetsLive] %s", result["detail"])
     except Exception as e:
         result.update(status="failed", error=f"{type(e).__name__}: {str(e)[:200]}")
