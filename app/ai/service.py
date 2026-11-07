@@ -147,22 +147,45 @@ def rule_answer(conn, question: str, symbol: str) -> dict:
             "data_date": data_date}
 
 
-def llm_config(user: Optional[dict]) -> Optional[dict]:
+def available_models(user: Optional[dict]) -> list[str]:
+    """可切换的模型池：用户已配置模型 + 用户自选候选 + 环境兜底模型（去重保序）。"""
+    from ..config import settings
+    ids: list[str] = []
+    if user:
+        from ..auth.service import get_prefs
+        prefs = get_prefs(user["id"]).get("llm") or {}
+        if prefs.get("model"):
+            ids.append(str(prefs["model"]))
+        for m in prefs.get("models") or []:
+            if isinstance(m, str) and m.strip():
+                ids.append(m.strip())
+    if settings.llm_model:
+        ids.append(settings.llm_model)
+    return list(dict.fromkeys(ids))
+
+
+def llm_config(user: Optional[dict], model: Optional[str] = None) -> Optional[dict]:
     """模型配置优先级：用户偏好（已启用+有 key）> 环境变量兜底。
 
     环境变量只在本机 .env 或进程环境里，代码与仓库中不出现任何密钥。
+    model="rule" 强制走规则模式；model 命中可切换池时用同一 key/base_url 换模型。
     """
     from ..config import settings
+    if model == "rule":
+        return None
     cfg: dict = {}
     if user:
         from ..auth.service import get_prefs
         cfg = (get_prefs(user["id"]).get("llm") or {})
-    if cfg.get("enabled") and cfg.get("api_key") and cfg.get("model"):
-        return cfg
-    if settings.llm_api_key and settings.llm_model:
-        return {"enabled": True, "api_key": settings.llm_api_key,
+    if not (cfg.get("enabled") and cfg.get("api_key") and cfg.get("model")):
+        cfg = ({"enabled": True, "api_key": settings.llm_api_key,
                 "model": settings.llm_model, "base_url": settings.llm_base_url}
-    return None
+               if settings.llm_api_key and settings.llm_model else {})
+    if not cfg:
+        return None
+    if model and model in available_models(user):
+        cfg = {**cfg, "model": model}
+    return cfg
 
 
 def llm_answer(conn, question: str, symbol: Optional[str], cfg: dict,
@@ -244,7 +267,7 @@ def _rule_covered(conn, question: str, symbol: str) -> bool:
 
 
 def answer(conn, question: str, ctx_symbol: Optional[str],
-           user: Optional[dict]) -> dict:
+           user: Optional[dict], model: Optional[str] = None) -> dict:
     """本地规则优先；规则答不上来（资料缺失/问题超出规则范围）再走大模型补答。"""
     question = (question or "").strip()
     symbol, candidates = resolve_symbol(conn, question, ctx_symbol)
@@ -262,7 +285,7 @@ def answer(conn, question: str, ctx_symbol: Optional[str],
                 "warnings": [], "data_date": None}
 
     out = rule_answer(conn, question, symbol)
-    cfg = llm_config(user)
+    cfg = llm_config(user, model)
     # 只有「主营业务等描述性资料缺失」才允许模型用常识补答；行情缺失不猜数字
     gap = any(str(m).startswith("stock_profile") for m in out["missing"]) \
         or not out["answer"].strip()

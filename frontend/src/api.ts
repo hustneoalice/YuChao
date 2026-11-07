@@ -290,6 +290,7 @@ export interface DepthQuote {
   ask_total: number;
   bid_ask_diff: number;
   bid_ask_ratio?: number | null;
+  margin?: boolean | null;
   outer_vol?: number | null;
   inner_vol?: number | null;
   volume?: number | null;
@@ -537,17 +538,18 @@ export interface AiStreamHandlers {
 }
 
 export const aiApi = {
-  chat: (q: string, symbol?: string) =>
-    req<AiAnswer>("/ai/chat", { method: "POST", body: { q, symbol: symbol || null } }),
+  chat: (q: string, symbol?: string, model?: string) =>
+    req<AiAnswer>("/ai/chat", { method: "POST", body: { q, symbol: symbol || null, model: model || null } }),
   /** SSE 流式问股：thinking 推理流 / tool 调用卡 / token 正文 / answer 整段 / meta 收尾 */
   chatStream: async (q: string, symbol: string | undefined,
-                      h: AiStreamHandlers, signal?: AbortSignal): Promise<void> => {
+                      h: AiStreamHandlers, model?: string,
+                      signal?: AbortSignal): Promise<void> => {
     const headers: Record<string, string> = { "Content-Type": "application/json" };
     const token = getToken();
     if (token) headers.Authorization = `Bearer ${token}`;
     const res = await fetch(BASE + "/ai/chat/stream", {
       method: "POST", headers, signal,
-      body: JSON.stringify({ q, symbol: symbol || null }),
+      body: JSON.stringify({ q, symbol: symbol || null, model: model || null }),
     });
     if (!res.ok || !res.body) {
       let message = res.statusText || `HTTP ${res.status}`;
@@ -588,5 +590,6 @@ export const aiApi = {
     if (buf.trim()) dispatch(buf);
   },
   tools: () => req<{ items: AiToolSpec[]; count: number }>("/ai/tools"),
+  models: () => req<{ current: string; items: { id: string; label: string }[] }>("/ai/models"),
   health: () => req<{ llm: boolean; mode: string; model: string | null; reason: string | null }>("/ai/health"),
 };

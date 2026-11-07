@@ -69,7 +69,7 @@ const num = (v?: number | null): string =>
   (v == null || !isFinite(v) ? "—" : fmt(v));
 
 /** 信息条 HTML：行情页共享条与面板头部共用同一套渲染，密度只由 mode 决定。
- *  quickAsk=true 时在「昨收」后挂一个快速问股小飞机（行情页头部用）。 */
+ *  quickAsk=true 时在「昨收」后挂一个快速问股机器人入口（行情页头部用）。 */
 export function quoteHeadHtml(info: ChartInfo | null, mode: Exclude<ChartHeadMode, "none"> = "full",
                                quickAsk = false): string {
   if (!info) return "";
@@ -95,7 +95,7 @@ export function quoteHeadHtml(info: ChartInfo | null, mode: Exclude<ChartHeadMod
   }
   parts.push(`<span class="ksy-q">${q}</span>`);
   if (quickAsk) {
-    parts.push(`<button class="qa-inline" type="button" title="快速问股" aria-label="快速问股" aria-expanded="false">${ic("paper-plane-tilt", 13)}</button>`);
+    parts.push(`<button class="qa-inline" type="button" title="AI 问股" aria-label="AI 问股" aria-expanded="false">${ic("ai-chat", 13)}</button>`);
   }
   return parts.join("");
 }

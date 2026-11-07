@@ -169,7 +169,7 @@ async def _llm_events(question: str, symbol: str, cfg: dict, knowledge: bool) ->
 
 
 async def stream_answer(question: str, ctx_symbol: Optional[str],
-                         user: Optional[dict]) -> AsyncIterator[str]:
+                         user: Optional[dict], model: Optional[str] = None) -> AsyncIterator[str]:
     question = (question or "").strip()
     if not question:
         yield sse("answer", {"answer": "请先输入问题。"})
@@ -185,7 +185,7 @@ async def stream_answer(question: str, ctx_symbol: Optional[str],
 
     symbol = stage["symbol"]
     rule = stage["rule"]
-    cfg = service.llm_config(user)
+    cfg = service.llm_config(user, model)
     if cfg and (stage["gap"] or not stage["covered"]):
         try:
             async for ev in _llm_events(question, symbol, cfg, knowledge=stage["gap"]):

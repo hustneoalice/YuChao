@@ -43,12 +43,12 @@ pip install -e ".[dev]"
 # 放到 data/stock_research.duckdb 后，补齐 2.0 新表与复权视图：
 python scripts/ensure_schema.py
 
-# 一键启动：默认开发模式 = 8031 API + 5178 vite 热更（看 5178）
+# 一键启动：默认单端口 8031（后端托管前端 dist，源码有更新自动重构建）
 ./scripts/start.sh
-
-# 生产模式：只启 8031，前端由后端托管 dist（源码有更新会自动重构建）
-./scripts/start.sh -p
 open http://127.0.0.1:8031
+
+# 开发模式：额外启动 5178 vite 热更（改前端源码时用这个）
+./scripts/start.sh -d
 
 # 停止（8031 + 5178 一起收）
 ./scripts/stop.sh
@@ -127,7 +127,7 @@ pytest -q          # 53 项测试：M1 冒烟 + M2（编排/采集/SSE 总线）
 
 ```bash
 cd frontend && npm install
-npm run dev        # http://localhost:5173 ，/api 代理至 127.0.0.1:8031（YUCHAO_API 可覆盖）
+npm run dev        # http://localhost:5178 ，/api 代理至 127.0.0.1:8031（YUCHAO_API 可覆盖）
 npm run build      # tsc --noEmit + vite build → dist/
 ```
 

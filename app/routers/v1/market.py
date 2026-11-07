@@ -473,7 +473,8 @@ def depth(symbol: str = Query(description="6 位代码，兼容 sh.600519 / 6005
     d = live.order_book(symbol)
     if not d:
         return Depth(symbol=symbol, applicable=False)
-    return Depth(**d)
+    # 两融标的判定只在有真实盘口时查（指数/停牌不显示该标签）
+    return Depth(**{**d, "margin": live.margin_target(symbol) if d.get("applicable") else None})
 
 
 @router.get("/market/trades", response_model=Trades, summary="逐笔成交明细（东财 details，5s 缓存）")

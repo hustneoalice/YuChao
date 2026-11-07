@@ -258,13 +258,22 @@ export function setWatchGroups(symbol: string, groups: string[]): void {
   noteGroups(w.groups);
   saveWatchlist();
 }
-/** 勾选/取消某个分组（多选）；返回操作后是否仍在该组 */
+/** 勾选/取消某个分组（多选）；返回操作后是否仍在该组。
+ *  取消最后一个分组 = 整体移出自选（不走 setWatchGroups 的「至少保留默认」回落）。 */
 export function toggleWatchGroup(symbol: string, group: string): boolean {
   const w = state.watchlist.find((x) => x.symbol === symbol);
   if (!w) return false;
-  const has = w.groups.includes(group);
-  setWatchGroups(symbol, has ? w.groups.filter((g) => g !== group) : [...w.groups, group]);
-  return !has;
+  if (w.groups.includes(group)) {
+    const rest = w.groups.filter((g) => g !== group);
+    if (!rest.length) { removeWatch(symbol); return false; }
+    w.groups = rest;
+    saveWatchlist();
+    return false;
+  }
+  w.groups = [...w.groups, group];
+  noteGroups(w.groups);
+  saveWatchlist();
+  return true;
 }
 /** 旧口径兼容：仅保留一个分组 */
 export function moveWatchGroup(symbol: string, group: string): void {

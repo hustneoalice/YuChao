@@ -87,6 +87,8 @@ export interface ChatMountOptions {
   chipsList: string[];
   /** 当前上下文标的（不含后缀的 6 位代码）；无标的返回 undefined */
   context: () => string | undefined;
+  /** 本次提问指定模型（undefined=后端默认，「rule」=强制规则模式） */
+  model?: () => string | undefined;
   /** 发送前回调（浮框用它确保面板已展开/聚焦） */
   beforeAsk?: () => void;
 }
@@ -160,7 +162,7 @@ export function mountChat(o: ChatMountOptions): void {
                 `<button class="ai-chip" data-pick="${esc(c.symbol)}">${esc(c.name)} ${esc(c.symbol)}</button>`).join("")}</div>`);
           }
         },
-      });
+      }, o.model?.());
       if (!answered) {
         txt.classList.add("ai-dim");
         txt.textContent = "（没有返回内容）";
@@ -169,7 +171,7 @@ export function mountChat(o: ChatMountOptions): void {
       // 流式中断且还没吐字 → 用非流式接口兜底一次
       if (!answered) {
         try {
-          const a = await aiApi.chat(text, o.context());
+          const a = await aiApi.chat(text, o.context(), o.model?.());
           tip.remove();
           o.log.insertAdjacentHTML("beforeend", answerHtml(a));
           bindFold(o.log);

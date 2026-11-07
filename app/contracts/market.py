@@ -158,6 +158,7 @@ class Depth(BaseModel):
     turnover_rate: Optional[float] = None
     vol_ratio: Optional[float] = None
     amplitude: Optional[float] = None
+    margin: Optional[bool] = Field(default=None, description="是否两融标的（支持融资买入）；None=未知")
 
 
 class TradeItem(BaseModel):

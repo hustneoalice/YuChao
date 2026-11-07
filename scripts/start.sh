@@ -1,8 +1,8 @@
 #!/usr/bin/env bash
-# 驭潮 启动脚本：后端 uvicorn(8031) + 前端 vite(5178)
-#   ./scripts/start.sh        默认开发模式：8031 API + 5178 vite 热更（看最新代码用这个）
-#   ./scripts/start.sh -d     同默认（兼容旧写法）
-#   ./scripts/start.sh -p     生产模式：只启 8031，由后端托管 dist（源码有更新会自动重构建）
+# 驭潮 启动脚本：后端 uvicorn(8031) 默认同时托管前端 dist —— 单端口。
+#   ./scripts/start.sh        默认生产形态：只启 8031，前端由后端托管（源码有更新自动重构建）
+#   ./scripts/start.sh -d     开发模式：额外启动 vite(5178) 热更
+#   ./scripts/start.sh -p     同默认（兼容旧写法）
 #   ./scripts/start.sh -n     启动后不跟随日志
 set -euo pipefail
 ROOT="$(cd "$(dirname "$0")/.." && pwd)"
@@ -10,7 +10,7 @@ LOG_DIR="$ROOT/.logs"
 PID_DIR="$LOG_DIR"
 mkdir -p "$LOG_DIR"
 
-DEV=1
+DEV=0
 FOLLOW=1
 for a in "$@"; do
   case "$a" in
@@ -61,8 +61,11 @@ if [ "$DEV" = "0" ] && dist_stale; then
   (cd "$ROOT/frontend" && npm run build >/dev/null)
 fi
 
-# 清理残留的 yuchao 后端进程（可能已不在 8031 监听但持有 duckdb 写锁）
-if pids=$(pgrep -f "uvicorn app.main:app" 2>/dev/null); then
+# 清理残留的 yuchao 后端进程（可能已不在 8031 监听但持有 duckdb 写锁）。
+# 8031 已有健康监听时绝不能杀：否则每次重复执行 start.sh 都会先打断在跑的服务。
+if [ -n "$(port_pid 8031)" ]; then
+  echo "[backend] 8031 已在运行，跳过残留清理"
+elif pids=$(pgrep -f "uvicorn app.main:app" 2>/dev/null); then
   echo "[backend] 清理残留进程：$pids"
   kill -TERM $pids 2>/dev/null || true
   sleep 1
@@ -78,7 +81,7 @@ if [ "$DEV" = "1" ]; then
   echo "驭潮已就绪：开发前端 http://localhost:5178 （热更，看最新代码）"
   echo "            API/生产前端 http://127.0.0.1:8031"
 else
-  echo "驭潮已就绪：http://localhost:8031 （生产模式，前端由后端托管）"
+  echo "驭潮已就绪：http://localhost:8031 （单端口，前端由后端托管）"
 fi
 echo "停止：./scripts/stop.sh · 日志：.logs/backend.log$([ "$DEV" = "1" ] && printf ' · .logs/frontend.log' || true)"
 

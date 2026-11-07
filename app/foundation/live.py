@@ -28,6 +28,7 @@ from .symbol import GLOBAL_INDICES, INDEX_NAMES, TICKER_INDICES
 _CACHE: Dict[str, tuple[float, Any]] = {}          # key → (到期时间戳, 数据)
 
 _REPORT_API = "https://reportapi.eastmoney.com/report/list"
+_RZRQ_API = "https://datacenter-web.eastmoney.com/api/data/v1/get"
 _SEARCH_API = "https://search-api-web.eastmoney.com/search/jsonp"
 _EM_REFERER = "https://data.eastmoney.com/"
 _TTL_NEWS = 600          # 资讯 10min
@@ -231,6 +232,29 @@ def realtime_quote(symbol: str) -> Optional[Dict[str, Any]]:
         "qdate": d.get("qdate"),                             # 行情归属日（腾讯 p[30]）
         "ts": time.strftime("%Y-%m-%d %H:%M"),
     }
+
+
+@_cached("live:margin", 6 * 3600)
+def margin_target(symbol: str) -> Optional[bool]:
+    """是否两融标的（支持融资买入）：东财两融个股明细近一年有记录即为标的。
+
+    6h 进程缓存；非个股 / 外联失败返回 None（前端不显示标签）。
+    """
+    code = pure_of(symbol)
+    if not (code.isdigit() and len(code) == 6):
+        return None
+    try:
+        r = _em_get(_RZRQ_API, params={
+            "reportName": "RPTA_WEB_RZRQ_GGMX",
+            "columns": "SCODE,DATE",
+            "pageSize": 1, "pageNumber": 1,
+            "sortColumns": "DATE", "sortTypes": -1,
+            "filter": f'(SCODE="{code}")',
+        })
+        rows = ((r.json().get("result") or {}).get("data") or [])
+        return bool(rows)
+    except Exception:
+        return None
 
 
 @_cached("live:depth", 3)

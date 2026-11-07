@@ -20,6 +20,7 @@ router = APIRouter(tags=["ai"])
 class ChatIn(BaseModel):
     q: str = Field(min_length=1, max_length=500)
     symbol: Optional[str] = Field(default=None, max_length=16)
+    model: Optional[str] = Field(default=None, max_length=64)
 
 
 @router.get("/ai/tools")
@@ -39,10 +40,19 @@ def health(user: Optional[dict] = Depends(current_user)):
     }
 
 
+@router.get("/ai/models")
+def models(user: Optional[dict] = Depends(current_user)):
+    """底部模型选择器数据：规则模式 + 可切换模型池；current 为当前生效项。"""
+    cfg = service.llm_config(user)
+    items = [{"id": "rule", "label": "规则模式"}]
+    items += [{"id": m, "label": m} for m in service.available_models(user)]
+    return {"current": (cfg or {}).get("model") or "rule", "items": items}
+
+
 @router.post("/ai/chat")
 def chat(body: ChatIn, user: Optional[dict] = Depends(current_user),
          conn=Depends(get_conn)):
-    out = service.answer(conn, body.q, body.symbol, user)
+    out = service.answer(conn, body.q, body.symbol, user, body.model)
     out["question"] = body.q
     return out
 
@@ -51,7 +61,7 @@ def chat(body: ChatIn, user: Optional[dict] = Depends(current_user),
 def chat_stream(body: ChatIn, user: Optional[dict] = Depends(current_user)):
     """SSE：thinking（推理流）/ tool（工具调用）/ token（正文）/ answer（规则整段）/ meta。"""
     return StreamingResponse(
-        streaming.stream_answer(body.q, body.symbol, user),
+        streaming.stream_answer(body.q, body.symbol, user, body.model),
         media_type="text/event-stream",
         headers={"Cache-Control": "no-cache", "X-Accel-Buffering": "no"},
     )

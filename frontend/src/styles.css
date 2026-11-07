@@ -147,11 +147,16 @@ svg{display:block}
 .gm-add{display:flex;align-items:center;gap:8px;margin-top:12px}
 .gm-add .field{flex:1}
 
-/* 行情页工具栏加自选（icon-only，TradingView 同款）：态 .on 高亮 + title 提示 */
+/* 行情页工具栏加自选（心形 + 下拉小三角，明示可展开分组）：态 .on 高亮 + title 提示 */
 #kl-watch.on{border-color:color-mix(in srgb,var(--accent) 35%,transparent);color:var(--accent);
   background:color-mix(in srgb,var(--accent) 12%,transparent)}
-#kl-watch{width:30px;height:30px}
+#kl-watch{width:auto;min-width:0;height:30px;gap:3px;padding:0 6px 0 8px}
 #kl-watch svg{width:16px;height:16px}
+/* 下拉指示：纯 CSS 小三角，不依赖字体字形 */
+#kl-watch .caret{width:0;height:0;flex:none;margin-top:2px;
+  border-left:3px solid transparent;border-right:3px solid transparent;
+  border-top:4px solid currentColor;opacity:.45;transition:opacity .15s}
+#kl-watch:hover .caret,#kl-watch.on .caret{opacity:1}
 
 /* 收藏按钮 · 快捷分组浮层（心形点开即可换组 / 新建 / 移出） */
 .wpop{position:fixed;z-index:250;width:220px;padding:8px;
@@ -173,14 +178,6 @@ svg{display:block}
 .wpop-new{display:flex;gap:6px;margin-top:5px}
 .wpop-new .field{flex:1;min-width:0;height:28px;font-size:12px;border-radius:8px}
 .wpop-new .hbtn{height:28px;padding:0 10px;font-size:11.5px;flex:none}
-.wpop-foot{display:flex;align-items:center;gap:6px;margin-top:6px;padding-top:6px;
-  border-top:1px solid var(--border-soft)}
-.wpop-foot .sp{flex:1}
-.wpop-foot .hbtn{height:26px;padding:0 10px;font-size:11.5px}
-.wpop-del{display:inline-flex;align-items:center;gap:5px;height:26px;min-height:26px;
-  padding:0 8px;border-radius:8px;font-size:11.5px;color:var(--faint)}
-.wpop-del:hover{color:var(--up);background:var(--up-soft)}
-.wpop-del svg{width:12px;height:12px}
 
 /* 自选列表行内走势 sparkline */
 #wl-wrap svg.spark{display:block;margin:0 auto;opacity:.9}
@@ -709,7 +706,7 @@ body.mobile .rcard .cbar{opacity:1}
 .kl-main{flex:1;min-height:0;position:relative}
 
 /* ── 控制条小圆钮（放大/缩小/重置/智能高度开关） ── */
-.cbtn{min-width:24px;height:24px;padding:0 5px;border-radius:7px;font-size:12.5px;
+.cbtn{min-width:24px;height:24px;min-height:24px;padding:0 5px;border-radius:7px;font-size:12.5px;
   color:var(--dim);border:1px solid transparent;line-height:1}
 .cbtn:hover{color:var(--text);background:var(--panel-2)}
 .cbtn.on{color:var(--accent);border-color:color-mix(in srgb,var(--accent) 35%,transparent);
@@ -1397,14 +1394,42 @@ body.mobile .sd-grid{grid-template-columns:1fr 1fr}
 .chip-chart text{font-variant-numeric:tabular-nums}
 .chip-tip{margin:8px 0 0;font-size:10px;line-height:1.6;color:var(--faint)}
 /* ── 盘口卡（对标众赢）：基本信息 + 买卖五档 / 逐笔成交 ── */
-.dp-id{display:flex;align-items:baseline;gap:7px;margin-bottom:2px;min-width:0}
-.dp-id b{font-size:13.5px;font-weight:700;flex:none}
-.dp-id .num{font-size:10px;color:var(--faint);font-family:var(--mono)}
-.dp-con{display:flex;gap:4px;overflow:hidden;margin:2px 0 9px;min-width:0}
+.dp-id{display:flex;align-items:center;gap:7px;margin-bottom:2px;min-width:0}
+.dp-id b{font-size:13.5px;font-weight:700;flex:none;letter-spacing:-.01em}
+.dp-id b.up{color:var(--up)}
+.dp-id b.down{color:var(--down)}
+/* 代码做成小胶囊，和名称/涨跌一起形成「身份行」的视觉层次 */
+.dp-id .num{flex:none;font-size:9.5px;line-height:1.5;padding:1px 5px;border-radius:4px;
+  color:var(--faint);font-family:var(--mono);letter-spacing:.04em;
+  background:color-mix(in srgb,var(--panel-2) 70%,transparent);border:1px solid var(--border-soft)}
+/* 两融标识：支持融资买入=强调色实心；非两融=弱化描边 */
+.dp-tag{flex:none;font-size:9px;line-height:1.5;padding:1px 5px;border-radius:4px;
+  white-space:nowrap;letter-spacing:.02em}
+.dp-tag.rz{color:var(--accent);background:var(--accent-soft);border:1px solid color-mix(in srgb,var(--accent) 30%,transparent);font-weight:650}
+.dp-tag.no{color:var(--faint);border:1px solid var(--border);background:transparent}
+.dp-con{display:flex;gap:4px;overflow:hidden;margin:2px 0 9px;min-width:0;cursor:default}
 .dp-con span{flex:none;font-size:9.5px;line-height:1.5;padding:1px 5px;border-radius:4px;
   background:var(--panel-2);color:var(--faint);white-space:nowrap}
 .dp-con span.ind{background:var(--accent-soft);color:var(--accent);font-weight:600}
+/* 「+N 更多」：明确可点/可 hover 的展开入口 */
+.dp-con .more{background:transparent;border:1px solid var(--border);color:var(--accent);
+  cursor:pointer;font-weight:600;transition:background .12s,border-color .12s}
+.dp-con .more:hover{background:var(--accent-soft);border-color:color-mix(in srgb,var(--accent) 40%,transparent)}
+/* 概念全量浮层（fixed 定位：不被卡片 overflow 裁剪） */
+.dp-conpop{position:fixed;z-index:92;display:grid;grid-template-columns:repeat(4,minmax(0,1fr));
+  gap:3px 10px;padding:9px 10px;border-radius:10px;
+  background:color-mix(in srgb,var(--panel) 94%,transparent);
+  border:1px solid var(--border);box-shadow:var(--shadow);
+  font-size:10px;color:var(--dim);max-height:260px;overflow:auto;
+  backdrop-filter:blur(14px);-webkit-backdrop-filter:blur(14px);animation:qaIn .12s ease-out}
+.dp-conpop[hidden]{display:none}
+.dp-conpop span{white-space:nowrap;overflow:hidden;text-overflow:ellipsis;line-height:1.75}
 .dp-head{display:flex;align-items:baseline;gap:10px;margin-bottom:8px}
+/* 涨跌箭头：纯 CSS 三角，跟着方向变色 */
+.dp-arrow{width:0;height:0;flex:none;align-self:center;
+  border-left:3.5px solid transparent;border-right:3.5px solid transparent}
+.dp-arrow.up{border-bottom:5px solid var(--up)}
+.dp-arrow.down{border-top:5px solid var(--down)}
 .dp-last{font-size:19px;font-weight:700;font-variant-numeric:tabular-nums}
 .dp-chg{display:flex;gap:6px;font-size:11.5px;font-variant-numeric:tabular-nums}
 .dp-time{margin-left:auto;font-size:10px;color:var(--faint);font-variant-numeric:tabular-nums}
@@ -1758,8 +1783,8 @@ body.mobile .sec-breadth{padding:0 10px 8px}
 .ai-form .hbtn[disabled]{opacity:.5;cursor:not-allowed}
 body.mobile .ai-bub,body.mobile .ai-tools,body.mobile .ai-warn{max-width:92%}
 
-/* ═══ 快速问股：信息条「昨收」后的小飞机 + 半透明小浮框 ═══ */
-.qa-inline{display:inline-flex;align-items:center;justify-content:center;width:19px;height:19px;padding:0;
+/* ═══ 快速问股：信息条「昨收」后的 AI 对话入口 + 半透明小浮框 ═══ */
+.qa-inline{display:inline-flex;align-items:center;justify-content:center;width:19px;height:19px;min-height:19px;padding:0;
   margin-left:5px;flex:none;border:1px solid var(--border-soft);border-radius:6px;background:transparent;
   color:var(--faint);cursor:pointer;transition:color .15s,border-color .15s,background .15s}
 .qa-inline:hover{color:var(--text);background:var(--panel-2)}
@@ -1768,23 +1793,34 @@ body.mobile .ai-bub,body.mobile .ai-tools,body.mobile .ai-warn{max-width:92%}
 body.llm-on .qa-inline{color:var(--down);border-color:color-mix(in srgb,var(--down) 36%,transparent);
   background:color-mix(in srgb,var(--down) 8%,transparent)}
 body.llm-on .qa-inline:hover{background:color-mix(in srgb,var(--down) 15%,transparent)}
+/* 浮框：半透明玻璃，不遮住背后的 K 线；标题栏可拖动 */
 .qa-panel{position:fixed;right:18px;top:92px;z-index:78;
   width:320px;max-width:calc(100vw - 24px);height:min(384px,calc(100vh - 118px));
   display:flex;flex-direction:column;gap:8px;padding:10px 12px;
-  background:color-mix(in srgb,var(--panel) 62%,transparent);
-  border:1px solid color-mix(in srgb,var(--border) 70%,transparent);border-radius:13px;
-  box-shadow:0 18px 44px -18px rgba(0,0,0,.55);backdrop-filter:blur(18px) saturate(1.25);
-  -webkit-backdrop-filter:blur(18px) saturate(1.25);animation:qaIn .16s ease-out}
+  background:color-mix(in srgb,var(--panel) 38%,transparent);
+  border:1px solid color-mix(in srgb,var(--border) 48%,transparent);border-radius:13px;
+  box-shadow:0 22px 56px -22px rgba(0,0,0,.62),0 0 0 1px rgba(255,255,255,.04) inset;
+  backdrop-filter:blur(26px) saturate(1.5);
+  -webkit-backdrop-filter:blur(26px) saturate(1.5);animation:qaIn .16s ease-out}
 .qa-panel[hidden]{display:none}
-.qa-panel .ai-bub{background:color-mix(in srgb,var(--panel-2) 72%,transparent);font-size:12px}
-.qa-panel .ai-tool,.qa-panel .ai-think{background:color-mix(in srgb,var(--panel) 55%,transparent)}
-.qa-head{display:flex;align-items:center;gap:8px;min-height:22px}
+.qa-panel .ai-bub{background:color-mix(in srgb,var(--panel-2) 52%,transparent);font-size:12px}
+.qa-panel .ai-tool,.qa-panel .ai-think{background:color-mix(in srgb,var(--panel) 40%,transparent)}
+.qa-head{display:flex;align-items:center;gap:8px;min-height:22px;cursor:grab;
+  touch-action:none;user-select:none}
+.qa-head.dragging{cursor:grabbing}
 .qa-head .sp{flex:1}
+/* 拖动把手：两列小圆点（纯 CSS 绘制，提示可拖） */
+.qa-grip{width:8px;height:12px;flex:none;opacity:.45;
+  background:
+    radial-gradient(circle at 2px 2px,currentColor 1px,transparent 1.6px),
+    radial-gradient(circle at 6px 2px,currentColor 1px,transparent 1.6px),
+    radial-gradient(circle at 2px 6px,currentColor 1px,transparent 1.6px),
+    radial-gradient(circle at 6px 6px,currentColor 1px,transparent 1.6px),
+    radial-gradient(circle at 2px 10px,currentColor 1px,transparent 1.6px),
+    radial-gradient(circle at 6px 10px,currentColor 1px,transparent 1.6px)}
 .qa-title{font-size:12.5px;font-weight:650;letter-spacing:-.01em}
 .qa-ctx{font-size:10.5px;color:var(--accent);font-family:var(--mono);white-space:nowrap;
   overflow:hidden;text-overflow:ellipsis;max-width:120px}
-.qa-mode{font-size:10px;color:var(--faint);border:1px solid var(--border);border-radius:999px;
-  padding:2px 7px;white-space:nowrap;max-width:110px;overflow:hidden;text-overflow:ellipsis}
 .qa-x{width:20px;height:20px;border:0;border-radius:6px;background:transparent;color:var(--faint);
   font-size:15px;line-height:1;cursor:pointer}
 .qa-x:hover{color:var(--text);background:var(--panel-2)}
@@ -1792,6 +1828,19 @@ body.llm-on .qa-inline:hover{background:color-mix(in srgb,var(--down) 15%,transp
 .qa-form input{height:32px;font-size:12.5px}
 .qa-form .hbtn{height:32px;font-size:11.5px}
 .qa-chips .ai-chip,.qa-panel .ai-chip{height:24px;font-size:11px;padding:0 9px}
+/* 底部一行：模型切换（主流对话产品同款：模型入口放在输入框下方） */
+.qa-foot{display:flex;align-items:center;gap:6px;min-height:22px}
+.qa-foot .sp{flex:1}
+.qa-modeltag{display:inline-flex;align-items:center;gap:4px;font-size:10px;color:var(--faint);flex:none}
+.qa-modeltag svg{width:12px;height:12px}
+.qa-modelsel{height:24px;max-width:172px;padding:0 4px;flex:none;
+  border:1px solid var(--border);border-radius:7px;outline:0;
+  background:color-mix(in srgb,var(--panel-2) 62%,transparent);color:var(--dim);
+  font-size:11px;cursor:pointer}
+.qa-modelsel:hover{border-color:color-mix(in srgb,var(--accent) 40%,transparent)}
+.qa-modelsel:focus-visible{border-color:var(--accent)}
+.qa-modelsel:disabled{opacity:.6;cursor:default}
+.qa-hint{font-size:10px;color:var(--faint);white-space:nowrap}
 @keyframes qaIn{from{opacity:0;transform:translateY(6px)}to{opacity:1;transform:none}}
 @media (max-width:820px){
   body.mobile .qa-panel{right:10px;left:10px;top:88px;width:auto;height:min(52vh,440px)}
@@ -1805,7 +1854,14 @@ body.llm-on .qa-inline:hover{background:color-mix(in srgb,var(--down) 15%,transp
 .llmchip span{overflow:hidden;text-overflow:ellipsis}
 .llmchip.on{color:var(--down);border-color:color-mix(in srgb,var(--down) 34%,transparent);
   background:color-mix(in srgb,var(--down) 9%,transparent)}
-.llmchip.on i{background:var(--down);box-shadow:0 0 0 3px color-mix(in srgb,var(--down) 16%,transparent)}
+/* 大模型已配置：绿点呼吸灯（光晕与外扩同步脉动） */
+.llmchip.on i{background:var(--down);box-shadow:0 0 0 3px color-mix(in srgb,var(--down) 16%,transparent);
+  animation:llmBreath 2.2s ease-in-out infinite}
+@keyframes llmBreath{
+  0%,100%{opacity:.72;box-shadow:0 0 0 2px color-mix(in srgb,var(--down) 12%,transparent)}
+  50%{opacity:1;box-shadow:0 0 0 5px color-mix(in srgb,var(--down) 24%,transparent),
+    0 0 9px color-mix(in srgb,var(--down) 60%,transparent)}
+}
 
 /* 模型思考流（推理过程实时滚动，可折叠） */
 .ai-think{max-width:min(78ch,86%);border:1px dashed color-mix(in srgb,var(--accent) 28%,var(--border));

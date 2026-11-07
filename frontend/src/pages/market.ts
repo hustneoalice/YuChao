@@ -442,6 +442,7 @@ let watchPop: HTMLElement | null = null;
 function closeWatchPop(): void {
   watchPop?.remove();
   watchPop = null;
+  document.getElementById("kl-watch")?.setAttribute("aria-expanded", "false");
 }
 
 function updateWatchBtn(): void {
@@ -449,8 +450,10 @@ function updateWatchBtn(): void {
   if (!b) return;
   const on = mk.cur ? isWatched(mk.cur.symbol) : false;
   b.classList.toggle("on", on);
-  b.title = on ? "已收藏 · 点击设置分组" : "收藏 / 设置分组";
-  b.innerHTML = ic(on ? "heart-filled" : "heart", 13);
+  b.title = on ? "已收藏 · 点击展开分组设置" : "收藏 · 点击展开分组设置";
+  // 心形 + 下拉小三角：让「可展开分组」这一层交互可被看出来
+  b.innerHTML = ic(on ? "heart-filled" : "heart", 13) + '<i class="caret"></i>';
+  b.setAttribute("aria-expanded", watchPop ? "true" : "false");
   renderKlpBar();                      // 收藏状态变化 → 信息条「标注」入口显隐同步
 }
 
@@ -462,14 +465,18 @@ function openWatchPop(): void {
   pop.className = "wpop";
   pop.style.visibility = "hidden";
 
-  // 多选：点分组 = 加入/移出该组，浮层保持打开，可连续勾多个组
+  // 多选：点分组 = 加入/移出该组；取消最后一个分组即整体移出自选
   const toggleG = (g: string) => {
     const w = getState().watchlist.find((x) => x.symbol === s.symbol);
     if (!w) { addWatch(s.symbol, s.name, g); toast(`已收藏 · ${g}`); }
     else {
       const on = toggleWatchGroup(s.symbol, g);
-      const now = getState().watchlist.find((x) => x.symbol === s.symbol)?.groups ?? [];
-      toast(`${on ? "已加入" : "已移出"}「${g}」· 当前：${now.join(" / ")}`);
+      if (!isWatched(s.symbol)) {
+        toast("已移出自选");
+      } else {
+        const now = getState().watchlist.find((x) => x.symbol === s.symbol)?.groups ?? [];
+        toast(`${on ? "已加入" : "已移出"}「${g}」· 当前：${now.join(" / ")}`);
+      }
     }
     draw();
   };
@@ -483,9 +490,7 @@ function openWatchPop(): void {
       `<div class="wpop-list">${allWatchGroups().map((g) =>
         `<button class="wpop-g${gsel.includes(g) ? " on" : ""}" data-g="${esc(g)}">` +
         `<span>${esc(g)}</span>${gsel.includes(g) ? ic("check", 12) : ""}</button>`).join("")}</div>` +
-      `<div class="wpop-new"><input class="field" placeholder="新建分组名称"><button class="hbtn" data-act="new">新建</button></div>` +
-      `<div class="wpop-foot">${w ? `<button class="wpop-del" data-act="rm">${ic("trash", 12)}移出自选</button>` : "<span></span>"}` +
-      `<span class="sp"></span><button class="hbtn" data-act="close">完成</button></div>`;
+      `<div class="wpop-new"><input class="field" placeholder="新建分组名称"><button class="hbtn" data-act="new">新建</button></div>`;
   };
 
   pop.addEventListener("click", (e) => {
@@ -493,8 +498,6 @@ function openWatchPop(): void {
     const gEl = t.closest<HTMLElement>("[data-g]");
     if (gEl) { toggleG(gEl.dataset.g!); return; }
     const act = t.closest<HTMLElement>("[data-act]")?.dataset.act;
-    if (act === "close") { closeWatchPop(); return; }
-    if (act === "rm") { removeWatch(s.symbol); toast(`已将 ${s.name} 移出自选`); closeWatchPop(); return; }
     if (act === "new") {
       const inp = pop.querySelector("input") as HTMLInputElement;
       const name = inp.value.trim();
@@ -524,6 +527,7 @@ function openWatchPop(): void {
   pop.style.left = `${left}px`;
   pop.style.top = `${top}px`;
   pop.style.visibility = "visible";
+  document.getElementById("kl-watch")?.setAttribute("aria-expanded", "true");
 }
 
 export function initMarket(): void {

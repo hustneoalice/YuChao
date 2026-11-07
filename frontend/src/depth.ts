@@ -67,20 +67,104 @@ function capYi(v: number | null | undefined): string {
 /* ── 名称 / 行业 / 概念 / 现价 ── */
 function headHtml(d: DepthQuote, q: Quote | null, symbol: string): string {
   const chgCls = pnlClass(d.pct);
+  const arrow = chgCls ? `<i class="dp-arrow ${chgCls}"></i>` : "";
   const cons = (q?.concept ?? "").split(/[,，、;；\s]+/).map((x) => x.trim())
     .filter((c) => c && c !== q?.industry);   // 概念里常回带行业名，避免和行业 chip 重复
   const ind = q?.industry ? `<span class="ind">${esc(q.industry)}</span>` : "";
-  const chips = cons.slice(0, 5).map((c) => `<span>${esc(c)}</span>`).join("");
-  const more = cons.length > 5 ? `<span class="more" title="${esc(cons.slice(5).join("、"))}">+${cons.length - 5}</span>` : "";
-  return `<div class="dp-id"><b>${esc(d.name || q?.name || symbol)}</b>
-      <span class="num">${esc(symbol.split(".")[0])}</span></div>
+  const shown = cons.slice(0, 5).map((c) => `<span>${esc(c)}</span>`).join("");
+  const more = cons.length > 5
+    ? `<span class="more" role="button" tabindex="0">+${cons.length - 5} 更多</span>` : "";
+  // 全量概念挂 data 属性，hover/点击时用固定定位浮层展示（不受卡片 overflow 裁剪）
+  const dataCons = cons.length ? ` data-cons='${esc(JSON.stringify(cons)).replace(/"/g, "&quot;")}'` : "";
+  const rz = d.margin === true
+    ? `<span class="dp-tag rz" title="两融标的：支持融资买入">融资融券</span>`
+    : d.margin === false
+      ? `<span class="dp-tag no" title="非两融标的：不支持融资买入">非两融</span>`
+      : "";
+  return `<div class="dp-id"><b class="${chgCls}">${esc(d.name || q?.name || symbol)}</b>
+      <span class="num">${esc(symbol.split(".")[0])}</span>${rz}</div>
     <div class="dp-head">
       <div class="dp-last ${chgCls}">${fmt(d.price)}</div>
-      <div class="dp-chg ${chgCls}">${d.chg != null ? (d.chg > 0 ? "+" : "") + fmt(d.chg) : "—"}
+      <div class="dp-chg ${chgCls}">${arrow}${d.chg != null ? (d.chg > 0 ? "+" : "") + fmt(d.chg) : "—"}
         <span>${d.pct != null ? (d.pct > 0 ? "+" : "") + fmt(d.pct) + "%" : "—"}</span></div>
       <div class="dp-time">${esc(d.time || "")}</div>
     </div>
-    ${ind || chips ? `<div class="dp-con">${ind}${chips}${more}</div>` : ""}`;
+    ${ind || shown ? `<div class="dp-con"${dataCons}>${ind}${shown}${more}</div>` : ""}`;
+}
+
+/* ── 概念浮层：默认只露前 5 个，hover 概念行 / 点「更多」展开全量 ── */
+let conPop: HTMLElement | null = null;
+let conPinned = false;
+let conAnchor: HTMLElement | null = null;
+
+function ensureConPop(): HTMLElement {
+  if (conPop) return conPop;
+  conPop = document.createElement("div");
+  conPop.className = "dp-conpop";
+  conPop.hidden = true;
+  document.body.append(conPop);
+  conPop.addEventListener("mouseleave", () => { if (!conPinned) hideConPop(); });
+  const closeOutside = (e: Event): void => {
+    if (!conPinned) return;
+    const t = e.target as HTMLElement;
+    if (t.closest?.(".dp-conpop, .dp-con")) return;
+    hideConPop();
+  };
+  document.addEventListener("pointerdown", closeOutside, true);
+  document.addEventListener("click", closeOutside, true);
+  window.addEventListener("resize", hideConPop);
+  window.addEventListener("scroll", hideConPop, true);
+  return conPop;
+}
+
+function hideConPop(): void {
+  conPinned = false;
+  conAnchor = null;
+  if (conPop) conPop.hidden = true;
+}
+
+function showConPop(anchor: HTMLElement): void {
+  const raw = anchor.dataset.cons;
+  if (!raw) return;
+  let names: string[] = [];
+  try { names = JSON.parse(raw) as string[]; } catch { return; }
+  if (!names.length) return;
+  const el = ensureConPop();
+  conAnchor = anchor;
+  el.innerHTML = names.map((n) => `<span>${esc(n)}</span>`).join("");
+  el.hidden = false;
+  el.style.visibility = "hidden";
+  const w = Math.min(430, Math.max(280, anchor.offsetWidth));
+  el.style.width = `${w}px`;
+  const r = anchor.getBoundingClientRect();
+  const h = el.offsetHeight;
+  const below = r.bottom + 6;
+  const top = below + h > window.innerHeight - 8 ? r.top - h - 6 : below;
+  el.style.left = `${Math.max(8, Math.min(r.left, window.innerWidth - w - 8))}px`;
+  el.style.top = `${Math.max(8, top)}px`;
+  el.style.visibility = "visible";
+}
+
+function bindConPop(card: HTMLElement): void {
+  card.addEventListener("mouseover", (e) => {
+    const con = (e.target as HTMLElement).closest<HTMLElement>(".dp-con");
+    if (con && con !== conAnchor) showConPop(con);
+  });
+  card.addEventListener("mouseout", (e) => {
+    const con = (e.target as HTMLElement).closest<HTMLElement>(".dp-con");
+    if (!con || conPinned) return;
+    const to = e.relatedTarget as HTMLElement | null;
+    if (to?.closest?.(".dp-conpop")) return;
+    hideConPop();
+  });
+  card.addEventListener("click", (e) => {
+    const more = (e.target as HTMLElement).closest<HTMLElement>(".dp-con .more");
+    if (!more) return;
+    const con = more.closest<HTMLElement>(".dp-con")!;
+    if (conPinned && conAnchor === con) { hideConPop(); return; }
+    conPinned = true;
+    showConPop(con);
+  });
 }
 
 /* ── 关键字段网格（2 列 · 标签左值右，对标众赢盘口左栏） ── */
@@ -214,6 +298,7 @@ function poll(card: HTMLElement, run: () => Promise<boolean>, paint: () => strin
 }
 
 export function bindOrderbook(card: HTMLElement, symbol: string, mode: string, getQuote: () => Quote | null): void {
+  bindConPop(card);
   poll(card,
     async () => {
       const s = dstate(symbol);
