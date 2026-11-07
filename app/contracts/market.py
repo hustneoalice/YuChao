@@ -220,6 +220,9 @@ class TargetItem(BaseModel):
     mine_date: Optional[str] = Field(default=None, description="最近一次地雷（阶段高点回落）日期")
     mine_ago: Optional[int] = Field(default=None, description="地雷距今交易日数（0=今日；null=近20日未出现）")
     mine_cnt: int = Field(default=0, description="近 20 个交易日地雷出现次数")
+    acc_strength: Optional[float] = Field(
+        default=None,
+        description="主力吸筹强度：近 20 日柱峰值在本股过去一年各 20 日窗口峰值的百分位（0-100）")
     trend_data_date: str = ""
     trend_provisional: bool = False
     tail_provisional: bool = Field(default=False, description="该行钱袋/地雷来自尾盘估算（收盘前可能变化）")

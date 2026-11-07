@@ -172,6 +172,7 @@ export interface TargetItem {
   mine_date?: string | null;              // 最近一次地雷（ZigZag 高点回落）日期
   mine_ago?: number | null;               // 地雷距今交易日数（0=今日；null=近20日未出现）
   mine_cnt?: number;                      // 近 20 个交易日地雷出现次数
+  acc_strength?: number | null;           // 主力吸筹强度：近20日柱峰值在本股近250日的百分位(0-100)
   trend_data_date: string; trend_provisional: boolean;
   tail_provisional?: boolean;             // 钱袋/地雷来自尾盘估算（收盘前可能变化）
 }

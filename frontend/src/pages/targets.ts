@@ -628,7 +628,7 @@ function showSparkPop(cv: HTMLCanvasElement, ev: MouseEvent): void {
 const COND_GROUPS: [string, string[]][] = [
   ["量能", ["vol"]],
   ["价格结构", ["short", "mid", "up20"]],
-  ["信号", ["trend", "negshrink", "nearzero", "money", "mine"]],
+  ["信号", ["trend", "negshrink", "nearzero", "money", "mine", "acc"]],
 ];
 /* 钱袋/地雷阈值用自然语言，避免「≤5 日」这种要心算的口径 */
 const SIGNAL_PILLS: [string, number][] = [["今日", 0], ["3日", 3], ["5日", 5], ["10日", 10]];

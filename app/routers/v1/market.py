@@ -703,6 +703,9 @@ def _target_scan(conn, conds: str, values: Optional[str],
     if "trend" in want:
         items.sort(key=lambda t:
             ((t.get('trend_cross_ago') if t.get('trend_cross_ago') is not None else 100000), -seg_rank(t)))
+    elif "acc" in want:
+        # 吸筹榜：个股内强度分位降序（80+ 才进榜），同强度再按操作优先级
+        items.sort(key=lambda t: (-(t.get('acc_strength') or 0), -seg_rank(t)))
     elif "money" in want:
         # 钱袋榜：越新鲜越靠前（距今天数升序），同日出现再按出现次数/操作优先级
         items.sort(key=lambda t: (

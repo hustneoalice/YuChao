@@ -1,5 +1,6 @@
 """行情读取：K 线（复权派生视图）/ 快照 / 搜索。"""
 import time
+from collections import deque
 from typing import Optional
 from threading import Lock
 from datetime import datetime
@@ -417,7 +418,7 @@ SEG_RANK = {0: 0, 1: 0, 2: 1, 6: 2, 4: 3, 5: 5, 3: 6}
 _TGT_CACHE: dict = {"key": None, "rows": [], "meta": {}}
 _TGT_COLS = ("symbol, name, close, pct_chg, vol_ma40, vol_ratio, vol_hit,"
              " short_orange, mid_orange, limit_up_20d, limit_up_cnt,"
-             " seg, seg_name, pullback")
+             " seg, seg_name, pullback, acc_strength")
 
 # 全市场目标指标：一次窗口 SQL 算完（条件无关层），按 (最新K线日期, 标的数, 北交开关) 缓存
 _TGT_SQL = (
@@ -500,6 +501,115 @@ def _tgt_sql(live_date: Optional[str]) -> str:
         " AND current IS NOT NULL AND volume > 0)"
     )
     return _TGT_SQL.replace("FROM daily_ohlcv),", f"FROM {live}),", 1)
+
+
+# 主力吸筹（众赢「主力吸筹」柱线移植，口径与 frontend/src/accumulation.ts 一致）：
+# 只由最低价序列驱动，柱子只出现在 38 日新低当天；柱高量纲随个股波动剧烈
+# （实测 250 根内：上证 79 / 宁德 95 / 招行 252 / 茅台 1194），不能跨股比较。
+# 因此指标层落「个股内百分位」acc_strength：近 20 日吸筹柱峰值，在本股过去
+# 一年各 20 日窗口峰值的分位（0-100）。用滚动窗口峰值做分母而非单根柱值，
+# 避免「取近 20 日最大值」天然高分位导致大半市场同时命中（80 分位≈80% 命中）。
+# 80 = 当前这段的吸筹力度进入本股一年内的前 20% 窗口。
+_ACC_BARS = 250          # 计算窗口（约一年交易日）
+_ACC_WARMUP = 38         # 前 38 根处于 38 日窗口/var8 平滑预热期，不计入分位
+_ACC_RECENT = 20         # 「近期」= 近 20 个交易日的柱峰值
+_ACC_FLOOR = 5.0         # 柱高低于该值视为噪声（0.1~1 量级的碎柱不参与分位）
+
+
+def _acc_sql(live_date: Optional[str]) -> str:
+    """吸筹取数：每股最近 250 根最低价（live 时同 _tgt_sql 拼接快照当日）。"""
+    if live_date:
+        src = (
+            "(SELECT symbol, date, low FROM v_daily_ohlcv_qfq"
+            f" WHERE date < DATE '{live_date}'"
+            " UNION ALL"
+            " SELECT symbol, trade_date AS date, COALESCE(low, current) AS low"
+            " FROM market_snapshot"
+            f" WHERE kind = 'stock' AND trade_date = DATE '{live_date}'"
+            " AND current IS NOT NULL AND volume > 0)")
+    else:
+        src = "v_daily_ohlcv_qfq"
+    return (
+        "WITH t AS (SELECT symbol, date, low,"
+        " ROW_NUMBER() OVER (PARTITION BY symbol ORDER BY date DESC) AS rn"
+        f" FROM {src} WHERE symbol IN (SELECT symbol FROM stock_universe)),"
+        " s AS (SELECT symbol, date, low FROM t WHERE rn <= 250)"
+        " SELECT symbol, date, low FROM s ORDER BY symbol, date")
+
+
+def _acc_series(lows: list[float]) -> list[Optional[float]]:
+    """众赢主力吸筹柱高（与 accumulation.ts 逐点同口径）。
+
+    diff = low - prevLow；absSma / upSma 为 3 期递推 SMA；upSma=0 时当日无柱
+    且不推进 var8；今日最低 ≤ 近 38 日最低才给 target，否则 target=0（var8
+    逐日减半回落）。返回 var8/618，空值为 None。单调队列维护窗口最小/最大值。
+    """
+    n = len(lows)
+    out: list[Optional[float]] = [None] * n
+    abs_sma = up_sma = 0.0
+    var4: Optional[float] = None
+    var8: Optional[float] = None
+    lo_q: deque = deque()            # (i, low) 单调递增 → 窗口最小值
+    hi_q: deque = deque()            # (i, var4) 单调递减 → 窗口最大值
+    for i in range(n):
+        low = float(lows[i])
+        diff = low - float(lows[i - 1]) if i else 0.0
+        abs_sma = (2 * abs_sma + abs(diff)) / 3
+        up_sma = (2 * up_sma + max(diff, 0.0)) / 3
+        while lo_q and lo_q[-1][1] >= low:
+            lo_q.pop()
+        lo_q.append((i, low))
+        while lo_q[0][0] <= i - 38:
+            lo_q.popleft()
+        if up_sma == 0:                  # 上影无穷：无柱，var4/var8 不推进
+            continue
+        input_v = abs_sma / up_sma * 100 * 10
+        var4 = input_v if var4 is None else (input_v + var4) / 2
+        while hi_q and hi_q[-1][1] <= var4:
+            hi_q.pop()
+        hi_q.append((i, var4))
+        while hi_q[0][0] <= i - 38:
+            hi_q.popleft()
+        target = (var4 + hi_q[0][1] * 2) / 2 if low <= lo_q[0][1] else 0.0
+        var8 = target if var8 is None else (target + var8) / 2
+        out[i] = var8 / 618
+    return out
+
+
+def _acc_roll_max(vals: list[Optional[float]], window: int) -> list[Optional[float]]:
+    """柱值序列的滚动窗口峰值（窗口按数组下标，None 不参与）。"""
+    q: deque = deque()               # (i, v) 单调递减
+    out: list[Optional[float]] = []
+    for i, v in enumerate(vals):
+        if v is not None:
+            while q and q[-1][1] <= v:
+                q.pop()
+            q.append((i, v))
+        while q and q[0][0] <= i - window:
+            q.popleft()
+        out.append(q[0][1] if q else None)
+    return out
+
+
+def _acc_strength_map(conn, live_date: Optional[str] = None) -> dict[str, float]:
+    """全市场 acc_strength：近 20 日窗口峰值在本股一年各 20 日窗口峰值中的分位。"""
+    lows_by_sym: dict[str, list[float]] = {}
+    for sym, _d, low in conn.execute(_acc_sql(live_date)).fetchall():
+        if low is None:
+            continue
+        lows_by_sym.setdefault(sym, []).append(float(low))
+    out: dict[str, float] = {}
+    start = _ACC_WARMUP + _ACC_RECENT - 1
+    for sym, lows in lows_by_sym.items():
+        vals = _acc_series(lows[: _ACC_BARS])
+        rm = _acc_roll_max(vals, _ACC_RECENT)       # 各 20 日窗口的柱峰值
+        peak = rm[-1] if rm else None               # 当前这段（近 20 日）的峰值
+        hist = [v for v in rm[start:] if v is not None]
+        if peak is None or peak < _ACC_FLOOR or not hist:
+            out[sym] = 0.0                          # 无柱/全是噪声碎柱：无参考意义
+            continue
+        out[sym] = round(sum(1 for v in hist if v <= peak) / len(hist) * 100, 1)
+    return out
 
 
 def _scan_computed_at(conn) -> str:
@@ -595,6 +705,7 @@ def compute_target_scan(conn, live: Optional[dict] = None) -> tuple[list[dict], 
         return _TGT_CACHE["rows"], _TGT_CACHE["meta"]
 
     names = dict(conn.execute("SELECT symbol, name FROM stock_universe").fetchall())
+    acc_map = _acc_strength_map(conn, live["date"] if live else None)
     out: list[dict] = []
     for r in conn.execute(_tgt_sql(live["date"] if live else None)).fetchall():
         sym, name = r[0], names.get(r[0])
@@ -618,6 +729,7 @@ def compute_target_scan(conn, live: Optional[dict] = None) -> tuple[list[dict], 
             "limit_up_20d": cnt > 0, "limit_up_cnt": cnt,
             "seg": seg, "seg_name": _TGT_SEGNAME[seg],
             "pullback": bool(ma7 and close < ma7),
+            "acc_strength": acc_map.get(sym),
         })
     db_as_of = str(fp[0])
     as_of = live["as_of"] if live else db_as_of
