@@ -19,8 +19,7 @@ export const MA_ROWS: readonly MARow[] = [
 
 const KEY = 'yc_ma_settings';
 const MIN_PERIOD = 2, MAX_PERIOD = 500;
-const ROLE: Record<number, string> = { 60: '·季', 120: '·半年', 250: '·年' };
-const TIP = '周期 2～500 根；日 K 中 60=季线、120=半年线、250=年线。';
+const TIP = '周期 2～500 根，逐条调整显隐。';
 
 const defaults = (): MASettings => ({
   periods: MA_ROWS.map((row) => row.defaultPeriod),
@@ -29,8 +28,9 @@ const defaults = (): MASettings => ({
 
 const pad = (n: number): number => Math.min(MAX_PERIOD, Math.max(MIN_PERIOD, Math.round(n)));
 
-export function maLabel(period: number): string {
-  return `MA${period}${ROLE[period] ?? ''}`;
+/** 图例只给序号，不带周期数值；周期仅在设置面板里作为可编辑项出现 */
+export function maLabel(slot: number): string {
+  return `均线${slot + 1}`;
 }
 
 export function readMASettings(): MASettings {
@@ -59,7 +59,7 @@ export function visibleMARows(): { period: number; color: string; label: string 
   return MA_ROWS.map((row, i) => ({
     period: settings.periods[i],
     color: cssv(row.cssVar) || row.fallback,
-    label: maLabel(settings.periods[i]),
+    label: maLabel(i),
   })).filter((_, i) => settings.visible[i]);
 }
 
@@ -98,12 +98,12 @@ export function mountMASettings(chart: Chart, el: HTMLElement, onChange: () => v
   pop.hidden = true;
   pop.setAttribute('role', 'dialog');
   pop.setAttribute('aria-label', '均线参数');
-  pop.innerHTML = `<div class="vpop-head"><b>均线参数</b><span class="mono">MA</span>
+  pop.innerHTML = `<div class="vpop-head"><b>均线参数</b><span class="mono">均线</span>
       <button type="button" class="vpop-x" aria-label="关闭">${ic('x', 11)}</button></div>
     <div class="vpop-body">${MA_ROWS.map((row, i) => `
       <div class="vpop-row">
         <span class="vpop-sw" style="--c:${cssv(row.cssVar) || row.fallback}"></span>
-        <span class="vpop-lb" data-lb="${i}" style="width:40px">${maLabel(row.defaultPeriod)}</span>
+        <span class="vpop-lb" data-lb="${i}" style="width:40px">${maLabel(i)}</span>
         <div class="vstep">
           <button type="button" data-d="-1" aria-label="第${i + 1}条均线周期减一">−</button>
           <input name="p${i}" type="number" min="${MIN_PERIOD}" max="${MAX_PERIOD}" step="1"
@@ -144,7 +144,7 @@ export function mountMASettings(chart: Chart, el: HTMLElement, onChange: () => v
   const syncSteps = (): void => {
     steps.forEach((box, i) => {
       const n = Number(inputs[i].value) ? pad(Number(inputs[i].value)) : MIN_PERIOD;
-      labels[i].textContent = maLabel(n);
+      labels[i].textContent = maLabel(i);
       box.querySelectorAll<HTMLButtonElement>('button').forEach((b) => {
         const dir = Number(b.dataset.d);
         b.disabled = dir < 0 ? n <= MIN_PERIOD : n >= MAX_PERIOD;

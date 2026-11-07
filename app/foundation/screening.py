@@ -26,13 +26,13 @@ CONDITIONS: tuple[dict[str, Any], ...] = (
     {"key": "trend", "label": "趋势柱线", "kind": "trend", "field": None,
      "default_on": False,
      "title": "STICKV 负转正或持续在零轴上方，可独立筛选或与其他条件同时满足"},
-    {"key": "vol", "label": "40日均量", "kind": "value", "field": "vol_ratio",
+    {"key": "vol", "label": "均量", "kind": "value", "field": "vol_ratio",
      "op": ">=", "default": 1.0, "min": 0.0, "max": 10.0, "step": 0.1, "unit": "x",
-     "default_on": True, "title": "当日成交量 / 40日均量 不小于阈值"},
+     "default_on": True, "title": "当日成交量 / 均量 不小于阈值"},
     {"key": "short", "label": "短线趋势橙", "kind": "flag", "field": "short_orange",
-     "default_on": True, "title": "收盘站上 MA10（K 线短线趋势通道填橙同判定）"},
+     "default_on": True, "title": "收盘站上短线趋势线（K 线通道填橙同判定）"},
     {"key": "mid", "label": "中线趋势橙", "kind": "flag", "field": "mid_orange",
-     "default_on": True, "title": "收盘站上 MA45（K 线中线趋势通道填橙同判定）"},
+     "default_on": True, "title": "收盘站上中线趋势线（K 线通道填橙同判定）"},
     {"key": "up20", "label": "20日内涨停", "kind": "flag", "field": "limit_up_20d",
      "default_on": True, "title": "近 20 个交易日有过涨停（主板 10% / 创业科创 20%）"},
     # 趋势柱线「负柱收敛」两条件依赖 STICKV 序列（dep=trend），用于提前捕捉
@@ -51,13 +51,13 @@ CONDITIONS: tuple[dict[str, Any], ...] = (
     {"key": "money", "label": "钱袋子", "kind": "value", "field": "money_ago",
      "op": "<=", "default": 5, "min": 0, "max": 60, "step": 1, "unit": "日",
      "default_on": False,
-     "title": "近 N 个交易日内出现过钱袋子（ZigZag 低点，反弹 6% 确认）；数值为距今天数，越小越新鲜"},
+     "title": "近 N 个交易日内出现过钱袋子（阶段低点确认后的反弹信号）；数值为距今天数，越小越新鲜"},
     # 地雷（钱眼掘金 ZigZag 高点回落）：与钱袋同源、方向相反的风险信号。
     # 默认关闭——地雷确认时价格通常已跌破短线趋势，与趋势橙叠加会把命中压到 0。
     {"key": "mine", "label": "地雷", "kind": "value", "field": "mine_ago",
      "op": "<=", "default": 5, "min": 0, "max": 60, "step": 1, "unit": "日",
      "default_on": False,
-     "title": "近 N 个交易日内出现过地雷（ZigZag 高点回落 6% 确认）；数值为距今天数，越小越新鲜（风险信号）"},
+     "title": "近 N 个交易日内出现过地雷（阶段高点确认后的回落信号）；数值为距今天数，越小越新鲜（风险信号）"},
 )
 
 _KEYS = {c["key"] for c in CONDITIONS}

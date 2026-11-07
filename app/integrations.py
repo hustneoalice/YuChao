@@ -269,7 +269,7 @@ def liangdian_message(conn, slot: str = "") -> dict | None:
     lines: list[tuple[str, str]] = [(
         f"命中 {len(hits)} 只 · 数据截至 {target_date}"
         + ("（盘中实时口径）" if live else ""),
-        "趋势柱线当日上穿零轴 + 中线趋势橙（站上 MA45）",
+        "趋势柱线当日上穿零轴 + 中线趋势橙（站上中线趋势线）",
     )]
     for i, t in enumerate(hits[:_LD_MAX], start=1):
         seg = f"第{t.get('seg')}段·{t.get('seg_name') or ''}"

@@ -54,7 +54,7 @@ const TABLE_ZH: Record<string, string> = {
   sector_index: "行业板块行情", daily_valuation: "全市场估值", corepicks_result: "核心标名单",
   stock_profile: "个股档案", target_scan: "目标监控指标", target_trend: "趋势柱线指标",
   pe_percentile: "估值分位", fund_universe: "基金清单", sector_member: "板块成分",
-  zy_block: "众赢板块", zy_block_member: "众赢板块成分", update_log: "更新记录",
+  zy_block: "板块", zy_block_member: "板块成分", update_log: "更新记录",
 };
 
 const daysAgo = (d?: string | null): number | null => {
@@ -80,7 +80,7 @@ const DATA_TYPE_ZH: Record<string, string> = {
   financials: "财务报表", stock_universe: "证券清单", sector_index: "行业板块行情",
   adjust_factor: "复权因子", corepicks: "核心标选股", corepicks_result: "核心标选股",
   stock_profile: "个股档案", market_snapshot: "盘中实时快照", quotes: "实时行情",
-  fund_universe_sync: "基金清单同步", zy_block_sync: "众赢板块同步",
+  fund_universe_sync: "基金清单同步", zy_block_sync: "板块同步",
   pe_percentile: "估值分位", target_scan: "目标监控计算", backup: "数据备份",
   feishu_push: "飞书早报", target_push: "两点乾坤推送",
   package_export: "导出数据包", package_import: "导入数据包", backfill: "历史回补",
@@ -522,7 +522,7 @@ async function renderFeishu(body: HTMLElement): Promise<void> {
     `<input class="field" id="fs-times" style="flex:1;min-width:220px" value="${esc(cfg.push_times.join(", "))}" ` +
     `placeholder="09:45, 10:30, 14:30（逗号分隔，最多 12 个）"></div></div>` +
     `<div class="setrow"><span class="lab"></span><div class="ctl">` +
-    `<span style="font-size:11px;color:var(--faint)">趋势柱线当日上穿零轴 + 中线趋势橙（站上 MA45）：交易日到点计算并推送，无命中不发消息</span></div></div>` +
+    `<span style="font-size:11px;color:var(--faint)">趋势柱线当日上穿零轴 + 中线趋势橙（站上中线趋势线）：交易日到点计算并推送，无命中不发消息</span></div></div>` +
     `<div class="setrow"><span class="lab"></span><div class="ctl">` +
     `<button class="hbtn primary" id="fs-save">保存</button>` +
     `<button class="hbtn" id="fs-test">发送测试消息</button>` +

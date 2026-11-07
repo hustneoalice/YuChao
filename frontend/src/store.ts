@@ -17,15 +17,15 @@ export const RIGHT_TABS = [
 export const CARD_DEFS = [
   { id: "watch", name: "自选股", icon: "star", tab: "market", desc: "与左侧自选列表同步的实时看板：现价 / 涨跌幅 / 换手 / 成交额一屏速览，点击直达个股。" },
   { id: "signals", name: "信号面板", icon: "lightning", tab: "market", desc: "六分段位置判定与操作提示，VIP 因子明细（趋势/位置）由系统计算。" },
-  { id: "trend", name: "趋势", icon: "chart-line", tab: "market", desc: "60分 / 日 / 周 三周期短线趋势（收盘 vs MA10）：多头红、空头绿，右侧为近 12/24 根趋势柱，附六段位。" },
+  { id: "trend", name: "趋势", icon: "chart-line", tab: "market", desc: "60分 / 日 / 周 三周期短线趋势：多头红、空头绿，右侧为近 12/24 根趋势柱，附六段位。" },
   { id: "moneyflow", name: "资金流", icon: "trend-up", tab: "market", desc: "超大 / 大 / 中 / 小单当日净流入结构，以及主力净额近五日迷你走势。" },
-  { id: "indicators", name: "技术指标", icon: "chart-line-up", tab: "market", desc: "MA / BOLL / RSI / KDJ 关键读数与 MA20 背离状态。" },
+  { id: "indicators", name: "技术指标", icon: "chart-line-up", tab: "market", desc: "均线 / BOLL / RSI / KDJ 关键读数与背离状态。" },
   { id: "valuation", name: "估值", icon: "database", tab: "market", desc: "市盈率（TTM）/ 市净率 / 市销率，以及总市值、流通市值。" },
   { id: "corepick", name: "核心标档案", icon: "target", tab: "market", desc: "该标的在追涨 / 低吸池中的档案与资金分（名单公开）。" },
   { id: "shareholders", name: "十大流通股东", icon: "user", tab: "holder", desc: "季度持股披露 / 持股数量变化 / 社保基金新进；进入仅表示新进入十大名单。" },
   { id: "chips", name: "筹码分布", icon: "list", tab: "chips", desc: "按日线换手衰减估算价格筹码：获利比例 / 平均成本 / 90% 成本区间 / 集中度，指数不适用。" },
-  { id: "orderbook", name: "盘口", icon: "cell-signal-high", tab: "depth", desc: "对标众赢「盘口」：名称概念 + 最高/开盘/昨收/振幅/涨跌停/量比/换手/市盈率/市净率/成交额/市值/内外盘 + 买卖五档 + 委比委差，一屏集中。" },
-  { id: "trades", name: "成交明细", icon: "list", tab: "depth", desc: "对标众赢「分时差价」：逐笔成交时间 / 价格 / 手数 / B·S 方向，主买红、主卖绿，最新在前。" },
+  { id: "orderbook", name: "盘口", icon: "cell-signal-high", tab: "depth", desc: "盘口：名称概念 + 最高/开盘/昨收/振幅/涨跌停/量比/换手/市盈率/市净率/成交额/市值/内外盘 + 买卖五档 + 委比委差，一屏集中。" },
+  { id: "trades", name: "成交明细", icon: "list", tab: "depth", desc: "成交明细：逐笔成交时间 / 价格 / 手数 / B·S 方向，主买红、主卖绿，最新在前。" },
 ] as const;
 
 export interface AppState {

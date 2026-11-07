@@ -301,7 +301,7 @@ td .mini{font:10px var(--mono);color:var(--faint);margin-left:4px}
           <div class="msg">
             <div class="who"><span class="av">AI</span>智能助手 · 08:11</div>
             <div class="body">
-              <p>按当前条件（<b>钱袋子 ≤ 1 日</b> + <b>量能小于 40 日均量</b> + <b>连续负柱收窄</b>）扫描全市场，命中 <span class="num">37</span> 只，下表为前 5：</p>
+              <p>按当前条件（<b>钱袋子 ≤ 1 日</b> + <b>量能低于近期均量</b> + <b>连续负柱收窄</b>）扫描全市场，命中 <span class="num">37</span> 只，下表为前 5：</p>
 
               <!-- 工具调用卡片：可折叠，展示参数 / 数据日期 / 耗时 -->
               <div class="toolcall open" data-tc>
@@ -341,7 +341,7 @@ td .mini{font:10px var(--mono);color:var(--faint);margin-left:4px}
                 </table>
               </div>
 
-              <p>共同点：三只都在 <b>20 日窗口内出现过 2 次钱袋</b>，且量能低于 40 日均量；负柱收窄天数越长，说明抛压衰减越充分。注意这是<b>日线口径</b>，今天盘中看到的仍是 11-05 的确认信号。</p>
+              <p>共同点：三只都在 <b>20 日窗口内出现过 2 次钱袋</b>，且量能低于近期均量；负柱收窄天数越长，说明抛压衰减越充分。注意这是<b>日线口径</b>，今天盘中看到的仍是 11-05 的确认信号。</p>
             </div>
             <div class="ev">
               <b>本次依据</b>　<span class="e"><i>①</i>daily_ohlcv 2026-11-05</span><span class="e"><i>②</i>target_trend 2026-11-05</span><span class="e"><i>③</i>条件引擎 target_scan</span>
@@ -626,7 +626,7 @@ const ANSWERS = {
     cards:'<div class="tc-row"><span class="k">数据源</span><span class="v">daily_ohlcv · target_trend</span></div>'
       + '<div class="tc-row"><span class="k">数据日期</span><span class="v"><em>2026-11-05</em>（盘中 T-1）</span></div>'
       + '<div class="tc-row"><span class="k">扫描</span><span class="v">5,019 只 · 命中 37 只 · 返回前 50</span></div>',
-    text:'按「钱袋子 ≤ 1 日 + 量能低于 40 日均量 + 连续负柱收窄」扫描，命中 <span class="num">37</span> 只。前 5 名如下：' + TABLE
+    text:'按「钱袋子 ≤ 1 日 + 量能低于近期均量 + 连续负柱收窄」扫描，命中 <span class="num">37</span> 只。前 5 名如下：' + TABLE
       + '<p>三只都满足：钱袋在 20 日窗口内出现、量能低于均量。注意这是<b>日线口径</b>，盘中看到的仍是 11-05 确认信号。</p>',
     ev:'<b>本次依据</b>　<span class="e"><i>①</i>daily_ohlcv 2026-11-05</span><span class="e"><i>②</i>target_trend</span><span class="e"><i>③</i>target_scan</span>' },
   profile: { tool:"stock_profile", args:'{symbol:"000001"}', ms:12,
@@ -650,11 +650,11 @@ const ANSWERS = {
     text:'PE(TTM) <span class="num">6.8</span>、PB <span class="num">0.62</span>，总市值 2,186 亿；近 5 年 PE 分位 <span class="num">32%</span>，处于历史偏低区间。'
       + '<p>分位为本地重建口径，样本自 2021 年起；不含机构目标价。</p>',
     ev:'<b>本次依据</b>　<span class="e"><i>①</i>daily_valuation 2026-11-05</span><span class="e"><i>②</i>pe_percentile</span>' },
-  task: { tool:"create_watch_task", args:'{symbol:"000001", rule:"close<ma10", push:"feishu"}', ms:6,
+  task: { tool:"create_watch_task", args:'{symbol:"000001", rule:"close_below_trend", push:"feishu"}', ms:6,
     cards:'<div class="tc-row"><span class="k">写入</span><span class="v">user_tasks（SQLite）</span></div>'
       + '<div class="tc-row"><span class="k">执行</span><span class="v">updater 每次收盘后 · 不常驻</span></div>'
       + '<div class="tc-row"><span class="k">推送</span><span class="v">飞书 · 命中即推</span></div>',
-    text:'已创建监控任务：<b>000001 平安银行 · 收盘跌破 MA10 时提醒</b>。任务写入 <span class="mono">user_tasks</span>，由更新内核在收盘后判定，命中推飞书；不会占用常驻进程。',
+    text:'已创建监控任务：<b>000001 平安银行 · 收盘跌破趋势线时提醒</b>。任务写入 <span class="mono">user_tasks</span>，由更新内核在收盘后判定，命中推飞书；不会占用常驻进程。',
     ev:'<b>本次依据</b>　<span class="e"><i>①</i>kline 2026-11-05</span><span class="e"><i>②</i>user_tasks</span>' },
   generic: { tool:"list_conditions", args:'{}', ms:4,
     cards:'<div class="tc-row"><span class="k">能力</span><span class="v">18 个工具 · 5 位专家</span></div>',

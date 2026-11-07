@@ -44,6 +44,8 @@ export const mk = {
   active: 0,                 // 焦点面板（chartbar 周期段/观察档作用于它）
   mainInds: ["ma", "short", "mid"] as MainKey[], // 默认趋势预设：MA + 短/中线趋势
   subInds: ["vol", "macd"] as SubKey[],  // 副图多选，每指标一个窗格
+  lineFib: localStorage.getItem("yc_kfib") === "1",  // 黄金分割（智能画线，主图叠加）
+  lineSR: localStorage.getItem("yc_ksr") === "1",    // 支撑压力（智能画线，主图叠加）
   minuteData: null as { date: string; prevClose: number | null; bars: Bar[] } | null,
   m60: null as Bar[] | null, // 60 分钟K（腾讯实时拉取，不落库）
   from: null as { page: string; label: string } | null,
@@ -802,6 +804,15 @@ export function initMarket(): void {
   // 指标/方案/配色点击处理：常显两行（#kl-indbar）与方案浮层（#kl-ipanel）共用一套委托
   const indClick = (e: Event): void => {
     const t = e.target as HTMLElement;
+    if (t.closest("button[data-line]")) {                  // 智能画线：黄金分割 / 支撑压力
+      const k = (t.closest("button[data-line]") as HTMLElement).dataset.line === "sr" ? "sr" : "fib";
+      if (k === "fib") mk.lineFib = !mk.lineFib; else mk.lineSR = !mk.lineSR;
+      localStorage.setItem(k === "fib" ? "yc_kfib" : "yc_ksr", (k === "fib" ? mk.lineFib : mk.lineSR) ? "1" : "0");
+      notifyLocal("prefs");
+      renderIndBar();
+      applyLines();
+      return;
+    }
     if (t.closest("i[data-pdel]")) {                       // 删除自定义方案
       const name = t.closest("i")!.dataset.pdel!;
       const map = readCustomPresets();
@@ -1040,11 +1051,16 @@ function renderIndBar(): void {
   const main = favs.map((k) => IND_BY_KEY[k]).filter((d) => d?.where === "main");
   const sub = favs.map((k) => IND_BY_KEY[k]).filter((d) => d?.where === "sub");
   const hint = `<span class="ipempty">在「＋更多」里勾选 ★ 常显</span>`;
-  // 单行布局：主图组 + 分割线 + 副图组 + 「＋更多」，放不下自动换行（#ip-inds flex-wrap）
+  // 单行布局：主图组 + 分割线 + 副图组 + 分割线 + 画线组 + 「＋更多」
   inds.innerHTML =
     `<div class="iprow"><span class="ipk">主图</span>${main.map(chipOf).join("") || hint}</div>` +
     `<i class="barsep"></i>` +
     `<div class="iprow"><span class="ipk">副图</span>${sub.map(chipOf).join("") || hint}</div>` +
+    `<i class="barsep"></i>` +
+    `<div class="iprow">` +
+      `<button data-line="fib" class="${mk.lineFib ? "on" : ""}" title="自动识别高低点，绘制 0.236 / 0.382 / 0.5 / 0.618 / 0.786">黄金分割</button>` +
+      `<button data-line="sr" class="${mk.lineSR ? "on" : ""}" title="按成交量峰与枢轴，绘制近端支撑 / 压力带">支撑压力</button>` +
+    `</div>` +
     `<button class="imore-open" data-more="1" title="全部指标：搜索 / 配置常显 / 临时叠加">＋更多</button>`;
 }
 
@@ -1143,6 +1159,10 @@ export async function ensurePeriodData(p: PKey): Promise<void> {
 
 /* ── K线（klinecharts 10 · 策影同款配置，见 kline.ts）——多周期面板引擎 ── */
 let kls: (KlineChartHandle | null)[] = [];
+/** 智能画线开关应用到全部 K 线实例（四格/双图各自一份） */
+function applyLines(): void {
+  kls.forEach((k) => k?.setLines(mk.lineFib, mk.lineSR));
+}
 /* 面板外壳（与全景右下角同一个 chartpanel 控件；行情页关头部，信息条全局共享） */
 let chartPanels: ChartPanelHandle[] = [];
 /* 分时面板：与全景右下角同一套独立 canvas 分时图（左涨跌幅/右价格/均价/昨收虚线/量柱） */
@@ -1349,6 +1369,7 @@ function applyPanel(i: number): void {
   // 分时主图固定为均价线（MA/趋势通道对每分钟假 K 线无意义），其余周期走默认预设
   kl.setMain(mk.mainInds);
   kl.setSub(SUB_OK[currentLayout()]?.[i] ? mk.subInds : []);
+  kl.setLines(mk.lineFib, mk.lineSR);
   // 同标的同周期的重灌（盘中 12s 轮询）保留视图窗口，换标的/切周期才回到最新
   const key = `${mk.cur.symbol}|${p}`;
   const keep = panelKey[i] === key;
@@ -1810,7 +1831,7 @@ function trendRow(label: string, list: Bar[], mode: string): string {
     const h = 2 + Math.min(Math.abs(x) / 1.2, 1) * 14;      // ±1.2% 打满 16px
     return `<i class="${x >= 0 ? "up" : "down"}" style="height:${h.toFixed(1)}px"></i>`;
   }).join("");
-  return `<div class="tr-row" title="${label} 收盘相对 MA10 偏离">` +
+  return `<div class="tr-row" title="${label} 收盘相对趋势线偏离">` +
     `<span class="tr-per">${label}</span>` +
     `<b class="tr-state ${up ? "up" : "down"}">${up ? "多头" : "空头"}</b>` +
     `<span class="num tr-dev ${up ? "up" : "down"}">${up ? "+" : ""}${d.toFixed(2)}%</span>` +
@@ -1978,12 +1999,12 @@ function cardBody(cid: string, mode: string): string {
     const pos = ma20v != null ? (closesN[i] > ma20v ? "上方" : "下方") : "—";
     const posCls = ma20v != null && closesN[i] > ma20v ? "up" : "down";
     if (mode === "simple") {
-      return `<div class="csimple"><div class="st"><b>MA20 ${pos}</b> · KDJ ${fmt(kd.k[i] ?? 0, 0)}<br><span style="font-size:10px;color:var(--faint)">ATR14 ${fmt(atr[i] ?? 0)} · BOLL 带宽 ${ma20v != null ? fmt(((bl.up[i]! - bl.low[i]!) / ma20v) * 100, 1) + "%" : "—"}</span></div><div class="minifig">${spark(closesN.slice(-20), 64, 22, "var(--accent)")}</div></div>`;
+      return `<div class="csimple"><div class="st"><b>均线 ${pos}</b> · KDJ ${fmt(kd.k[i] ?? 0, 0)}<br><span style="font-size:10px;color:var(--faint)">ATR ${fmt(atr[i] ?? 0)} · BOLL 带宽 ${ma20v != null ? fmt(((bl.up[i]! - bl.low[i]!) / ma20v) * 100, 1) + "%" : "—"}</span></div><div class="minifig">${spark(closesN.slice(-20), 64, 22, "var(--accent)")}</div></div>`;
     }
-    return row("MA5", fmt(sma(bars, 5)[i] ?? 0)) + row("MA20", fmt(ma20v), posCls) +
+    return row("均线（快）", fmt(sma(bars, 5)[i] ?? 0)) + row("均线（慢）", fmt(ma20v), posCls) +
       row("KDJ K", fmt(kd.k[i] ?? 0, 1)) + row("KDJ J", fmt(kd.j[i] ?? 0, 1)) +
       row("BOLL 上", fmt(bl.up[i] ?? 0)) + row("BOLL 下", fmt(bl.low[i] ?? 0)) +
-      row("ATR14", fmt(atr[i] ?? 0));
+      row("ATR", fmt(atr[i] ?? 0));
   }
   if (cid === "valuation") {
     const v = q?.valuation;

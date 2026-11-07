@@ -38,17 +38,17 @@ export function mountVolumeSettings(chart: Chart, el: HTMLElement) {
     <div class="vpop-body">${[0, 1].map((i) => `
       <div class="vpop-row">
         <span class="vpop-sw" style="--c:${MA_COLORS[i]}"></span>
-        <span class="vpop-lb">MA${i + 1}</span>
+        <span class="vpop-lb">均量${i + 1}</span>
         <div class="vstep">
-          <button type="button" data-d="-1" aria-label="MA${i + 1} 周期减一">−</button>
+          <button type="button" data-d="-1" aria-label="均量${i + 1} 周期减一">−</button>
           <input name="p${i}" type="number" min="${MIN_PERIOD}" max="${MAX_PERIOD}" step="1"
-            inputmode="numeric" aria-label="MA${i + 1} 周期">
-          <button type="button" data-d="1" aria-label="MA${i + 1} 周期加一">+</button>
+            inputmode="numeric" aria-label="均量${i + 1} 周期">
+          <button type="button" data-d="1" aria-label="均量${i + 1} 周期加一">+</button>
         </div>
         <button type="button" class="switch on" data-sw="${i}" role="switch"
-          aria-checked="true" aria-label="显示 MA${i + 1}"><i></i></button>
+          aria-checked="true" aria-label="显示均量${i + 1}"><i></i></button>
       </div>`).join('')}</div>
-    <p class="vpop-tip">周期 2～500 根，日 K 中 40 即 40 日均量。</p>
+    <p class="vpop-tip">周期 2～500 根，按当前 K 线周期计算均量。</p>
     <div class="vpop-foot">
       <button type="button" class="vpop-reset">恢复默认</button>
       <span class="sp"></span>
@@ -64,7 +64,7 @@ export function mountVolumeSettings(chart: Chart, el: HTMLElement) {
   const tip = pop.querySelector<HTMLElement>('.vpop-tip')!;
 
   /* 提示行兼当校验：两条线周期撞了就换成提醒（旧弹窗的文案保留，但不占额外高度） */
-  const TIP = '周期 2～500 根，日 K 中 40 即 40 日均量。';
+  const TIP = '周期 2～500 根，按当前 K 线周期计算均量。';
   const updateTip = (): void => {
     const dup = inputs[0].value === inputs[1].value
       && switches[0].classList.contains('on') && switches[1].classList.contains('on');

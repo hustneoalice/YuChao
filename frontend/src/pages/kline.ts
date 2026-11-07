@@ -147,6 +147,249 @@ function registerTrendChannel(
     },
   });
 }
+/* ═══ 智能画线：黄金分割 / 支撑压力（主图叠加，独立于指标集合） ═══ */
+type LineBar = { open: number; high: number; low: number; close: number; volume?: number | null };
+type LinePivot = { i: number; p: number; kind: "high" | "low"; open?: boolean };
+type SRZone = { center: number; lo: number; hi: number; vol: number; peak: boolean };
+type SmartDrawArgs = {
+  ctx: CanvasRenderingContext2D;
+  chart: Chart;
+  indicator: { name: string };
+  xAxis: { convertToPixel: (i: number) => number };
+  yAxis: { convertToPixel: (p: number) => number };
+  bounding: { width: number; height: number };
+};
+
+function lineAtr(bars: LineBar[], n = 14): number {
+  const trs = bars.map((b, i) => {
+    const pc = i ? bars[i - 1].close : b.open;
+    return Math.max(b.high - b.low, Math.abs(b.high - pc), Math.abs(b.low - pc));
+  });
+  const a = trs.slice(-n);
+  return a.reduce((x, y) => x + y, 0) / (a.length || 1);
+}
+
+/* 阶段摆动识别（ZigZag 偏差 + 最小深度）：
+ *  · 阈值 max(ATR14×2.5, 收盘价×5%)——过滤掉 2~4 根 K 线的小波动（ZigZag 常用 5%）
+ *  · 深度 10 根——不足 10 根的摆动直接丢弃，同向枢轴合并保留更极端值
+ *  · 只保留 stage 级高点/低点，末端未确认枢轴同样受深度约束 */
+const LINE_DEPTH = 10;
+
+/** ZigZag：自适应阈值 + 最小深度，末端枢轴标记为未确认 */
+function linePivots(bars: LineBar[]): LinePivot[] {
+  if (bars.length < 10) return [];
+  const close = bars[bars.length - 1].close;
+  const th = Math.max(lineAtr(bars) * 2.5, close * 0.05);
+  const out: LinePivot[] = [];
+  let dir: 0 | 1 | -1 = 0;
+  let ext: { i: number; p: number } | null = null;
+  let hi = { i: 0, p: bars[0].high }, lo = { i: 0, p: bars[0].low };
+  for (let i = 1; i < bars.length; i++) {
+    const b = bars[i];
+    if (dir === 0) {
+      if (b.high > hi.p) hi = { i, p: b.high };
+      if (b.low < lo.p) lo = { i, p: b.low };
+      if (hi.p - lo.p >= th) {
+        if (hi.i < lo.i) { out.push({ ...lo, kind: "low" }); ext = hi; dir = 1; }
+        else { out.push({ ...hi, kind: "high" }); ext = lo; dir = -1; }
+      }
+    } else if (dir === 1) {
+      if (b.high > ext!.p) ext = { i, p: b.high };
+      else if (ext!.p - b.low >= th) { out.push({ ...ext!, kind: "high" }); dir = -1; ext = { i, p: b.low }; }
+    } else {
+      if (b.low < ext!.p) ext = { i, p: b.low };
+      else if (b.high - ext!.p >= th) { out.push({ ...ext!, kind: "low" }); dir = 1; ext = { i, p: b.high }; }
+    }
+  }
+  if (ext) out.push({ ...ext, kind: dir === 1 ? "high" : "low", open: true });
+  // 最小深度过滤：与上一枢轴距离不足 LINE_DEPTH 的摆动不成立；
+  // 被丢弃枢轴之后的同向枢轴并入原枢轴（保留更极端值）
+  const kept: LinePivot[] = [];
+  for (const p of out) {
+    const last = kept[kept.length - 1];
+    if (!last) { kept.push(p); continue; }
+    if (last.kind === p.kind) {
+      if (p.kind === "high" ? p.p >= last.p : p.p <= last.p) kept[kept.length - 1] = p;
+      continue;
+    }
+    if (p.i - last.i < LINE_DEPTH) continue;
+    kept.push(p);
+  }
+  return kept;
+}
+
+/** 最近一段有效阶段摆动腿 → 回撤/反弹比例位 */
+function lineFib(bars: LineBar[]) {
+  const pv = linePivots(bars);
+  if (!pv.length) return null;
+  const last = bars[bars.length - 1];
+  const end = pv[pv.length - 1];
+  const atr = lineAtr(bars);
+  let start: LinePivot | null = null;
+  for (let i = pv.length - 2; i >= 0; i--) {
+    if (pv[i].kind !== end.kind && Math.abs(end.i - pv[i].i) >= LINE_DEPTH && Math.abs(end.p - pv[i].p) >= atr * 1.5) {
+      start = pv[i]; break;
+    }
+  }
+  if (!start) {
+    // 枢轴链过短：退到末端枢轴之前窗口内的阶段极值，仍要求足够跨度与幅度
+    const win = bars.slice(0, end.i + 1);
+    if (!win.length) return null;
+    if (end.kind === "low") {
+      let mi = 0;
+      win.forEach((b, i) => { if (b.high > win[mi].high) mi = i; });
+      start = { i: mi, p: win[mi].high, kind: "high" };
+    } else {
+      let mi = 0;
+      win.forEach((b, i) => { if (b.low < win[mi].low) mi = i; });
+      start = { i: mi, p: win[mi].low, kind: "low" };
+    }
+    if (Math.abs(end.i - start.i) < LINE_DEPTH || Math.abs(end.p - start.p) < atr * 1.5) return null;
+  }
+  const hiP = Math.max(start.p, end.p), loP = Math.min(start.p, end.p) , diff = hiP - loP;
+  if (diff <= atr * 1.5) return null;
+  const rebound = end.kind === "low";
+  const levels = [0, 0.236, 0.382, 0.5, 0.618, 0.786, 1].map((r) => ({
+    r, p: rebound ? loP + diff * r : hiP - diff * r,
+  }));
+  const pos = rebound ? (last.close - loP) / diff : (hiP - last.close) / diff;
+  return { start, end, hiP, loP, diff, rebound, levels, pos };
+}
+
+/** 支撑压力带：成交量分布峰 + 近端枢轴，合并成“带” */
+function lineSR(bars: LineBar[], pv: LinePivot[]) {
+  const close = bars[bars.length - 1].close;
+  if (bars.length < 10) return { sup: [] as SRZone[], res: [] as SRZone[], close };
+  let hi = -Infinity, lo = Infinity;
+  bars.forEach((b) => { hi = Math.max(hi, b.high); lo = Math.min(lo, b.low); });
+  const nb = 20, bin = ((hi - lo) / nb) || 1;
+  const bins = Array.from({ length: nb }, (_, i) => ({ i, lo: lo + bin * i, hi: lo + bin * (i + 1), v: 0 }));
+  bars.forEach((b) => {
+    const p = (b.high + b.low + b.close) / 3;
+    const k = Math.max(0, Math.min(nb - 1, Math.floor((p - lo) / bin)));
+    bins[k].v += (b.volume || 1);
+  });
+  const top = [...bins].sort((a, b) => b.v - a.v).slice(0, 6).sort((a, b) => a.i - b.i);
+  const clusters: { i1: number; i2: number; v: number; lo: number; hi: number }[] = [];
+  let cur: { i1: number; i2: number; v: number; lo: number; hi: number } | null = null;
+  top.forEach((x) => {
+    if (cur && x.i <= cur.i2 + 1) {
+      cur.i2 = x.i; cur.v += x.v; cur.lo = Math.min(cur.lo, x.lo); cur.hi = Math.max(cur.hi, x.hi);
+    } else {
+      if (cur) clusters.push(cur);
+      cur = { i1: x.i, i2: x.i, v: x.v, lo: x.lo, hi: x.hi };
+    }
+  });
+  if (cur) clusters.push(cur);
+  const cands: SRZone[] = clusters.map((c) => ({ center: (c.lo + c.hi) / 2, lo: c.lo, hi: c.hi, vol: c.v, peak: true }));
+  pv.slice(-6).forEach((p) => cands.push({ center: p.p, lo: p.p - bin * 0.35, hi: p.p + bin * 0.35, vol: 0, peak: false }));
+  cands.sort((a, b) => a.center - b.center);
+  const merged: SRZone[] = [];
+  cands.forEach((c) => {
+    const m = merged[merged.length - 1];
+    if (m && Math.abs(m.center - c.center) <= bin * 1.25) {
+      m.lo = Math.min(m.lo, c.lo); m.hi = Math.max(m.hi, c.hi); m.center = (m.lo + m.hi) / 2;
+      m.vol += c.vol; m.peak = m.peak || c.peak;
+    } else merged.push({ ...c });
+  });
+  const sup = merged.filter((z) => z.center < close && Math.abs(close - z.center) / close <= 0.09).sort((a, b) => b.center - a.center).slice(0, 2);
+  const res = merged.filter((z) => z.center > close && Math.abs(z.center - close) / close <= 0.09).sort((a, b) => a.center - b.center).slice(0, 2);
+  return { sup, res, close };
+}
+
+function drawSmartLines(a: SmartDrawArgs): void {
+  const { ctx, chart, indicator, xAxis, yAxis, bounding } = a;
+  const list = chart.getDataList() as unknown as LineBar[];
+  if (list.length < 10) return;
+  const W = bounding.width, H = bounding.height;
+  const panel = cssv("--panel") || "#161618";
+  const dim = cssv("--dim") || "#A1A1A6";
+  ctx.save();
+  ctx.beginPath();
+  ctx.rect(0, 0, W, H);
+  ctx.clip();
+  const xOf = (i: number): number => Math.max(0, Math.min(W, xAxis.convertToPixel(i)));
+  const yOf = (p: number): number => yAxis.convertToPixel(p);
+  const label = (txt: string, x: number, y: number, color: string): void => {
+    if (y < 6 || y > H - 4) return;
+    ctx.font = "9.5px ui-monospace,SFMono-Regular,Menlo,monospace";
+    ctx.textAlign = "right";
+    ctx.textBaseline = "bottom";
+    ctx.lineWidth = 2.6;
+    ctx.strokeStyle = panel;
+    ctx.strokeText(txt, x, y - 3);
+    ctx.fillStyle = color;
+    ctx.fillText(txt, x, y - 3);
+  };
+  if (indicator.name === "ZY_FIB") {
+    const f = lineFib(list);
+    if (!f) { ctx.restore(); return; }
+    const x0 = xOf(Math.min(f.start.i, f.end.i)), xEnd = W - 3;
+    const y50 = yOf(f.levels[3].p), y618 = yOf(f.levels[4].p);
+    ctx.fillStyle = "rgba(255,214,10,.07)";
+    ctx.fillRect(x0, Math.min(y50, y618), Math.max(0, xEnd - x0), Math.abs(y50 - y618));
+    ctx.strokeStyle = "rgba(255,159,67,.55)";
+    ctx.lineWidth = 1;
+    ctx.beginPath();
+    ctx.moveTo(xOf(f.start.i), yOf(f.start.p));
+    ctx.lineTo(xOf(f.end.i), yOf(f.end.p));
+    ctx.stroke();
+    f.levels.forEach((lv) => {
+      const y = yOf(lv.p);
+      const gold = Math.abs(lv.r - 0.618) < 0.001;
+      ctx.strokeStyle = gold ? "#FFD60A" : "rgba(161,161,166,.55)";
+      ctx.lineWidth = gold ? 1.6 : 1;
+      ctx.setLineDash(gold ? [] : [4, 3]);
+      ctx.beginPath();
+      ctx.moveTo(x0, y);
+      ctx.lineTo(xEnd, y);
+      ctx.stroke();
+      label(`${(lv.r * 100).toFixed(1)}%  ${fmt(lv.p)}`, xEnd - 2, y, gold ? "#FFD60A" : dim);
+    });
+    ctx.setLineDash([]);
+    [f.start, f.end].forEach((p) => {
+      ctx.fillStyle = "#FF9F43";
+      ctx.beginPath();
+      ctx.arc(xOf(p.i), yOf(p.p), 2.6, 0, Math.PI * 2);
+      ctx.fill();
+    });
+    const lvl = f.pos < 0.236 ? "弱反弹" : f.pos < 0.382 ? "反弹初期" : f.pos < 0.5 ? "修复反弹"
+      : f.pos < 0.618 ? "强势反弹" : f.pos < 0.786 ? "接近反转" : "反转确认";
+    const text = `${f.rebound ? "反弹" : "回撤"} ${Math.round(f.pos * 100)}% · ${lvl}`;
+    ctx.font = "600 10px ui-monospace,SFMono-Regular,Menlo,monospace";
+    ctx.textAlign = "left";
+    ctx.textBaseline = "top";
+    const tw = ctx.measureText(text).width;
+    ctx.fillStyle = "rgba(0,0,0,.42)";
+    ctx.fillRect(7, 6, tw + 14, 19);
+    ctx.fillStyle = "#FFD60A";
+    ctx.fillText(text, 13, 10);
+  } else if (indicator.name === "ZY_SR") {
+    const m = lineSR(list, linePivots(list));
+    const xEnd = W - 3;
+    const band = (z: SRZone, kind: "sup" | "res"): void => {
+      const yTop = Math.max(0, Math.min(H, yOf(z.hi)));
+      const yBot = Math.max(0, Math.min(H, yOf(z.lo)));
+      const y = Math.min(yTop, yBot), h = Math.max(1, Math.abs(yBot - yTop));
+      const color = kind === "res" ? UP : DOWN;
+      ctx.fillStyle = kind === "res" ? "rgba(239,83,80,.08)" : "rgba(81,156,44,.09)";
+      ctx.fillRect(0, y, xEnd, h);
+      ctx.strokeStyle = color;
+      ctx.lineWidth = 1;
+      ctx.setLineDash([5, 3]);
+      ctx.beginPath();
+      ctx.moveTo(0, yOf(z.center));
+      ctx.lineTo(xEnd, yOf(z.center));
+      ctx.stroke();
+      ctx.setLineDash([]);
+      label(`${kind === "res" ? "压力" : "支撑"} ${fmt(z.center)}${z.peak ? " · 峰" : ""}`, xEnd - 2, yOf(z.center), color);
+    };
+    m.res.forEach((z) => band(z, "res"));
+    m.sup.forEach((z) => band(z, "sup"));
+  }
+  ctx.restore();
+}
+
 let registered = false;
 function ensureRegistered(): void {
   if (registered) return;
@@ -428,7 +671,7 @@ function ensureRegistered(): void {
   } catch { /* 重复注册忽略 */ }
   registerIndicator({
     name: "ZY_ACCUMULATION",
-    shortName: "主力吸筹·公式版",
+    shortName: "主力吸筹",
     precision: 2,
     minValue: 0,
     calc: (list) => accumulationSeries(list).map(value => ({ accumulation: value })),
@@ -439,7 +682,7 @@ function ensureRegistered(): void {
   });
   registerIndicator({
     name: "ZY_MAIN_COST",
-    shortName: "主力成本·公式版",
+    shortName: "主力成本",
     precision: 2,
     calc: (list, indicator) => {
       // extendData 是设置弹窗的四条显隐开关（顺序同 figures），关掉的输出置 null 不上线
@@ -461,7 +704,7 @@ function ensureRegistered(): void {
     shouldUpdate: () => ({ calc: true, draw: true }),
   });
   registerIndicator({
-    name: "ZY_STOCK_OPERATE", shortName: "个股操盘·公式版", precision: 2, minValue: 0, maxValue: 100,
+    name: "ZY_STOCK_OPERATE", shortName: "个股操盘", precision: 2, minValue: 0, maxValue: 100,
     calc: (list) => stockOperateSeries(list as unknown as { high: number; low: number; close: number }[])
       .map(v => ({ ...v, top: 95, bottom: 5 })),
     figures: [
@@ -495,7 +738,7 @@ function ensureRegistered(): void {
     },
   });
   registerIndicator({
-    name: "ZY_VOLUME_ACTIVITY", shortName: "量能活跃·估算股本", precision: 2,
+    name: "ZY_VOLUME_ACTIVITY", shortName: "量能活跃", precision: 2,
     calc: (list) => {
       const capital = (list[0] as { floatShares?: number } | undefined)?.floatShares ?? null;
       return volumeActivitySeries(list, capital).map(v => ({
@@ -580,10 +823,10 @@ function ensureRegistered(): void {
     },
   });
   registerIndicator({
-    name: "ZY_TREND_HISTOGRAM", shortName: "趋势柱线·公式版", precision: 2, shouldFormatBigNumber: false,
+    name: "ZY_TREND_HISTOGRAM", shortName: "趋势柱线", precision: 2, shouldFormatBigNumber: false,
     calc: list => trendHistogramSeries(list).map(v => ({...v, zero: 0})),
     figures: [
-      { key: "short", title: "STICKV", type: "line", styles: (raw: unknown) => {
+      { key: "short", title: "趋势柱线", type: "line", styles: (raw: unknown) => {
         const v = (raw as {data?: {current?: {short?: number; base?: number}}}).data?.current;
         return { color: (v?.short ?? 0) >= (v?.base ?? 0) ? chartUp() : chartDown(), size: 1 };
       } },
@@ -617,13 +860,13 @@ function ensureRegistered(): void {
       ctx.font = "12px sans-serif";
       ctx.textBaseline = "top";
       ctx.fillStyle = (selected?.short ?? 0) >= (selected?.base ?? 0) ? chartUp() : chartDown();
-      ctx.fillText(`STICKV ${selected?.short == null ? "--" : selected.short.toFixed(2)}`, 8 + titleW + 14, 5);
+      ctx.fillText(`${selected?.short == null ? "--" : selected.short.toFixed(2)}`, 8 + titleW + 14, 5);
       ctx.restore();
       return false;
     },
   });
   registerIndicator({
-    name: "ZY_STRONG_PULLBACK", shortName: "强势调整·约定规则", precision: 2,
+    name: "ZY_STRONG_PULLBACK", shortName: "强势调整", precision: 2,
     calc: list => strongPullbackSeries(list).map(v => ({...v, eye: v.hit ? v.eye : null})),
     figures: [
       {key: "eye", title: "", type: "line", styles: () => ({color: "transparent"})},
@@ -671,7 +914,7 @@ function ensureRegistered(): void {
   });
   // 钱眼掘金·近似：钱袋=阶段低点（画在最低价下方），地雷=阶段高点（画在最高价上方）
   registerIndicator({
-    name: "ZY_QYJJ", shortName: "钱眼掘金·近似", precision: 2, shouldFormatBigNumber: false,
+    name: "ZY_QYJJ", shortName: "阶段反转", precision: 2, shouldFormatBigNumber: false,
     calc: list => qyjjSeries(list).map(v => ({ ...v, px: v.close })),
     figures: [{ key: "px", title: "", type: "line", styles: () => ({ color: "transparent" }) }],
     draw: ({ ctx, chart, indicator, xAxis, yAxis, bounding }) => {
@@ -732,14 +975,13 @@ function ensureRegistered(): void {
       draw: ({ ctx, indicator }) => {
         ctx.save();
         ctx.textBaseline = "top";
-        // 标题「VOL(5,10)」由 indicator tooltip 画在左上（10.5px），均量线标签接在其右侧，避免压字
-        ctx.font = "10.5px sans-serif";
-        const startX = 8 + ctx.measureText(`VOL(${indicator.calcParams.join(",")})`).width + 14;
+        // 标题由 tooltip 画在左上（仅名称）；均量线标签不带周期参数，避免从图面反推实现
         ctx.font = "11px sans-serif";
-        indicator.calcParams.forEach((period, i) => {
+        const startX = 38;
+        indicator.calcParams.forEach((_, i) => {
           if ((indicator.extendData as boolean[] | undefined)?.[i] === false) return;
           ctx.fillStyle = i === 0 ? "#FF9F43" : "#4DD0E1";
-          ctx.fillText(`MA${period}`, startX + i * 58, 4);
+          ctx.fillText(`均量${i + 1}`, startX + i * 48, 4);
         });
         ctx.restore();
         return false;
@@ -910,6 +1152,27 @@ function ensureRegistered(): void {
       ],
     });
   } catch { /* 重复注册忽略 */ }
+  /* 智能画线：黄金分割 / 支撑压力（主图叠加，不进入指标集合） */
+  try {
+    registerIndicator({
+      name: "ZY_FIB",
+      shortName: "黄金分割",
+      precision: 2,
+      calc: (kLineDataList) => (kLineDataList as unknown as LineBar[]).map((b) => ({ guide: b.close })),
+      figures: [{ key: "guide", title: "", type: "line", styles: () => ({ color: "transparent", size: 0.1 }) }],
+      draw: (p) => { drawSmartLines(p as unknown as SmartDrawArgs); return true; },
+    });
+  } catch { /* 重复注册忽略 */ }
+  try {
+    registerIndicator({
+      name: "ZY_SR",
+      shortName: "支撑压力",
+      precision: 2,
+      calc: (kLineDataList) => (kLineDataList as unknown as LineBar[]).map((b) => ({ guide: b.close })),
+      figures: [{ key: "guide", title: "", type: "line", styles: () => ({ color: "transparent", size: 0.1 }) }],
+      draw: (p) => { drawSmartLines(p as unknown as SmartDrawArgs); return true; },
+    });
+  } catch { /* 重复注册忽略 */ }
 }
 
 /* ── 时间转换（策影 format.ts 逐字 + 分钟级 datetime 支持） ── */
@@ -930,42 +1193,42 @@ export const IND_CATS: { cat: IndCat; label: string }[] = [
 ];
 export const IND_DEFS: IndDef[] = [
   // 主图叠加
-  { key: "qyjj", kc: "ZY_QYJJ", label: "钱眼掘金", cat: "main", where: "main", desc: "众赢云指标 i_qyjj_c 近似移植：收盘 6% 波段反转、信号落在拐点后一根；钱袋=阶段低点、地雷=阶段高点；原公式在服务端，无法逐点还原，与原模型仅部分一致" },
-  { key: "strongpullback", kc: "ZY_STRONG_PULLBACK", label: "强势调整", cat: "main", where: "main", desc: "用户约定规则：起点后第2～8个交易日连线，第9日结束；次日量比(50%,200%)、后续>50%、收盘≥MA45；破保护位/低量结束；同组眼睛连线；非众赢原公式" },
-  { key: "ma", kc: "MA", label: "MA", cat: "main", where: "main", desc: "移动平均线 5/10/20/30/60/120/250（60=季线、120=半年线、250=年线）" },
-  { key: "td", kc: "ZY_TD_SEQ", label: "九转序列", cat: "main", where: "main", desc: "TD Sequential：只在成立的 低9/高9、低13/高13 处标数字（收盘对 4 根前连续 9；随后对 2 根前高低累计 13，需完美检验）" },
-  { key: "ema", kc: "EMA", label: "EMA", cat: "main", where: "main", desc: "指数移动平均线" },
+  { key: "qyjj", kc: "ZY_QYJJ", label: "阶段反转", cat: "main", where: "main", desc: "阶段反转信号：钱袋=阶段低点、地雷=阶段高点，信号落在拐点后一根" },
+  { key: "strongpullback", kc: "ZY_STRONG_PULLBACK", label: "强势调整", cat: "main", where: "main", desc: "起点后限定周期内连线，随后结束；量能配合、收盘站上中线趋势；破保护位或缩量结束；同组眼睛连线" },
+  { key: "ma", kc: "MA", label: "均线", cat: "main", where: "main", desc: "移动平均线（周期可设置）" },
+  { key: "td", kc: "ZY_TD_SEQ", label: "九转序列", cat: "main", where: "main", desc: "TD Sequential：只在成立的计数节点处标数字（需完美检验）" },
+  { key: "ema", kc: "EMA", label: "指数均线", cat: "main", where: "main", desc: "指数移动平均线" },
   { key: "boll", kc: "BOLLX", label: "BOLL", cat: "main", where: "main", desc: "布林带（虚线三轨+淡填充）" },
   { key: "sar", kc: "SAR", label: "SAR", cat: "main", where: "main", desc: "抛物线转向（停损点）" },
-  { key: "short", kc: "SHORT_TREND_CHANNEL", label: "短线趋势", cat: "main", where: "main", desc: "策影同款短线操盘趋势通道（收盘对 MA10）" },
-  { key: "maincost", kc: "ZY_MAIN_COST", label: "主力成本", cat: "main", where: "main", desc: "众赢安装包公式移植：ZJ=(O+H+L+C)/4，同一 DMA 按量能占比分四档权重输出超短期/短期/中期/长期四条成本线，齿轮里可逐条开关；原软件标注仅大盘，此处个股也可显示，尚未与原软件逐点核对" },
-  { key: "mid", kc: "MID_TREND_CHANNEL", label: "中线趋势", cat: "main", where: "main", desc: "策影同款中线操盘趋势通道（收盘对 MA45）" },
+  { key: "short", kc: "SHORT_TREND_CHANNEL", label: "短线趋势", cat: "main", where: "main", desc: "短线操盘趋势通道（价格相对慢线的位置着色）" },
+  { key: "maincost", kc: "ZY_MAIN_COST", label: "主力成本", cat: "main", where: "main", desc: "按量能占比分档权重的多条成本线，齿轮里可逐条开关；原软件标注仅大盘，此处个股也可显示" },
+  { key: "mid", kc: "MID_TREND_CHANNEL", label: "中线趋势", cat: "main", where: "main", desc: "中线操盘趋势通道（价格相对慢线的位置着色）" },
   { key: "avg", kc: "TIME_AVG", label: "均价线", cat: "main", where: "main", desc: "分时均价线（日内）" },
   { key: "bbi", kc: "BBI", label: "BBI", cat: "main", where: "main", desc: "多空指数（四均线加权）" },
   { key: "bbiboll", kc: "BBIBOLL", label: "BBIBOLL", cat: "main", where: "main", desc: "BBI 布林变异带（多均线布林）" },
   // 趋势类
-  { key: "trendhistogram", kc: "ZY_TREND_HISTOGRAM", label: "趋势柱线", cat: "trend", where: "sub", desc: "众赢安装包公式移植：零轴至中期值、短期至中期值的红绿实心柱；个股与指数可用，尚未与原软件逐点核对" },
+  { key: "trendhistogram", kc: "ZY_TREND_HISTOGRAM", label: "趋势柱线", cat: "trend", where: "sub", desc: "零轴至中期值、短期至中期值的红绿实心柱；个股与指数可用" },
   { key: "macd", kc: "MACDX", label: "MACD", cat: "trend", where: "sub", desc: "指数平滑异同移动平均（DIF/DEA 折线 + MACD 柱改竖线段，红绿按正负）" },
   { key: "dmi", kc: "DMI", label: "DMI", cat: "trend", where: "sub", desc: "趋向指标（ADX 强弱方向）" },
   { key: "trix", kc: "TRIX", label: "TRIX", cat: "trend", where: "sub", desc: "三重指数平滑平均线" },
   { key: "emv", kc: "EMV", label: "EMV", cat: "trend", where: "sub", desc: "简易波动指标（量价趋势）" },
   { key: "dma", kc: "DMA", label: "DMA", cat: "trend", where: "sub", desc: "平均线差（快慢均线差值）" },
   // 动量类
-  { key: "stockoperate", kc: "ZY_STOCK_OPERATE", label: "个股操盘", cat: "mom", where: "sub", desc: "众赢安装包公式移植：收盘在 10 日高低区间的 3 日平滑位置；红柱=收盘≥MA10、绿柱=收盘<MA10；三根水平线为 95（绿）/50（品红）/5（蓝），波段/反弹/超跌进场时信号线由 50 跳到 80；尚未与原软件逐点核对" },
-  { key: "kdj", kc: "KDJX", label: "KDJ", cat: "mom", where: "sub", desc: "随机指标（超买80/超卖20参考线）" },
-  { key: "rsi", kc: "RSIX", label: "RSI", cat: "mom", where: "sub", desc: "相对强弱指标（超买70/超卖30参考线）" },
+  { key: "stockoperate", kc: "ZY_STOCK_OPERATE", label: "个股操盘", cat: "mom", where: "sub", desc: "收盘在近期高低区间的位置平滑；红柱=站上慢线、绿柱=跌破慢线；三根水平参考线；波段/反弹/超跌进场时信号线上移" },
+  { key: "kdj", kc: "KDJX", label: "KDJ", cat: "mom", where: "sub", desc: "随机指标（超买/超卖参考线）" },
+  { key: "rsi", kc: "RSIX", label: "RSI", cat: "mom", where: "sub", desc: "相对强弱指标（超买/超卖参考线）" },
   { key: "cci", kc: "CCI", label: "CCI", cat: "mom", where: "sub", desc: "顺势指标（脱离常态范围）" },
   { key: "roc", kc: "ROC", label: "ROC", cat: "mom", where: "sub", desc: "变动率指标" },
   { key: "mtm", kc: "MTM", label: "MTM", cat: "mom", where: "sub", desc: "动量指标" },
-  { key: "wr", kc: "WRX", label: "WR", cat: "mom", where: "sub", desc: "威廉指标（超买80/超卖20参考线）" },
-  { key: "obos", kc: "OBOSX", label: "超买超卖", cat: "mom", where: "sub", desc: "操盘线：加权价 14 周期位置百分位（超买95/中轴50/超卖5）" },
+  { key: "wr", kc: "WRX", label: "WR", cat: "mom", where: "sub", desc: "威廉指标（超买/超卖参考线）" },
+  { key: "obos", kc: "OBOSX", label: "超买超卖", cat: "mom", where: "sub", desc: "操盘线：加权价位置百分位（超买/中轴/超卖参考）" },
   { key: "psy", kc: "PSY", label: "PSY", cat: "mom", where: "sub", desc: "心理线（上涨天数占比）" },
   { key: "lwr", kc: "LWR", label: "LWR", cat: "mom", where: "sub", desc: "威廉随机指标（快慢随机线）" },
   { key: "osc", kc: "OSC", label: "OSC", cat: "mom", where: "sub", desc: "变动率柱（震荡量指标）" },
   { key: "udl", kc: "UDL", label: "UDL", cat: "mom", where: "sub", desc: "引力线（多周期动量合成）" },
   // 量能类
-  { key: "volumeactivity", kc: "ZY_VOLUME_ACTIVITY", label: "量能活跃", cat: "vol", where: "sub", desc: "短线量能红绿填充、趋势量能蓝线；太阳=极度活跃、闪电=十分活跃、月亮=极度萎缩；以最近有效日量/换手率估算固定股本，尚未与原软件核对；指数或缺少数据不计算" },
-  { key: "accumulation", kc: "ZY_ACCUMULATION", label: "主力吸筹", cat: "vol", where: "sub", desc: "众赢安装包公式移植，尚未与原软件逐点核对；紫色柱为价格推导指标，非实际主力资金" },
+  { key: "volumeactivity", kc: "ZY_VOLUME_ACTIVITY", label: "量能活跃", cat: "vol", where: "sub", desc: "短线量能红绿填充、趋势量能蓝线；太阳=极度活跃、闪电=十分活跃、月亮=极度萎缩；指数或缺少数据不计算" },
+  { key: "accumulation", kc: "ZY_ACCUMULATION", label: "主力吸筹", cat: "vol", where: "sub", desc: "紫色柱为价格推导指标，非实际主力资金" },
   { key: "vol", kc: "VOLX", label: "VOL", cat: "vol", where: "sub", desc: "成交量（两条均量线，周期可设置）" },
   { key: "volfs", kc: "VOLFS", label: "VOLFS", cat: "vol", where: "sub", desc: "分时逐分钟量柱（分钟价涨红/跌绿，通达信分时同款）" },
   { key: "obv", kc: "OBV", label: "OBV", cat: "vol", where: "sub", desc: "能量潮（量能累积方向）" },
@@ -977,7 +1240,7 @@ export const IND_DEFS: IndDef[] = [
   { key: "bias", kc: "BIAS", label: "BIAS", cat: "swing", where: "sub", desc: "乖离率（偏离均线程度）" },
   // 波动分位类
   { key: "atr", kc: "ATR", label: "ATR", cat: "volat", where: "sub", desc: "真实波幅（波动强度）" },
-  { key: "sixseg", kc: "SIXSEG", label: "六段", cat: "volat", where: "sub", desc: "趋势线六位置（超跌/反弹/突破/超涨/回踩/跌破）：价格相对短线操盘 MA7 快 / MA10 慢的位置" },
+  { key: "sixseg", kc: "SIXSEG", label: "六段", cat: "volat", where: "sub", desc: "趋势线六位置（超跌/反弹/突破/超涨/回踩/跌破）：价格相对短线趋势快慢线的位置" },
 ];
 export const IND_BY_KEY: Record<string, IndDef> = Object.fromEntries(IND_DEFS.map((d) => [d.key, d]));
 
@@ -1028,6 +1291,8 @@ export interface KlineChartHandle {
   drawLegend: (inds: MainKey[]) => void;
   /** 副图多选：每个指标一个窗格，高度均分（策影 autoLayout 同款） */
   setSub: (inds: SubKey[]) => void;
+  /** 智能画线：黄金分割 / 支撑压力（主图叠加，独立开关） */
+  setLines: (fib: boolean, sr: boolean) => void;
   /** 当前周期（d/w/m/q）：决定十字光标卡片的标题形态 */
   setPeriod: (p: "t" | "60" | "d" | "w" | "m" | "q") => void;
   /** 智能高度：按容器高重分主/副图（3.6:1，策影同款；开关关时副图固定 100px） */
@@ -1082,17 +1347,14 @@ function smartHeights(total: number, n: number): { main: number; sub: number } {
   return { main, sub };
 }
 
-/** 副图标题：只画「名称(参数)」，不画数值图例行，尽量少遮挡 */
+/** 副图标题：只画名称，不带参数，避免从图面反推实现细节 */
 function subTip(label: string) {
-  return (p: { indicator: { calcParams?: Array<string | number> } }) => {
-    const ps = (p.indicator.calcParams || []).filter((x): x is number => typeof x === "number");
-    return {
-      name: label,
-      calcParamsText: ps.length ? `(${ps.join(",")})` : "",
-      legends: [],
-      features: [],
-    };
-  };
+  return () => ({
+    name: label,
+    calcParamsText: "",
+    legends: [],
+    features: [],
+  });
 }
 
 /** 主图指标：回传空数据源，让出价格区（标题只给副图） */
@@ -1275,7 +1537,7 @@ export function mountKline(el: HTMLElement): KlineChartHandle {
       parts.push(visibleMARows().map((line) =>
         `<span><i style="background:${line.color}"></i>${line.label}</span>`).join(""));
     if (inds.includes("boll"))
-      parts.push(`<span><i style="background:${chartUp()}"></i><i style="background:#4C8DFF"></i><i style="background:${chartDown()}"></i>BOLL(20,2)</span>`);
+      parts.push(`<span><i style="background:${chartUp()}"></i><i style="background:#4C8DFF"></i><i style="background:${chartDown()}"></i>BOLL</span>`);
     if (inds.includes("avg"))
       parts.push(`<span><i style="background:#26C6DA"></i>均价线</span>`);
     const list = chart.getDataList() as { close: number }[];
@@ -1910,6 +2172,18 @@ export function mountKline(el: HTMLElement): KlineChartHandle {
         }
       }
       requestAnimationFrame(mainCostSettings.sync);
+    },
+    setLines(fib: boolean, sr: boolean) {
+      chart.getIndicators({ paneId: "candle_pane" }).forEach((i) => {
+        if ((i.name === "ZY_FIB" && !fib) || (i.name === "ZY_SR" && !sr)) chart.removeIndicator({ id: i.id });
+      });
+      const have = new Set(chart.getIndicators({ paneId: "candle_pane" }).map((i) => i.name));
+      if (fib && !have.has("ZY_FIB")) {
+        chart.createIndicator({ name: "ZY_FIB", paneId: "candle_pane", isStack: true, createTooltipDataSource: NO_TIP } as never, true);
+      }
+      if (sr && !have.has("ZY_SR")) {
+        chart.createIndicator({ name: "ZY_SR", paneId: "candle_pane", isStack: true, createTooltipDataSource: NO_TIP } as never, true);
+      }
     },
     setSub(inds: SubKey[]) {
       // 副图多选：全清后按固定顺序重建，每指标一个窗格（注册表驱动）

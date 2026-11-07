@@ -13,22 +13,22 @@ import { chartDown, chartUp, trendPalette } from "./kline";
 /* 后端不可达时的兜底登记（与 screening.CONDITIONS 同构，仅为首屏不空） */
 const FALLBACK_CONDS: TargetCond[] = [
   { key: "trend", label: "趋势柱线", kind: "trend", default_on: false,
-    title: "STICKV 负转正或持续在零轴上方，可独立筛选或与其他条件同时满足" },
-  { key: "vol", label: "40日均量", kind: "value", op: ">=", default: 1.0,
+    title: "趋势柱线由负转正或持续在零轴上方，可独立筛选或与其他条件同时满足" },
+  { key: "vol", label: "均量", kind: "value", op: ">=", default: 1.0,
     min: 0.0, max: 10.0, step: 0.1, unit: "x", default_on: true,
-    title: "当日成交量 / 40日均量 不小于阈值" },
+    title: "当日成交量 / 均量 不小于阈值" },
   { key: "short", label: "短线趋势橙", kind: "flag", default_on: true,
-    title: "收盘站上 MA10（K 线短线趋势通道填橙同判定）" },
+    title: "收盘站上短线趋势线（K 线通道填橙同判定）" },
   { key: "mid", label: "中线趋势橙", kind: "flag", default_on: true,
-    title: "收盘站上 MA45（K 线中线趋势通道填橙同判定）" },
+    title: "收盘站上中线趋势线（K 线通道填橙同判定）" },
   { key: "up20", label: "20日内涨停", kind: "flag", default_on: true,
     title: "近 20 个交易日有过涨停（主板 10% / 创业科创 20%）" },
   { key: "money", label: "钱袋子", kind: "value", op: "<=", default: 5,
     min: 0, max: 60, step: 1, unit: "日", default_on: false,
-    title: "近 N 个交易日内出现过钱袋子（ZigZag 低点，反弹 6% 确认）；数值为距今天数，越小越新鲜" },
+    title: "近 N 个交易日内出现过钱袋子（阶段低点确认后的反弹信号）；数值为距今天数，越小越新鲜" },
   { key: "mine", label: "地雷", kind: "value", op: "<=", default: 5,
     min: 0, max: 60, step: 1, unit: "日", default_on: false,
-    title: "近 N 个交易日内出现过地雷（ZigZag 高点回落 6% 确认）；数值为距今天数，越小越新鲜（风险信号）" },
+    title: "近 N 个交易日内出现过地雷（阶段高点确认后的回落信号）；数值为距今天数，越小越新鲜（风险信号）" },
 ];
 
 function readJSON<T>(key: string, fallback: T): T {
@@ -182,7 +182,7 @@ function segMeter(seg: number, name?: string | null): string {
   const cells = SEG_NAMES
     .map((s, i) => `<i class="${i + 1 === n ? `on ${SEG_TIER[i]}` : ""}" title="第${i + 1}段 · ${SEGFULL[i + 1]}（${SEG_ACTIONS[i]}）"></i>`)
     .join("");
-  return `<span class="seg6" title="六分段理论：围绕日线短线趋势线（MA7 快 / MA10 慢）的六个位置。1 趋势线超跌 → 2 反弹趋势线 → 3 趋势线突破 → 4 趋势线超涨 → 5 回踩趋势线 → 6 趋势线跌破">
+  return `<span class="seg6" title="六分段理论：围绕日线短线趋势线的六个位置。1 趋势线超跌 → 2 反弹趋势线 → 3 趋势线突破 → 4 趋势线超涨 → 5 回踩趋势线 → 6 趋势线跌破">
     <span class="seg6-cells">${cells}</span>
     <small style="color:${tint}">第${n}段 · ${esc(name || SEG_NAMES[n - 1])}</small></span>`;
 }
@@ -336,7 +336,7 @@ function segMapSvg(): string {
   return `<svg viewBox="0 0 880 250" role="img"` +
     ` aria-label="六分段理论示意图：真实日 K 走完超跌、反弹、突破、超涨、回踩、跌破六个位置">` +
     `${channel}${trendBars}${candles}${trendLine(fast, pal.fast)}${trendLine(slow, pal.slow)}${leads}${last}</svg>` +
-    `<div class="segmap-note">${esc(data.label)} · 日K（前复权）｜六段按众赢短线操盘 MA7 / MA10 判定` +
+    `<div class="segmap-note">${esc(data.label)} · 日K（前复权）｜六段按短线趋势线判定` +
     `（取最近一个完整六段循环）</div>`;
 }
 
@@ -357,10 +357,10 @@ function renderSegMap(): void {
   const pal = trendPalette();
   const lg = document.getElementById("tgt-segmap-lg");
   if (lg) {
-    lg.innerHTML = `<i style="background:${pal.fast}"></i>快线 MA7` +
-      `<i style="background:${pal.slow}"></i>慢线 MA10` +
+    lg.innerHTML = `<i style="background:${pal.fast}"></i>快线` +
+      `<i style="background:${pal.slow}"></i>慢线` +
       `<i class="fill" style="background:rgba(${pal.fr.join(",")},.32)"></i>站上慢线 = 多头` +
-      `<i class="fill" style="background:linear-gradient(90deg,var(--up) 50%,var(--down) 50%)"></i>趋势柱 = 收盘 vs MA10`;
+      `<i class="fill" style="background:linear-gradient(90deg,var(--up) 50%,var(--down) 50%)"></i>趋势柱 = 收盘与趋势线比较`;
   }
   body.innerHTML = segMapSvg();
   applySegMapState();
@@ -375,24 +375,24 @@ const TGT_COLS: DataTableCol<TargetItem>[] = [
   { label: "#", width: 34, mono: true, render: (_t, i) => `<span style="color:var(--faint)">${i + 1}</span>` },
   { label: "代码", mono: true, sort: "symbol", render: (t) => t.symbol },
   { label: "名称", sort: "name", render: (t) => `<span style="font-weight:600">${esc(t.name || t.symbol)}</span>` },
-  { label: "近况", width: 150, title: "上方：K 线 + 中线趋势（站上 MA45 为橙、跌破为蓝）；下方：趋势柱线。鼠标悬停可放大查看",
+  { label: "近况", width: 150, title: "上方：K 线 + 中线趋势（站上中线趋势线为橙、跌破为蓝）；下方：趋势柱线。鼠标悬停可放大查看",
     render: (t) => `<canvas class="tgt-spark" data-sym="${esc(t.symbol)}" style="width:132px;height:56px"></canvas>` },
   { label: "现价", num: true, sort: "close", render: (t) => fmt(t.close ?? 0) },
   { label: "涨跌幅", num: true, sort: (t) => t.pct_chg ?? null, render: (t) => {
       const ch = t.pct_chg ?? 0;
       return `<span class="${ch >= 0 ? "up" : "down"}">${fmtChg(ch)}%</span>`; } },
-  { label: "STICKV", num: true, sort: t => t.trend_value ?? null, render: t => t.trend_value == null ? "—" : `<span class="${t.trend_value > 0 ? "up" : "down"}">${t.trend_value.toFixed(2)}</span>${t.trend_provisional ? '<small> 盘中暂定</small>' : ''}` },
+  { label: "趋势柱线", num: true, sort: t => t.trend_value ?? null, render: t => t.trend_value == null ? "—" : `<span class="${t.trend_value > 0 ? "up" : "down"}">${t.trend_value.toFixed(2)}</span>${t.trend_provisional ? '<small> 盘中暂定</small>' : ''}` },
   { label: "最近转正", sort: t => t.trend_cross_date ?? "", render: t => t.trend_cross_date ?? "—" },
   { label: "距今交易日", num: true, sort: t => t.trend_cross_ago ?? null, render: t => t.trend_cross_ago == null ? "—" : t.trend_cross_ago === 0 ? "当日" : `${t.trend_cross_ago}日前` },
   { label: "连续上方", num: true, sort: t => t.trend_above_days, render: t => t.trend_value == null ? "—" : `${t.trend_above_days}日` },
-  { label: "负柱收敛", num: true, title: "STICKV 连续为负且逐日收窄的天数（绿柱缩短，提前捕捉上穿零轴）",
+  { label: "负柱收敛", num: true, title: "趋势柱线连续为负且逐日收窄的天数（绿柱缩短，提前捕捉上穿零轴）",
     sort: t => t.neg_run ?? 0, render: t => t.neg_run
       ? `<span class="tag ${t.neg_run >= 3 ? "acc" : "p1"}">${t.neg_run}日</span>`
       : `<span style="color:var(--faint)">—</span>` },
-  { label: "距零轴", num: true, title: "当前负柱幅度 |STICKV|，越小越贴近零轴",
+  { label: "距零轴", num: true, title: "当前负柱幅度，越小越贴近零轴",
     sort: t => t.neg_abs ?? null,
     render: t => t.neg_abs == null ? `<span style="color:var(--faint)">—</span>` : t.neg_abs.toFixed(1) },
-  { label: "40日均量", num: true, title: "当日成交量 / 40日均量", sort: (t) => t.vol_ratio,
+  { label: "均量", num: true, title: "当日成交量 / 均量", sort: (t) => t.vol_ratio,
     render: (t) => `<span style="color:${t.vol_hit ? PAL.o : "var(--dim)"}">${t.vol_ratio == null ? "—" : `${t.vol_ratio.toFixed(2)}x`}</span>` },
   { label: "短线趋势", sort: (t) => (t.short_orange ? 1 : 0), render: (t) =>
       `<span style="color:${t.short_orange ? PAL.o : PAL.b}">●</span> ${t.short_orange ? "橙" : "蓝"}` },
@@ -400,19 +400,19 @@ const TGT_COLS: DataTableCol<TargetItem>[] = [
       `<span style="color:${t.mid_orange ? PAL.o : PAL.b}">●</span> ${t.mid_orange ? "橙" : "蓝"}` },
   { label: "20日涨停", num: true, title: "近 20 个交易日涨停次数", sort: (t) => t.limit_up_cnt,
     render: (t) => t.limit_up_20d ? `<span class="tag acc">${t.limit_up_cnt}次</span>` : `<span style="color:var(--faint)">—</span>` },
-  { label: "钱袋子", num: true, title: "近 20 日钱袋（ZigZag 低点，反弹 6% 确认）的信号日期 · 出现次数；越新鲜越靠前，适合打底仓/波段低吸",
+  { label: "钱袋子", num: true, title: "近 20 日钱袋（阶段低点确认后的反弹信号）的日期 · 出现次数；越新鲜越靠前，适合打底仓/波段低吸",
     sort: (t) => t.money_ago ?? 9999,
     render: (t) => t.money_date == null ? `<span style="color:var(--faint)">—</span>` :
       `<span style="color:${(t.money_ago ?? 9) <= 3 ? PAL.o : "var(--text)"}">${t.money_date.slice(5)}</span>` +
       ((t.money_cnt ?? 0) > 1 ? `<small style="color:var(--faint)"> · ${t.money_cnt}次</small>` : "") +
       tailFlag(t) },
-  { label: "地雷", num: true, title: "近 20 日地雷（ZigZag 高点回落 6% 确认）的信号日期 · 出现次数；越新鲜越靠前，属风险信号",
+  { label: "地雷", num: true, title: "近 20 日地雷（阶段高点确认后的回落信号）的日期 · 出现次数；越新鲜越靠前，属风险信号",
     sort: (t) => t.mine_ago ?? 9999,
     render: (t) => t.mine_date == null ? `<span style="color:var(--faint)">—</span>` :
       `<span style="color:${(t.mine_ago ?? 9) <= 3 ? "var(--down)" : "var(--text)"}">${t.mine_date.slice(5)}</span>` +
       ((t.mine_cnt ?? 0) > 1 ? `<small style="color:var(--faint)"> · ${t.mine_cnt}次</small>` : "") +
       tailFlag(t) },
-  { label: "六分段", sort: "seg", title: "六分段理论：围绕日线短线趋势线（MA7 快 / MA10 慢）的六个位置，1 趋势线超跌 → 2 反弹趋势线 → 3 趋势线突破 → 4 趋势线超涨 → 5 回踩趋势线 → 6 趋势线跌破；亮格为当前所在位置",
+  { label: "六分段", sort: "seg", title: "六分段理论：围绕日线短线趋势线的六个位置，1 趋势线超跌 → 2 反弹趋势线 → 3 趋势线突破 → 4 趋势线超涨 → 5 回踩趋势线 → 6 趋势线跌破；亮格为当前所在位置",
     render: (t) => (t.seg ? segMeter(t.seg, t.seg_name) : `<span style="color:var(--faint)">—</span>`) },
   { label: "短线状态", sort: (t) => (t.pullback ? 0 : 1), render: (t) =>
       `<span style="font-size:11.5px;color:${t.short_orange ? PAL.o : PAL.b}">${t.pullback ? "回调中" : "上行"} · ${t.short_orange ? "橙" : "蓝"}</span>` },
@@ -424,7 +424,7 @@ function drawPage(): void {
   if (!pager) pager = createPager(document.getElementById("tgt-pager")!, "targets", drawPage);
   if (tableHasTrend !== wantTrend) { tbl = null; tableHasTrend = wantTrend; }
   const columns = (wantTrend ? TGT_COLS : TGT_COLS.filter(column =>
-    !["STICKV", "最近转正", "距今交易日", "连续上方", "负柱收敛", "距零轴"].includes(column.label)))
+    !["趋势柱线", "最近转正", "距今交易日", "连续上方", "负柱收敛", "距零轴"].includes(column.label)))
     .filter(column => column.label !== "近况" || sparkOn);
   if (!tbl) tbl = createDataTable(document.getElementById("tgt-wrap")!, columns, {
     rowKey: (t) => t.symbol,
@@ -691,7 +691,7 @@ function renderConds(): void {
     `<span class="tgt-preset-count">已启用 <b>${onKeys.length}</b>/${meta.length}</span></div>` +
     groups +
     `<div class="tgt-grp-hint">所有勾选条件同时满足 · ST 已剔除 · 未勾选不参与判定</div>` +
-    (conflict ? `<div class="tgt-conflict">钱袋/地雷是 ZigZag 拐点确认，价格通常在 MA10 另一侧，与趋势橙方向相反；叠加后命中极少。<button type="button" class="tgt-conflict-fix" data-p="${conds["mine"] && !conds["money"] ? "mine" : "money"}">只看信号</button></div>` : "");
+    (conflict ? `<div class="tgt-conflict">钱袋/地雷是拐点确认信号，价格通常在趋势线另一侧，与趋势橙方向相反；叠加后命中极少。<button type="button" class="tgt-conflict-fix" data-p="${conds["mine"] && !conds["money"] ? "mine" : "money"}">只看信号</button></div>` : "");
   if (conds["trend"]) {
     el.insertAdjacentHTML("beforeend", `<div class="tgt-trend-set">
       <label>趋势柱线 <select id="tgt-trend-mode"><option value="cross" ${trend.mode === "cross" ? "selected" : ""}>负转正</option><option value="above" ${trend.mode === "above" ? "selected" : ""}>零轴上方</option></select></label>
@@ -699,7 +699,7 @@ function renderConds(): void {
       <label>天数 <input aria-label="最近交易日数" id="tgt-trend-days" type="number" min="1" max="250" step="1" value="${trend.recent}"></label>
       <label><input id="tgt-trend-still" type="checkbox" ${trend.stillAbove ? "checked" : ""}>当前仍在零轴上方</label>` :
       `<label>连续至少 <input aria-label="连续上方交易日数" id="tgt-trend-days" type="number" min="1" max="250" step="1" value="${trend.aboveDays}"> 个交易日</label>`}
-      <span class="tgt-trend-hint">${trend.mode === "cross" ? "前值≤0、当日>0；窗口包含最新数据日" : "STICKV>0，零值不计入连续天数"} · 日K前复权</span></div>`);
+      <span class="tgt-trend-hint">${trend.mode === "cross" ? "前值≤0、当日>0；窗口包含最新数据日" : "趋势柱线>0，零值不计入连续天数"} · 日K前复权</span></div>`);
     const save = () => { localStorage.setItem("yc_tgt_trend", JSON.stringify(trend)); renderConds(); void load(true); };
     el.querySelector<HTMLSelectElement>('#tgt-trend-mode')!.onchange = event => { trend.mode = (event.target as HTMLSelectElement).value; save(); };
     const recent = el.querySelector<HTMLSelectElement>('#tgt-trend-recent');
@@ -715,7 +715,7 @@ function renderConds(): void {
     `<label><input type="checkbox" id="tgt-spark-on" ${sparkOn ? "checked" : ""}> 显示缩略图</label>` +
     `<label>范围 <select id="tgt-spark-range">${(Object.keys(SPARK_BARS) as SparkRange[])
       .map((k) => `<option value="${k}" ${sparkRange === k ? "selected" : ""}>${SPARK_LABEL[k]}</option>`).join("")}</select></label>` +
-    `<span class="tgt-trend-hint">上：K 线 + 中线趋势（橙=站上 MA45）· 下：趋势柱线 · 鼠标悬停放大</span></div>`);
+    `<span class="tgt-trend-hint">上：K 线 + 中线趋势（橙=站上中线趋势线）· 下：趋势柱线 · 鼠标悬停放大</span></div>`);
   const saveSpark = (): void =>
     localStorage.setItem("yc_tgt_spark", JSON.stringify({ on: sparkOn, range: sparkRange }));
   el.querySelector<HTMLInputElement>("#tgt-spark-on")!.onchange = (event) => {

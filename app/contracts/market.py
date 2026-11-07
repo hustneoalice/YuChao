@@ -20,7 +20,7 @@ class Bar(BaseModel):
         default=None, description="盘中实时合并的「今日未收盘 bar」标记（非库内落库数据）"
     )
     indicators: Optional[dict[str, Optional[float]]] = Field(
-        default=None, description="with=indicator 时的标准指标（MA5/7/10/20/35/45、std20、BOLL）"
+        default=None, description="with=indicator 时的标准指标（均线、BOLL 等）"
     )
 
 
@@ -188,8 +188,8 @@ class SearchHit(BaseModel):
 class TargetItem(BaseModel):
     """目标页扫描行（策影目标页同源口径）：指标层 + 四条件布尔。
 
-    条件：40日均量（当日量 ≥ 40日均量）、短线趋势橙（收盘 ≥ MA10，K 线通道
-    填橙同一判定）、中线趋势橙（收盘 ≥ MA45）、近 20 个交易日有涨停
+    条件：均量（当日量 ≥ 均量）、短线趋势橙（收盘站上短线趋势线，K 线通道
+    填橙同一判定）、中线趋势橙（收盘站上中线趋势线）、近 20 个交易日有涨停
     （主板 10% / 创业科创 20% 阈值口径）。
     ST 股票服务端直接剔除；北交所受 bj_enabled 开关控制。"""
 
@@ -197,16 +197,16 @@ class TargetItem(BaseModel):
     name: Optional[str] = None
     close: Optional[float] = None
     pct_chg: Optional[float] = Field(default=None, description="当日涨跌幅%")
-    vol_ma40: Optional[float] = Field(default=None, description="40日均量")
-    vol_ratio: Optional[float] = Field(default=None, description="当日量 / 40日均量")
-    vol_hit: bool = Field(default=False, description="条件①：当日量 ≥ 40日均量")
-    short_orange: bool = Field(default=False, description="条件②：收盘 ≥ MA10（短线趋势橙）")
-    mid_orange: bool = Field(default=False, description="条件③：收盘 ≥ MA45（中线趋势橙）")
+    vol_ma40: Optional[float] = Field(default=None, description="均量")
+    vol_ratio: Optional[float] = Field(default=None, description="当日量 / 均量")
+    vol_hit: bool = Field(default=False, description="条件①：当日量 ≥ 均量")
+    short_orange: bool = Field(default=False, description="条件②：收盘站上短线趋势线")
+    mid_orange: bool = Field(default=False, description="条件③：收盘站上中线趋势线")
     limit_up_20d: bool = Field(default=False, description="条件④：近 20 个交易日有涨停")
     limit_up_cnt: int = Field(default=0, description="近 20 个交易日涨停次数")
     seg: int = Field(default=0, description="六分段 1..6（趋势线六位置：超跌/反弹/突破/超涨/回踩/跌破）")
     seg_name: str = Field(default="", description="六分段名：超跌/反弹/突破/超涨/回踩/跌破")
-    pullback: bool = Field(default=False, description="回调中：收盘跌破 MA7 快线")
+    pullback: bool = Field(default=False, description="回调中：收盘跌破短线快线")
 
     trend_value: Optional[float] = None
     trend_cross_date: Optional[str] = None
@@ -214,10 +214,10 @@ class TargetItem(BaseModel):
     trend_above_days: int = 0
     neg_run: int = Field(default=0, description="连续负柱收窄天数（绿柱缩短，提前捕捉上穿零轴）")
     neg_abs: Optional[float] = Field(default=None, description="当前负柱距零轴幅度 |STICKV|（正值时为 null）")
-    money_date: Optional[str] = Field(default=None, description="最近一次钱袋子（ZigZag 低点）日期")
+    money_date: Optional[str] = Field(default=None, description="最近一次钱袋子（阶段低点）日期")
     money_ago: Optional[int] = Field(default=None, description="钱袋距今交易日数（0=今日；null=近20日未出现）")
     money_cnt: int = Field(default=0, description="近 20 个交易日钱袋出现次数")
-    mine_date: Optional[str] = Field(default=None, description="最近一次地雷（ZigZag 高点回落）日期")
+    mine_date: Optional[str] = Field(default=None, description="最近一次地雷（阶段高点回落）日期")
     mine_ago: Optional[int] = Field(default=None, description="地雷距今交易日数（0=今日；null=近20日未出现）")
     mine_cnt: int = Field(default=0, description="近 20 个交易日地雷出现次数")
     trend_data_date: str = ""
