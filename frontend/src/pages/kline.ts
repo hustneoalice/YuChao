@@ -156,8 +156,11 @@ type SmartDrawArgs = {
   chart: Chart;
   indicator: { name: string };
   xAxis: { convertToPixel: (i: number) => number };
-  yAxis: { convertToPixel: (p: number) => number };
-  bounding: { width: number; height: number };
+  yAxis: {
+    convertToPixel: (p: number) => number;
+    getRange: () => { displayFrom: number; displayTo: number };
+  };
+  bounding: { width: number; height: number; top: number; bottom: number };
 };
 
 function lineAtr(bars: LineBar[], n = 14): number {
@@ -175,11 +178,12 @@ function lineAtr(bars: LineBar[], n = 14): number {
  *  · 只保留 stage 级高点/低点，末端未确认枢轴同样受深度约束 */
 const LINE_DEPTH = 10;
 
-/** ZigZag：自适应阈值 + 最小深度，末端枢轴标记为未确认 */
-function linePivots(bars: LineBar[]): LinePivot[] {
-  if (bars.length < 10) return [];
+/** ZigZag：自适应阈值 + 最小深度，末端枢轴标记为未确认。
+ *  浪型用同一套算法但更细（阈值/深度可调）：阶段线要粗，浪级要细。 */
+function linePivots(bars: LineBar[], depth = LINE_DEPTH, mult = 2.5, pct = 0.05): LinePivot[] {
+  if (bars.length < depth * 2) return [];
   const close = bars[bars.length - 1].close;
-  const th = Math.max(lineAtr(bars) * 2.5, close * 0.05);
+  const th = Math.max(lineAtr(bars) * mult, close * pct);
   const out: LinePivot[] = [];
   let dir: 0 | 1 | -1 = 0;
   let ext: { i: number; p: number } | null = null;
@@ -212,7 +216,7 @@ function linePivots(bars: LineBar[]): LinePivot[] {
       if (p.kind === "high" ? p.p >= last.p : p.p <= last.p) kept[kept.length - 1] = p;
       continue;
     }
-    if (p.i - last.i < LINE_DEPTH) continue;
+    if (p.i - last.i < depth) continue;
     kept.push(p);
   }
   return kept;
@@ -297,11 +301,313 @@ function lineSR(bars: LineBar[], pv: LinePivot[]) {
   return { sup, res, close };
 }
 
+/* ═══ 艾略特浪型：1-5 推动浪 / A-B-C 调整浪 ═══
+ * 铁律（R.N. Elliott，不可违反）：
+ *   ① 2 浪不破 1 浪起点（回撤 < 100%）
+ *   ② 3 浪不是 1/3/5 浪中最短的一段（通常最长）
+ *   ③ 4 浪不与 1 浪价格区间重叠（引导/终结楔形除外）
+ * 软规则（仅用于给候选打分，挑最优结构）：
+ *   2 浪回撤 38.2%~78.6%（0.5/0.618 最典型）、4 浪回撤 23.6%~50%、
+ *   3 浪 ≈ 1.618×1 浪、5 浪 ≈ 1 浪 或 0.618×3 浪、2/4 浪交替（深度不同）
+ * 识别流程：细 ZigZag 取摆动点 → 滑窗枚举 6 点/5 点候选 → 铁律过滤 → 打分 + 新鲜度。
+ * 只做结构描述，不预测；末端未确认的枢轴用虚线 + 「?」标注。 */
+const WAVE_TH_MULT = 1.6;
+const WAVE_TH_PCT = 0.035;
+const WAVE_DEPTH = 4;
+const WAVE_BARS = 320;                          // 只在近 320 根内识别：贴住当前价，避免标到图上早已看不到的旧结构
+
+type WaveStruct = {
+  pts: (LinePivot & { label: string })[];
+  dir: 1 | -1;
+  title: string;
+  note: string;
+};
+
+/** 铁律校验 + 软规则打分；n = 段数（4=走到 4 浪，5=完整推动浪） */
+function waveScore(p: LinePivot[], dir: 1 | -1, n: number): { score: number; note: string } | null {
+  const px = (k: number): number => p[k].p;
+  const leg = (a: number, b: number): number => Math.abs(px(b) - px(a));
+  const l1 = leg(0, 1), l3 = leg(2, 3);
+  if (l1 <= 0 || l3 <= 0) return null;
+  // ① 2 浪不破 1 浪起点
+  if (dir === 1 ? px(2) <= px(0) : px(2) >= px(0)) return null;
+  // ② 3 浪必须越过 1 浪终点
+  if (dir === 1 ? px(3) <= px(1) : px(3) >= px(1)) return null;
+  const l5 = n >= 5 ? leg(4, 5) : null;
+  // ② 3 浪不是最短
+  if (l3 < l1 * 0.95 || (l5 != null && l3 < l5 * 0.95)) return null;
+  // ③ 4 浪不与 1 浪区间重叠（重叠视为楔形：不否决，扣分并标注）
+  let diagonal = false;
+  if (n >= 4) {
+    const deep = dir === 1 ? px(4) <= px(0) : px(4) >= px(0);
+    if (deep) return null;
+    diagonal = dir === 1 ? px(4) <= px(1) : px(4) >= px(1);
+  }
+  let score = 4 - (diagonal ? 2 : 0);
+  const r2 = dir === 1 ? (px(1) - px(2)) / l1 : (px(2) - px(1)) / l1;
+  if (r2 >= 0.382 && r2 <= 0.786) score += r2 >= 0.5 && r2 <= 0.618 ? 2 : 1;
+  const k3 = l3 / l1;
+  if (k3 >= 1.4 && k3 <= 1.9) score += 2;
+  else if (k3 <= 2.618) score += 1;
+  let r4 = 0;
+  if (n >= 4) {
+    r4 = dir === 1 ? (px(3) - px(4)) / l3 : (px(4) - px(3)) / l3;
+    if (r4 >= 0.236 && r4 <= 0.5) score += 1;
+    if (Math.abs(r2 - r4) >= 0.15) score += 1;             // 交替
+  }
+  if (l5 != null) {
+    const k5 = l5 / l1;
+    if ((k5 >= 0.618 && k5 <= 1.0) || Math.abs(l5 / l3 - 0.618) <= 0.15) score += 1;
+  }
+  const note = `3浪 ${k3.toFixed(2)}×1浪`
+    + (n >= 4 ? ` · 2浪回撤 ${Math.round(r2 * 100)}%` : "")
+    + (diagonal ? " · 1/4 重叠(楔形)" : "");
+  return { score, note };
+}
+
+/** A-B-C 调整浪校验（跟在 5 浪之后）：B 不破 5 浪极点，C 越过 A 终点 */
+function waveABC(base: LinePivot, dir: 1 | -1, rest: LinePivot[]): boolean {
+  if (rest.length < 3) return false;
+  const [a, b, c] = rest;
+  if (a.kind === base.kind || b.kind !== base.kind || c.kind !== a.kind) return false;
+  return dir === 1 ? (b.p < base.p && c.p < a.p) : (b.p > base.p && c.p > a.p);
+}
+
+function lineWave(bars: LineBar[]): WaveStruct | null {
+  if (bars.length < 40) return null;
+  const off = Math.max(0, bars.length - WAVE_BARS);   // 识别窗口偏移：回填成整段数据的下标
+  const win = off ? bars.slice(off) : bars;
+  const pv = linePivots(win, WAVE_DEPTH, WAVE_TH_MULT, WAVE_TH_PCT);
+  if (pv.length < 5) return null;
+  let best: { s: number; n: number; total: number; note: string } | null = null;
+  for (const n of [5, 4] as const) {
+    for (let e = pv.length - 1; e >= n; e--) {
+      const p = pv.slice(e - n, e + 1);
+      const dir: 1 | -1 = p[0].kind === "low" ? 1 : -1;
+      if (!p.every((x, i) => (i % 2 === 0 ? x.kind === p[0].kind : x.kind !== p[0].kind))) continue;
+      const r = waveScore(p, dir, n);
+      if (!r) continue;
+      // 结构质量 + 完整度 + 新鲜度（越靠近最新枢轴越优先）
+      const total = r.score + (n === 5 ? 0.8 : 0) - (pv.length - 1 - e) * 0.4;
+      if (!best || total > best.total) best = { s: e - n, n, total, note: r.note };
+    }
+  }
+  if (!best) return null;
+  const p = pv.slice(best.s, best.s + best.n + 1);
+  const dir: 1 | -1 = p[0].kind === "low" ? 1 : -1;
+  const labels = ["0", "1", "2", "3", "4", "5"].slice(0, best.n + 1);
+  const pts: (LinePivot & { label: string })[] = p.map((x, k) => ({ ...x, i: x.i + off, label: labels[k] }));
+  let title = dir === 1 ? "上升 1-5 浪" : "下跌 1-5 浪";
+  let note = best.note;
+  if (best.n === 4) {
+    title = dir === 1 ? "上升 1-4 浪（5 浪待确认）" : "下跌 1-4 浪（5 浪待确认）";
+  } else {
+    const rest = pv.slice(best.s + best.n + 1);
+    if (waveABC(p[p.length - 1], dir, rest)) {
+      rest.slice(0, 3).forEach((x, k) => pts.push({ ...x, i: x.i + off, label: ["A", "B", "C"][k] }));
+      title += " + A-B-C 调整";
+      note += " · 调整中";
+    }
+  }
+  const last = pts[pts.length - 1];
+  if (last.open && best.n === 5) title += "（末端未确认）";
+  return { pts, dir, title, note };
+}
+
+/* ═══ 箱体 / 反转形态：横向震荡区间 + W底·M头·头肩 ═══
+ * 箱体：细 ZigZag 的摆动点若高点成簇、低点也成簇，且区间内绝大多数收盘落在其中，
+ *   即视为横向箱体；再按最新价在箱体中的位置 + 量能给出四种提示：
+ *   下沿缩量企稳（风险相对可控）/ 上沿滞涨（警惕回落）/ 放量突破 / 放量跌破。
+ * 反转形态：本质是支撑压力 + 颈线的组合，只认两种最经典的结构：
+ *   · 底部：W 底 / 头肩底 —— 放量突破颈线才算成立
+ *   · 顶部：M 头 / 头肩顶 —— 放量跌破颈线才算确认
+ * 只画最近结构，颈线用虚线延伸到右侧；未突破时明确标注「未确认」。 */
+const BOX_BARS = 200;
+const PAT_BARS = 320;
+
+type BoxStruct = {
+  i0: number;
+  hi: number;
+  lo: number;
+  state: string;
+  tone: "brk" | "brkdn" | "ok" | "risk" | "wait";
+};
+
+function lineBox(bars: LineBar[]): BoxStruct | null {
+  if (bars.length < 40) return null;
+  const off = Math.max(0, bars.length - BOX_BARS);
+  const win = off ? bars.slice(off) : bars;
+  const n = win.length;
+  const pv = linePivots(win, 3, 1.4, 0.03);
+  if (pv.length < 5) return null;
+  // 末端未确认枢轴可能是突破后的新高/新低，先剔除再找箱体（突破状态由最新收盘判断）
+  const all = pv.slice(-10);
+  const tail = all.length > 4 && all[all.length - 1].open ? all.slice(0, -1) : all;
+  let best: { pts: LinePivot[]; hi: number; lo: number; score: number } | null = null;
+  for (let s = 0; s <= tail.length - 5; s++) {
+    const seg = tail.slice(s);
+    const highs = seg.filter((p) => p.kind === "high").map((p) => p.p);
+    const lows = seg.filter((p) => p.kind === "low").map((p) => p.p);
+    if (highs.length < 2 || lows.length < 2) continue;
+    const hi = Math.max(...highs), lo = Math.min(...lows);
+    const range = hi - lo;
+    if (range <= 0) continue;
+    const ratio = range / lo;
+    if (ratio < 0.035 || ratio > 0.28) continue;          // 太窄不算箱体，太宽是趋势
+    const hiBand = Math.max(...highs) - Math.min(...highs);
+    const loBand = Math.max(...lows) - Math.min(...lows);
+    if (hiBand > range * 0.45 || loBand > range * 0.45) continue;  // 上下沿各自要贴同一水平
+    const i0 = seg[0].i, i1 = n - 1, span = i1 - i0 + 1;
+    if (span < 25) continue;                              // 至少一个多月的横盘才算箱体
+    const inside = win.slice(i0, i1 + 1).filter((b) => b.close >= lo * 0.985 && b.close <= hi * 1.015).length;
+    if (inside / span < 0.86) continue;                    // 绝大多数收盘要在箱体内
+    // 越长越好、上下沿越平越好，过宽的区间扣分
+    const score = seg.length * 3 + (1 - (hiBand + loBand) / range) * 2 - ratio * 4;
+    if (!best || score > best.score) best = { pts: seg, hi, lo, score };
+  }
+  if (!best) return null;
+  const last = win[n - 1];
+  const avg = (a: number[]): number => a.reduce((x, y) => x + y, 0) / (a.length || 1);
+  const boxVol = avg(win.slice(best.pts[0].i).map((b) => b.volume || 0));
+  const recentVol = avg(win.slice(-5).map((b) => b.volume || 0));
+  const recentPeak = Math.max(...win.slice(-3).map((b) => b.volume || 0));
+  const shrink = recentVol < boxVol * 0.85;
+  const burst = recentPeak > boxVol * 1.35;
+  const pos = (last.close - best.lo) / (best.hi - best.lo);
+  let state = "区间震荡";
+  let tone: BoxStruct["tone"] = "wait";
+  if (last.close > best.hi * 1.003) {
+    state = burst ? "放量突破上沿" : "突破上沿(量不足)";
+    tone = "brk";
+  } else if (last.close < best.lo * 0.997) {
+    state = burst ? "放量跌破下沿" : "跌破下沿";
+    tone = "brkdn";
+  } else if (pos < 0.22) {
+    state = shrink ? "下沿缩量企稳" : "回踩下沿";
+    tone = shrink ? "ok" : "wait";
+  } else if (pos > 0.78) {
+    state = shrink ? "上沿缩量滞涨" : "上沿放量试探";
+    tone = "risk";
+  }
+  return { i0: best.pts[0].i + off, hi: best.hi, lo: best.lo, state, tone };
+}
+
+type PatternStruct = {
+  kind: "W底" | "M头" | "头肩底" | "头肩顶";
+  dir: 1 | -1;                                          // 1=底部反转（看涨）· -1=顶部反转（看跌）
+  pts: (LinePivot & { label: string })[];
+  neck: number;
+  status: string;
+  confirmed: boolean;
+};
+
+function linePattern(bars: LineBar[]): PatternStruct | null {
+  if (bars.length < 60) return null;
+  const off = Math.max(0, bars.length - PAT_BARS);
+  const win = off ? bars.slice(off) : bars;
+  const pv = linePivots(win, 4, 1.8, 0.04);
+  if (pv.length < 3) return null;
+  const n = win.length;
+  const close = win[n - 1].close;
+  const vols = win.slice(-20).map((b) => b.volume || 0);
+  const vAvg = vols.reduce((a, b) => a + b, 0) / (vols.length || 1);
+  const volOk = Math.max(...win.slice(-3).map((b) => b.volume || 0)) > vAvg * 1.25;
+  const at = (p: LinePivot, label: string) => ({ ...p, i: p.i + off, label });
+  const cands: PatternStruct[] = [];
+  const tag = (up: boolean): string => (volOk ? (up ? "放量突破颈线" : "放量跌破颈线") : (up ? "突破颈线(量不足)" : "跌破颈线(量不足)"));
+  // 颈线穿越必须发生在最近 45 根内：老形态早就走完了，拿当前价去“确认”没有意义
+  const brokeAt = (neck: number, up: boolean): number => {
+    for (let i = n - 2; i >= Math.max(1, n - 45); i--) {
+      const a = win[i - 1].close, b = win[i].close;
+      if (up ? a <= neck && b > neck : a >= neck && b < neck) return i;
+    }
+    return -1;
+  };
+  const fresh = (i: number, bars: number): boolean => i >= n - bars;
+
+  // 头肩底 / 头肩顶：最近 7 个枢轴内滑窗取 5 点，避免突破后新枢轴把形态挤掉
+  for (let e = pv.length - 1; e >= Math.max(4, pv.length - 7); e--) {
+    const [a, b, c, d, g] = pv.slice(e - 4, e + 1);
+    if (a.kind === "low" && b.kind === "high" && c.kind === "low" && d.kind === "high" && g.kind === "low") {
+      const neck = Math.max(b.p, d.p);
+      const shGap = Math.abs(g.p - a.p) / a.p;
+      if (c.p < a.p * 0.99 && c.p < g.p * 0.99 && shGap <= 0.08 && b.p > c.p * 1.02 && d.p > c.p * 1.02 && g.i - a.i <= 120) {
+        const ok = close > neck * 1.002;
+        if (ok ? brokeAt(neck, true) < 0 : !fresh(g.i, 50)) continue;
+        cands.push({
+          kind: "头肩底", dir: 1, neck, confirmed: ok,
+          pts: [at(a, "左肩"), at(b, "颈1"), at(c, "头"), at(d, "颈2"), at(g, "右肩")],
+          status: ok ? tag(true) : "待突破颈线 · 未确认",
+        });
+      }
+    }
+    if (a.kind === "high" && b.kind === "low" && c.kind === "high" && d.kind === "low" && g.kind === "high") {
+      const neck = Math.min(b.p, d.p);
+      const shGap = Math.abs(g.p - a.p) / a.p;
+      if (c.p > a.p * 1.01 && c.p > g.p * 1.01 && shGap <= 0.08 && b.p < c.p * 0.98 && d.p < c.p * 0.98 && g.i - a.i <= 120) {
+        const ok = close < neck * 0.998;
+        if (ok ? brokeAt(neck, false) < 0 : !fresh(g.i, 50)) continue;
+        cands.push({
+          kind: "头肩顶", dir: -1, neck, confirmed: ok,
+          pts: [at(a, "左肩"), at(b, "颈1"), at(c, "头"), at(d, "颈2"), at(g, "右肩")],
+          status: ok ? tag(false) : "待跌破颈线 · 未确认",
+        });
+      }
+    }
+  }
+  // W 底 / M 头：最近 6 个枢轴内滑窗取 3 点
+  for (let e = pv.length - 1; e >= Math.max(2, pv.length - 6); e--) {
+    const [a, b, c] = pv.slice(e - 2, e + 1);
+    if (a.kind === "low" && b.kind === "high" && c.kind === "low") {
+      const neck = b.p;
+      if (neck > Math.max(a.p, c.p) * 1.03 && Math.abs(c.p - a.p) / a.p <= 0.06 && c.i - a.i <= 90) {
+        const ok = close > neck * 1.002;
+        if (ok ? brokeAt(neck, true) < 0 : !fresh(c.i, 40)) continue;
+        cands.push({
+          kind: "W底", dir: 1, neck, confirmed: ok,
+          pts: [at(a, "底1"), at(b, "颈线"), at(c, "底2")],
+          status: ok ? tag(true) : "待突破颈线 · 未确认",
+        });
+      }
+    }
+    if (a.kind === "high" && b.kind === "low" && c.kind === "high") {
+      const neck = b.p;
+      if (neck < Math.min(a.p, c.p) * 0.97 && Math.abs(c.p - a.p) / a.p <= 0.06 && c.i - a.i <= 90) {
+        const ok = close < neck * 0.998;
+        if (ok ? brokeAt(neck, false) < 0 : !fresh(c.i, 40)) continue;
+        cands.push({
+          kind: "M头", dir: -1, neck, confirmed: ok,
+          pts: [at(a, "顶1"), at(b, "颈线"), at(c, "顶2")],
+          status: ok ? tag(false) : "待跌破颈线 · 未确认",
+        });
+      }
+    }
+  }
+  if (!cands.length) return null;
+  // 已确认的优先（越新越好）；都没确认就画最新的那个并明确标注未确认
+  const picked = cands.filter((p) => p.confirmed);
+  const list = picked.length ? picked : cands;
+  list.sort((x, y) => {
+    const xi = x.pts[x.pts.length - 1].i, yi = y.pts[y.pts.length - 1].i;
+    return yi - xi;
+  });
+  return list[0];
+}
+
 function drawSmartLines(a: SmartDrawArgs): void {
   const { ctx, chart, indicator, xAxis, yAxis, bounding } = a;
   const list = chart.getDataList() as unknown as LineBar[];
   if (list.length < 10) return;
-  const W = bounding.width, H = bounding.height;
+  const W = bounding.width;
+  // 叠加上层指标的 bounding.height 只给到图例高度（实测 22px），会被裁成一条；
+  // 用价格轴显示区间反推主图高度，拿不到（NaN/异常）时退回 bounding.height。
+  let H = bounding.height;
+  try {
+    const r = yAxis.getRange();
+    const h = Math.abs(yAxis.convertToPixel(r.displayFrom) - yAxis.convertToPixel(r.displayTo));
+    if (Number.isFinite(h) && h > 40) H = h;
+  } catch { /* 保留 bounding.height */ }
+  H = Math.max(60, H);
   const panel = cssv("--panel") || "#161618";
   const dim = cssv("--dim") || "#A1A1A6";
   ctx.save();
@@ -386,6 +692,175 @@ function drawSmartLines(a: SmartDrawArgs): void {
     };
     m.res.forEach((z) => band(z, "res"));
     m.sup.forEach((z) => band(z, "sup"));
+  } else if (indicator.name === "ZY_WAVE") {
+    const w = lineWave(list);
+    if (!w) { ctx.restore(); return; }
+    const WAVE = "#FF79C6";
+    const xEnd = W - 3;
+    // 1-5 浪折线：3 浪金色加粗，末端未确认段虚线
+    w.pts.forEach((p, k) => {
+      if (k === w.pts.length - 1) return;
+      const q = w.pts[k + 1];
+      const is3 = k === 2;
+      ctx.strokeStyle = is3 ? "#FFD60A" : WAVE;
+      ctx.lineWidth = is3 ? 2 : 1.4;
+      ctx.setLineDash(q.open ? [5, 4] : []);
+      ctx.beginPath();
+      ctx.moveTo(xOf(p.i), yOf(p.p));
+      ctx.lineTo(xOf(q.i), yOf(q.p));
+      ctx.stroke();
+    });
+    ctx.setLineDash([]);
+    // 枢轴点 + 浪号（高点标在上方，低点标在下方；贴边时收进可视区）
+    // 上下两侧各自记录上一个标签位置：只有同侧标签才会纵向撞在一起，异侧允许相邻
+    const lastLblX: Record<"high" | "low", number> = { high: -999, low: -999 };
+    w.pts.forEach((p) => {
+      const x = Math.max(9, Math.min(xEnd - 9, xOf(p.i)));
+      const y = yOf(p.p);
+      const above = p.kind === "high";
+      ctx.fillStyle = /^[ABC]$/.test(p.label) ? "#4DD0E1" : p.label === "3" ? "#FFD60A" : WAVE;
+      ctx.beginPath();
+      ctx.arc(xOf(p.i), y, 2.4, 0, Math.PI * 2);
+      ctx.fill();
+      if (Math.abs(x - lastLblX[p.kind]) < 11) return;
+      lastLblX[p.kind] = x;
+      ctx.font = "700 11px ui-monospace,SFMono-Regular,Menlo,monospace";
+      ctx.textAlign = "center";
+      ctx.textBaseline = above ? "bottom" : "top";
+      ctx.lineWidth = 3;
+      ctx.strokeStyle = panel;
+      ctx.strokeText(p.label, x, above ? y - 5 : y + 5);
+      ctx.fillText(p.label, x, above ? y - 5 : y + 5);
+    });
+    // 左下角结构摘要：窄主图只留一行浪型，够高时补 3浪/1浪 比例
+    ctx.textAlign = "left";
+    ctx.textBaseline = "top";
+    const compact = H < 70;
+    const t1 = `艾略特 ${w.title}`;
+    const t2 = compact ? "" : w.note;
+    ctx.font = "600 10px ui-monospace,SFMono-Regular,Menlo,monospace";
+    const t1w = ctx.measureText(t1).width;
+    ctx.font = "9.5px ui-monospace,SFMono-Regular,Menlo,monospace";
+    const bw = Math.min(W - 14, Math.max(t1w, ctx.measureText(t2).width) + 16);
+    const bh = compact ? 20 : 34;
+    const by = Math.max(4, H - bh - 4);
+    ctx.fillStyle = "rgba(0,0,0,.42)";
+    ctx.fillRect(7, by, bw, bh);
+    ctx.fillStyle = WAVE;
+    ctx.font = "600 10px ui-monospace,SFMono-Regular,Menlo,monospace";
+    ctx.fillText(t1, 13, by + 4);
+    if (!compact) {
+      ctx.font = "9.5px ui-monospace,SFMono-Regular,Menlo,monospace";
+      ctx.fillStyle = dim;
+      ctx.fillText(t2, 13, by + 19);
+    }
+  } else if (indicator.name === "ZY_BOX") {
+    const b = lineBox(list);
+    if (!b) { ctx.restore(); return; }
+    const x0 = xOf(b.i0), xEnd = W - 3;
+    const yTop = Math.max(0, Math.min(H, yOf(b.hi)));
+    const yBot = Math.max(0, Math.min(H, yOf(b.lo)));
+    const y = Math.min(yTop, yBot), h = Math.max(1, Math.abs(yBot - yTop));
+    // 箱体底色 + 上下沿虚线；右端不封口，暗示区间仍在延续
+    ctx.fillStyle = "rgba(144,164,174,.07)";
+    ctx.fillRect(x0, y, Math.max(0, xEnd - x0), h);
+    ctx.strokeStyle = "rgba(144,164,174,.7)";
+    ctx.lineWidth = 1;
+    ctx.setLineDash([6, 4]);
+    ctx.beginPath();
+    ctx.moveTo(x0, yTop);
+    ctx.lineTo(xEnd, yTop);
+    ctx.moveTo(x0, yBot);
+    ctx.lineTo(xEnd, yBot);
+    ctx.stroke();
+    ctx.setLineDash([]);
+    // 上下沿价格标在箱体左端（右侧已有黄金分割/支撑压力价位，避免叠字）
+    ctx.font = "9.5px ui-monospace,SFMono-Regular,Menlo,monospace";
+    ctx.textAlign = "left";
+    ctx.textBaseline = "bottom";
+    ctx.lineWidth = 3;
+    ctx.strokeStyle = panel;
+    ctx.fillStyle = "#B0BEC5";
+    const edgeX = Math.max(4, Math.min(x0 + 4, xEnd - 84));
+    const edges: [string, number, number][] = [["上沿", b.hi, yTop], ["下沿", b.lo, yBot]];
+    edges.forEach(([name, v, yy]) => {
+      const s = `${name} ${fmt(v)}`;
+      ctx.strokeText(s, edgeX, yy - 2);
+      ctx.fillText(s, edgeX, yy - 2);
+    });
+    // 状态徽标放在箱体内部左侧：企稳 / 滞涨 / 突破，一眼看清当前该偏多还是偏空
+    const tone = b.tone === "brk" ? UP : b.tone === "brkdn" ? DOWN
+      : b.tone === "ok" ? "#4DD0E1" : b.tone === "risk" ? "#FFB74D" : dim;
+    const txt = `箱体 · ${b.state}`;
+    ctx.font = "600 10px ui-monospace,SFMono-Regular,Menlo,monospace";
+    ctx.textAlign = "left";
+    ctx.textBaseline = "middle";
+    const tw = ctx.measureText(txt).width;
+    const tx = Math.max(x0 + 6, Math.min(xEnd - tw - 10, x0 + 10));
+    const ty = Math.max(12, Math.min(H - 12, (yTop + yBot) / 2));
+    if (h >= 44) {                                        // 箱体太窄时只留上下沿，避免三层文字叠在一起
+      ctx.fillStyle = "rgba(0,0,0,.45)";
+      ctx.fillRect(tx - 5, ty - 9, tw + 10, 18);
+      ctx.fillStyle = tone;
+      ctx.fillText(txt, tx, ty);
+    }
+  } else if (indicator.name === "ZY_PAT") {
+    const p = linePattern(list);
+    if (!p) { ctx.restore(); return; }
+    const col = p.dir === 1 ? UP : DOWN;                 // 底部反转看涨用红，顶部反转看跌用绿
+    const xEnd = W - 3;
+    // 形态折线：依次连接左肩/头/右肩（或底1-颈-底2）
+    ctx.strokeStyle = col;
+    ctx.lineWidth = 1.6;
+    ctx.setLineDash([]);
+    ctx.beginPath();
+    p.pts.forEach((q, k) => {
+      const x = xOf(q.i), y = yOf(q.p);
+      if (k === 0) ctx.moveTo(x, y);
+      else ctx.lineTo(x, y);
+    });
+    ctx.stroke();
+    // 颈线：关键确认位，未突破时虚线到右端并明确标注
+    const yNeck = yOf(p.neck);
+    ctx.strokeStyle = col;
+    ctx.lineWidth = 1;
+    ctx.setLineDash([7, 4]);
+    ctx.beginPath();
+    ctx.moveTo(xOf(p.pts[0].i), yNeck);
+    ctx.lineTo(xEnd, yNeck);
+    ctx.stroke();
+    ctx.setLineDash([]);
+    label(`颈线 ${fmt(p.neck)}`, xEnd - 2, yNeck, col);
+    // 枢轴点 + 结构名（如 左肩 / 头 / 右肩 / 底1 / 底2）
+    const lastLblX: Record<"high" | "low", number> = { high: -999, low: -999 };
+    p.pts.forEach((q) => {
+      const x = Math.max(12, Math.min(xEnd - 12, xOf(q.i)));
+      const y = yOf(q.p);
+      ctx.fillStyle = col;
+      ctx.beginPath();
+      ctx.arc(xOf(q.i), y, 2.4, 0, Math.PI * 2);
+      ctx.fill();
+      if (Math.abs(x - lastLblX[q.kind]) < 24) return;    // 结构名比浪号长，同侧间距要求更大
+      lastLblX[q.kind] = x;
+      ctx.font = "700 10px ui-monospace,SFMono-Regular,Menlo,monospace";
+      ctx.textAlign = "center";
+      ctx.textBaseline = q.kind === "high" ? "bottom" : "top";
+      ctx.lineWidth = 3;
+      ctx.strokeStyle = panel;
+      ctx.strokeText(q.label, x, q.kind === "high" ? y - 5 : y + 5);
+      ctx.fillText(q.label, x, q.kind === "high" ? y - 5 : y + 5);
+    });
+    // 状态徽标固定在主图左上第二行：形态可能画得很长，跟着起点走容易跑到屏幕外
+    const txt = `${p.kind} · ${p.status}`;
+    ctx.font = "600 10px ui-monospace,SFMono-Regular,Menlo,monospace";
+    ctx.textAlign = "left";
+    ctx.textBaseline = "middle";
+    const tw = ctx.measureText(txt).width;
+    const tx = 8, ty = 31;
+    ctx.fillStyle = "rgba(0,0,0,.45)";
+    ctx.fillRect(tx - 4, ty - 9, tw + 9, 18);
+    ctx.fillStyle = col;
+    ctx.fillText(txt, tx, ty);
   }
   ctx.restore();
 }
@@ -1173,6 +1648,36 @@ function ensureRegistered(): void {
       draw: (p) => { drawSmartLines(p as unknown as SmartDrawArgs); return true; },
     });
   } catch { /* 重复注册忽略 */ }
+  try {
+    registerIndicator({
+      name: "ZY_WAVE",
+      shortName: "浪型结构",
+      precision: 2,
+      calc: (kLineDataList) => (kLineDataList as unknown as LineBar[]).map((b) => ({ guide: b.close })),
+      figures: [{ key: "guide", title: "", type: "line", styles: () => ({ color: "transparent", size: 0.1 }) }],
+      draw: (p) => { drawSmartLines(p as unknown as SmartDrawArgs); return true; },
+    });
+  } catch { /* 重复注册忽略 */ }
+  try {
+    registerIndicator({
+      name: "ZY_BOX",
+      shortName: "箱体区间",
+      precision: 2,
+      calc: (kLineDataList) => (kLineDataList as unknown as LineBar[]).map((b) => ({ guide: b.close })),
+      figures: [{ key: "guide", title: "", type: "line", styles: () => ({ color: "transparent", size: 0.1 }) }],
+      draw: (p) => { drawSmartLines(p as unknown as SmartDrawArgs); return true; },
+    });
+  } catch { /* 重复注册忽略 */ }
+  try {
+    registerIndicator({
+      name: "ZY_PAT",
+      shortName: "反转形态",
+      precision: 2,
+      calc: (kLineDataList) => (kLineDataList as unknown as LineBar[]).map((b) => ({ guide: b.close })),
+      figures: [{ key: "guide", title: "", type: "line", styles: () => ({ color: "transparent", size: 0.1 }) }],
+      draw: (p) => { drawSmartLines(p as unknown as SmartDrawArgs); return true; },
+    });
+  } catch { /* 重复注册忽略 */ }
 }
 
 /* ── 时间转换（策影 format.ts 逐字 + 分钟级 datetime 支持） ── */
@@ -1291,8 +1796,8 @@ export interface KlineChartHandle {
   drawLegend: (inds: MainKey[]) => void;
   /** 副图多选：每个指标一个窗格，高度均分（策影 autoLayout 同款） */
   setSub: (inds: SubKey[]) => void;
-  /** 智能画线：黄金分割 / 支撑压力（主图叠加，独立开关） */
-  setLines: (fib: boolean, sr: boolean) => void;
+  /** 智能画线：黄金分割 / 支撑压力 / 浪型结构（主图叠加，独立开关） */
+  setLines: (fib: boolean, sr: boolean, wave: boolean, box: boolean, pat: boolean) => void;
   /** 当前周期（d/w/m/q）：决定十字光标卡片的标题形态 */
   setPeriod: (p: "t" | "60" | "d" | "w" | "m" | "q") => void;
   /** 智能高度：按容器高重分主/副图（3.6:1，策影同款；开关关时副图固定 100px） */
@@ -2173,9 +2678,11 @@ export function mountKline(el: HTMLElement): KlineChartHandle {
       }
       requestAnimationFrame(mainCostSettings.sync);
     },
-    setLines(fib: boolean, sr: boolean) {
+    setLines(fib: boolean, sr: boolean, wave: boolean, box: boolean, pat: boolean) {
       chart.getIndicators({ paneId: "candle_pane" }).forEach((i) => {
-        if ((i.name === "ZY_FIB" && !fib) || (i.name === "ZY_SR" && !sr)) chart.removeIndicator({ id: i.id });
+        if ((i.name === "ZY_FIB" && !fib) || (i.name === "ZY_SR" && !sr)
+          || (i.name === "ZY_WAVE" && !wave) || (i.name === "ZY_BOX" && !box)
+          || (i.name === "ZY_PAT" && !pat)) chart.removeIndicator({ id: i.id });
       });
       const have = new Set(chart.getIndicators({ paneId: "candle_pane" }).map((i) => i.name));
       if (fib && !have.has("ZY_FIB")) {
@@ -2183,6 +2690,15 @@ export function mountKline(el: HTMLElement): KlineChartHandle {
       }
       if (sr && !have.has("ZY_SR")) {
         chart.createIndicator({ name: "ZY_SR", paneId: "candle_pane", isStack: true, createTooltipDataSource: NO_TIP } as never, true);
+      }
+      if (wave && !have.has("ZY_WAVE")) {
+        chart.createIndicator({ name: "ZY_WAVE", paneId: "candle_pane", isStack: true, createTooltipDataSource: NO_TIP } as never, true);
+      }
+      if (box && !have.has("ZY_BOX")) {
+        chart.createIndicator({ name: "ZY_BOX", paneId: "candle_pane", isStack: true, createTooltipDataSource: NO_TIP } as never, true);
+      }
+      if (pat && !have.has("ZY_PAT")) {
+        chart.createIndicator({ name: "ZY_PAT", paneId: "candle_pane", isStack: true, createTooltipDataSource: NO_TIP } as never, true);
       }
     },
     setSub(inds: SubKey[]) {

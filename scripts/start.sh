@@ -63,12 +63,22 @@ fi
 
 # 清理残留的 yuchao 后端进程（可能已不在 8031 监听但持有 duckdb 写锁）。
 # 8031 已有健康监听时绝不能杀：否则每次重复执行 start.sh 都会先打断在跑的服务。
+# 注意：持锁阻塞在 DuckDB 等待时可能延迟响应 TERM，必须等待后兜底 KILL，
+#       否则新实例会一直卡在“等待写锁释放”直到超时。
 if [ -n "$(port_pid 8031)" ]; then
   echo "[backend] 8031 已在运行，跳过残留清理"
 elif pids=$(pgrep -f "uvicorn app.main:app" 2>/dev/null); then
   echo "[backend] 清理残留进程：$pids"
   kill -TERM $pids 2>/dev/null || true
-  sleep 1
+  for _ in $(seq 1 20); do
+    sleep 0.5
+    pgrep -f "uvicorn app.main:app" >/dev/null 2>&1 || break
+  done
+  if left=$(pgrep -f "uvicorn app.main:app" 2>/dev/null); then
+    echo "[backend] 残留进程未响应 TERM，强制结束：$left"
+    kill -KILL $left 2>/dev/null || true
+    sleep 0.5
+  fi
 fi
 
 start_one backend 8031 90 "cd '$ROOT' && PYTHONUNBUFFERED=1 .venv/bin/python -m uvicorn app.main:app --host 127.0.0.1 --port 8031 --log-level info"

@@ -46,6 +46,9 @@ export const mk = {
   subInds: ["vol", "macd"] as SubKey[],  // 副图多选，每指标一个窗格
   lineFib: localStorage.getItem("yc_kfib") === "1",  // 黄金分割（智能画线，主图叠加）
   lineSR: localStorage.getItem("yc_ksr") === "1",    // 支撑压力（智能画线，主图叠加）
+  lineWave: localStorage.getItem("yc_kwave") === "1", // 浪型结构（艾略特 1-5 浪，主图叠加）
+  lineBox: localStorage.getItem("yc_kbox") === "1",   // 箱体区间（横向震荡，主图叠加）
+  linePat: localStorage.getItem("yc_kpat") === "1",   // 反转形态（W底/M头/头肩，主图叠加）
   minuteData: null as { date: string; prevClose: number | null; bars: Bar[] } | null,
   m60: null as Bar[] | null, // 60 分钟K（腾讯实时拉取，不落库）
   from: null as { page: string; label: string } | null,
@@ -804,10 +807,17 @@ export function initMarket(): void {
   // 指标/方案/配色点击处理：常显两行（#kl-indbar）与方案浮层（#kl-ipanel）共用一套委托
   const indClick = (e: Event): void => {
     const t = e.target as HTMLElement;
-    if (t.closest("button[data-line]")) {                  // 智能画线：黄金分割 / 支撑压力
-      const k = (t.closest("button[data-line]") as HTMLElement).dataset.line === "sr" ? "sr" : "fib";
-      if (k === "fib") mk.lineFib = !mk.lineFib; else mk.lineSR = !mk.lineSR;
-      localStorage.setItem(k === "fib" ? "yc_kfib" : "yc_ksr", (k === "fib" ? mk.lineFib : mk.lineSR) ? "1" : "0");
+    if (t.closest("button[data-line]")) {                  // 智能画线：黄金分割 / 支撑压力 / 浪型 / 箱体 / 形态
+      const key = (t.closest("button[data-line]") as HTMLElement).dataset.line || "fib";
+      if (key === "sr") mk.lineSR = !mk.lineSR;
+      else if (key === "wave") mk.lineWave = !mk.lineWave;
+      else if (key === "box") mk.lineBox = !mk.lineBox;
+      else if (key === "pat") mk.linePat = !mk.linePat;
+      else mk.lineFib = !mk.lineFib;
+      const on = key === "fib" ? mk.lineFib : key === "sr" ? mk.lineSR
+        : key === "wave" ? mk.lineWave : key === "box" ? mk.lineBox : mk.linePat;
+      localStorage.setItem(key === "fib" ? "yc_kfib" : key === "sr" ? "yc_ksr"
+        : key === "wave" ? "yc_kwave" : key === "box" ? "yc_kbox" : "yc_kpat", on ? "1" : "0");
       notifyLocal("prefs");
       renderIndBar();
       applyLines();
@@ -1060,6 +1070,9 @@ function renderIndBar(): void {
     `<div class="iprow">` +
       `<button data-line="fib" class="${mk.lineFib ? "on" : ""}" title="自动识别高低点，绘制 0.236 / 0.382 / 0.5 / 0.618 / 0.786">黄金分割</button>` +
       `<button data-line="sr" class="${mk.lineSR ? "on" : ""}" title="按成交量峰与枢轴，绘制近端支撑 / 压力带">支撑压力</button>` +
+      `<button data-line="wave" class="${mk.lineWave ? "on" : ""}" title="艾略特波浪：三条铁律校验后标出 0-5 推动浪与 A-B-C 调整浪">浪型结构</button>` +
+      `<button data-line="box" class="${mk.lineBox ? "on" : ""}" title="自动框出横盘震荡箱体：下沿缩量企稳、上沿滞涨、放量突破/跌破">箱体区间</button>` +
+      `<button data-line="pat" class="${mk.linePat ? "on" : ""}" title="只认最经典的反转结构：W底/M头/头肩底/头肩顶，放量突破或跌破颈线才算确认">反转形态</button>` +
     `</div>` +
     `<button class="imore-open" data-more="1" title="全部指标：搜索 / 配置常显 / 临时叠加">＋更多</button>`;
 }
@@ -1161,7 +1174,7 @@ export async function ensurePeriodData(p: PKey): Promise<void> {
 let kls: (KlineChartHandle | null)[] = [];
 /** 智能画线开关应用到全部 K 线实例（四格/双图各自一份） */
 function applyLines(): void {
-  kls.forEach((k) => k?.setLines(mk.lineFib, mk.lineSR));
+  kls.forEach((k) => k?.setLines(mk.lineFib, mk.lineSR, mk.lineWave, mk.lineBox, mk.linePat));
 }
 /* 面板外壳（与全景右下角同一个 chartpanel 控件；行情页关头部，信息条全局共享） */
 let chartPanels: ChartPanelHandle[] = [];
@@ -1369,7 +1382,7 @@ function applyPanel(i: number): void {
   // 分时主图固定为均价线（MA/趋势通道对每分钟假 K 线无意义），其余周期走默认预设
   kl.setMain(mk.mainInds);
   kl.setSub(SUB_OK[currentLayout()]?.[i] ? mk.subInds : []);
-  kl.setLines(mk.lineFib, mk.lineSR);
+  kl.setLines(mk.lineFib, mk.lineSR, mk.lineWave, mk.lineBox, mk.linePat);
   // 同标的同周期的重灌（盘中 12s 轮询）保留视图窗口，换标的/切周期才回到最新
   const key = `${mk.cur.symbol}|${p}`;
   const keep = panelKey[i] === key;
