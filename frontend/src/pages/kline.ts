@@ -151,6 +151,8 @@ function registerTrendChannel(
 type LineBar = { open: number; high: number; low: number; close: number; volume?: number | null };
 type LinePivot = { i: number; p: number; kind: "high" | "low"; open?: boolean };
 type SRZone = { center: number; lo: number; hi: number; vol: number; peak: boolean };
+/** 连线测量端点：日期 + 取到的极值点（高/低由点击位置就近判定） */
+type MPoint = { date: string; value: number; kind: "high" | "low" };
 type SmartDrawArgs = {
   ctx: CanvasRenderingContext2D;
   chart: Chart;
@@ -1849,7 +1851,7 @@ export interface KlineChartHandle {
   setPickMode: (on: boolean) => void;
   /** 单选 K 线模式是否开启 */
   isPickMode: () => boolean;
-  /** 连线测量模式：第一击吸附最低点，第二击吸附最高点，测算区间涨跌幅 */
+  /** 连线测量模式：点击时按光标位置就近吸附该根 K 线的高点或低点 */
   setMeasureMode: (on: boolean) => void;
   /** 连线测量模式是否开启 */
   isMeasureMode: () => boolean;
@@ -2059,7 +2061,7 @@ export function mountKline(el: HTMLElement): KlineChartHandle {
   let lastSel: RangeStats | null = null;
   /* 单选 K 线模式：默认关闭（点击只移动十字光标，不选单根）；勾选后点击才选中 */
   let pickMode = false;
-  /* 连线测量模式：第一击吸附最低点 → 第二击吸附最高点 → 算涨跌幅（与框选/单选互斥） */
+  /** 连线测量模式：点击时按光标纵向位置取最近的高点或低点（与框选/单选互斥） */
   let measureMode = false;
 
   /* ── 浮动信息卡：跟随十字光标，边缘翻转避让 ── */
@@ -2386,13 +2388,13 @@ export function mountKline(el: HTMLElement): KlineChartHandle {
   el.addEventListener("mousemove", onSelMove, true);
   el.addEventListener("mouseup", onSelUp, true);
 
-  /* ── 连线测量（低点 → 高点）：第一击吸附该根最低点，移动预览、第二击吸附另一根最高点，
-   *  然后卡上给出 (高点B - 低点A) / 低点A 的区间涨跌幅。
+  /* ── 连线测量：每一击都按光标纵向位置就近取该根 K 线的高点或低点，
+   *  移动预览、第二击落点后给出 (终点 - 起点) / 起点 的区间涨跌幅。
    *  交互层自己做（canvas 覆盖层 + 独立鼠标捕获），不依赖 klinecharts 的绘图工具：
    *  缩放/平移/尺寸变化时按日期重新定位重绘，盘中轮询重灌数据也不丢锚点。 */
-  let mFrom: { date: string; low: number } | null = null;
-  let mTo: { date: string; high: number } | null = null;
-  let mHover: { date: string; high: number } | null = null;
+  let mFrom: MPoint | null = null;
+  let mTo: MPoint | null = null;
+  let mHover: MPoint | null = null;
   const mcv = document.createElement("canvas");
   mcv.className = "kl-measure";
   mcv.style.display = "none";
@@ -2430,8 +2432,8 @@ export function mountKline(el: HTMLElement): KlineChartHandle {
     mctx.setTransform(dpr, 0, 0, dpr, 0, 0);
     mctx.clearRect(0, 0, w, h);
     const end = mTo ?? mHover;
-    const p1 = mFrom ? mPx(mFrom.date, mFrom.low) : null;
-    const p2 = end ? mPx(end.date, end.high) : null;
+    const p1 = mFrom ? mPx(mFrom.date, mFrom.value) : null;
+    const p2 = end ? mPx(end.date, end.value) : null;
     if (!mFrom || !end || !p1 || !p2) {
       mcv.style.display = "none";
       mtip.style.display = "none";
@@ -2458,18 +2460,19 @@ export function mountKline(el: HTMLElement): KlineChartHandle {
       mctx.stroke();
     });
     mctx.restore();
-    const diff = end.high - mFrom.low;
-    const pct = mFrom.low ? (diff / mFrom.low) * 100 : 0;
+    const diff = end.value - mFrom.value;
+    const pct = mFrom.value ? (diff / mFrom.value) * 100 : 0;
     const cls = pct >= 0 ? "up" : "down";
+    const tag = (k: "high" | "low"): string => (k === "low" ? "低" : "高");
     mtip.innerHTML =
       `<div class="t">${esc(mFrom.date)} → ${esc(end.date)}</div>` +
       `<div class="grp"><span>涨跌幅<b class="num ${cls}">${pct >= 0 ? "+" : ""}${pct.toFixed(2)}%</b></span>` +
       `<span>价差<b class="num ${cls}">${sgn(diff)}</b></span></div>` +
-      `<div class="grp"><span>低<b class="num">${mFrom.low.toFixed(2)}</b></span>` +
-      `<span>高<b class="num">${end.high.toFixed(2)}</b></span></div>` +
+      `<div class="grp"><span>起·${tag(mFrom.kind)}<b class="num">${mFrom.value.toFixed(2)}</b></span>` +
+      `<span>止·${tag(end.kind)}<b class="num">${end.value.toFixed(2)}</b></span></div>` +
       (mTo
         ? `<div class="st-f">点击另一根 K 线重新测量 · ESC 清除</div>`
-        : `<div class="st-f">再点击另一根 K 线取最高点</div>`);
+        : `<div class="st-f">再点击另一根 K 线取最近的高/低点</div>`);
     mtip.style.display = "block";
     const tw = mtip.offsetWidth, th = mtip.offsetHeight;
     const flipX = p2.x + 14 + tw > w;
@@ -2487,12 +2490,18 @@ export function mountKline(el: HTMLElement): KlineChartHandle {
     mctx.clearRect(0, 0, mcv.width, mcv.height);
   };
 
-  /** 像素 x → 该根 K 线（主图按列命中，未来空白区返回 null） */
-  const mBarAt = (x: number): Bar | null => {
+  /** 像素坐标 → 该根 K 线最近的高点/低点（比较光标到两端的纵向像素距离；未来空白区返回 null） */
+  const mBarHit = (x: number, y: number): MPoint | null => {
     const di = diOfX(x);
     if (di == null) return null;
     const list = chart.getDataList() as unknown as Bar[];
-    return di >= 0 && di < list.length ? list[di] : null;
+    const bar = list[di];
+    if (!bar) return null;
+    const hi = mPx(bar.date, bar.high);
+    const lo = mPx(bar.date, bar.low);
+    if (!hi || !lo) return null;
+    const kind: "high" | "low" = Math.abs(y - lo.y) <= Math.abs(y - hi.y) ? "low" : "high";
+    return { date: bar.date, value: kind === "low" ? bar.low : bar.high, kind };
   };
 
   const onMDown = (e: MouseEvent) => {
@@ -2501,17 +2510,16 @@ export function mountKline(el: HTMLElement): KlineChartHandle {
     const rect = el.getBoundingClientRect();
     const x = e.clientX - rect.left, y = e.clientY - rect.top;
     if (!pane || y < pane.top || y > pane.top + pane.height) return;
-    const bar = mBarAt(x);
-    if (!bar) return;
+    const hit = mBarHit(x, y);
+    if (!hit) return;
     e.preventDefault(); e.stopPropagation();          // 拦截图表平移
-    const date = bar.date;
     if (mFrom && !mTo) {
-      // 第二击：吸附这根的最高点，测量成立
-      mTo = { date, high: bar.high };
+      // 第二击：落点，测量成立
+      mTo = hit;
       mHover = null;
     } else {
-      // 第一击（或已完成后重新测量）：吸附这根的最低点
-      mFrom = { date, low: bar.low };
+      // 第一击（或已完成后重新测量）：起点
+      mFrom = hit;
       mTo = null;
       mHover = null;
     }
@@ -2520,9 +2528,9 @@ export function mountKline(el: HTMLElement): KlineChartHandle {
   const onMMove = (e: MouseEvent) => {
     if (!measureMode || !mFrom || mTo) return;
     const rect = el.getBoundingClientRect();
-    const bar = mBarAt(e.clientX - rect.left);
-    if (!bar || mHover?.date === bar.date) return;
-    mHover = { date: bar.date, high: bar.high };      // 预览也吸附悬停这根的最高点
+    const hit = mBarHit(e.clientX - rect.left, e.clientY - rect.top);
+    if (!hit || (mHover?.date === hit.date && mHover?.kind === hit.kind)) return;
+    mHover = hit;                                     // 预览同样就近吸附高/低点
     drawMeasure();
   };
   el.addEventListener("mousedown", onMDown, true);
