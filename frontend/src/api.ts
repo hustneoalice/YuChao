@@ -95,7 +95,7 @@ export const meApi = {
     req<{ items: CardItem[] }>("/me/cards", { method: "PUT", body: { items } }),
   /* F11 · 大模型 BYOK（key 永不回显，仅 key_set 布尔） */
   llm: () => req<LlmCfg>("/me/llm"),
-  putLlm: (p: { base_url?: string; api_key?: string; model?: string; enabled?: boolean }) =>
+  putLlm: (p: { base_url?: string; api_key?: string; model?: string; enabled?: boolean; prompt?: string }) =>
     req<LlmCfg>("/me/llm", { method: "PUT", body: p }),
   testLlm: (p?: { base_url?: string; api_key?: string; model?: string }) =>
     req<TestResult>("/me/llm/test", { method: "POST", body: p ?? {} }),
@@ -110,7 +110,10 @@ export const meApi = {
     req<TestResult>("/me/feishu/targets/push", { method: "POST", body: {} }),
 };
 
-export interface LlmCfg { base_url: string; model: string; enabled: boolean; key_set: boolean }
+export interface LlmCfg {
+  base_url: string; model: string; enabled: boolean; key_set: boolean;
+  prompt: string; prompt_default: string;
+}
 export interface FeishuCfg {
   enabled: boolean; webhook_set: boolean; has_secret: boolean;
   push_enabled: boolean; push_times: string[];
@@ -447,6 +450,8 @@ export const corepicksApi = {
 export interface DataStatus {
   stage: "uninitialized" | "initializing" | "ready" | "updating" | "update_failed";
   duckdb_path: string;
+  /** 是否交易日（周末 / 法定节假日为 false；后端按交易日历判定） */
+  trading_day?: boolean;
   tables: { table: string; rows?: number; latest_date?: string; earliest_date?: string;
     coverage?: number | null; cycle?: string; expected?: string | null;
     fresh?: "ok" | "warn" | "bad"; fresh_badge?: string; fresh_note?: string }[];
@@ -539,10 +544,17 @@ export interface AiStreamHandlers {
   onWarn?: (m: string) => void;
   onMeta?: (m: AiStreamMeta) => void;
 }
+export interface AiIndicator {
+  key: string; label: string; where: "main" | "sub";
+  aliases: string[]; supported: boolean;
+}
 
 export const aiApi = {
   chat: (q: string, symbol?: string, model?: string) =>
     req<AiAnswer>("/ai/chat", { method: "POST", body: { q, symbol: symbol || null, model: model || null } }),
+  /** 指标目录：聊天框用于识别「打开/关闭/查数值」指令 */
+  indicators: () =>
+    req<{ items: AiIndicator[]; defaults: string[]; count: number }>("/ai/indicators"),
   /** SSE 流式问股：thinking 推理流 / tool 调用卡 / token 正文 / answer 整段 / meta 收尾 */
   chatStream: async (q: string, symbol: string | undefined,
                       h: AiStreamHandlers, model?: string,

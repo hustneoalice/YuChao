@@ -59,3 +59,28 @@ register(ToolSpec(
     source="market_snapshot（东财快照）",
     freshness="ohlcv",
 ), stock_quote)
+
+
+def indicator_snapshot(conn, symbol: str, keys=None) -> dict:
+    """技术指标最新值与状态（趋势柱线/MACD/KDJ/短线趋势等）。
+
+    keys 可传列表或逗号串；缺省取常用组合。个股/ETF/指数均按日线 qfq 计算。
+    """
+    from . import indicators as _ind    # 延迟导入：避免 tools ↔ indicators 循环
+
+    if isinstance(keys, str):
+        keys = [k.strip() for k in keys.replace("，", ",").split(",") if k.strip()]
+    return _ind.snapshot(conn, symbol, list(keys or []))
+
+
+register(ToolSpec(
+    id="indicator_snapshot",
+    name="技术指标",
+    cat="指标",
+    desc="查询个股/ETF/指数的最新指标数值与状态（趋势柱线、短线/中线趋势、MACD、KDJ、RSI、BOLL、DKX、六段等）",
+    params={"symbol": "代码（个股 6 位 / 指数 000001.SH）",
+            "keys": "指标 key 列表，可省略（默认常用组合）"},
+    returns="{ok,symbol,name,data_date,items:[{key,label,value,state,...}]}",
+    source="daily_ohlcv + foundation.ta 本地计算",
+    freshness="ohlcv",
+), indicator_snapshot)

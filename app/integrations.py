@@ -45,6 +45,9 @@ def put_llm(user_id: str, patch: dict) -> dict:
         new["api_key"] = key.strip()
     if patch.get("enabled") is not None:
         new["enabled"] = bool(patch["enabled"])
+    prompt = patch.get("prompt")
+    if prompt is not None:                 # None=不改；""=恢复默认（服务端用内置提示词）
+        new["prompt"] = str(prompt)[:8000]
     service.put_prefs(user_id, {"llm": new})
     return new
 

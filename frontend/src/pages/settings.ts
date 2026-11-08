@@ -615,6 +615,12 @@ async function renderLlm(body: HTMLElement): Promise<void> {
     `<div class="setrow"><span class="lab">启用</span><div class="ctl">` +
     `<span class="switch${cfg.enabled ? " on" : ""}" id="llm-sw"><i></i></span>` +
     `<span style="font-size:11px;color:var(--faint)">启用后 Agent 中心等模块才能调用</span></div></div>` +
+    `<div class="setrow"><span class="lab">问答提示词</span><div class="ctl" style="flex-direction:column;align-items:stretch;gap:6px">` +
+    `<textarea class="field" id="llm-prompt" rows="6" spellcheck="false" style="width:100%;min-height:140px;resize:vertical;font-family:ui-monospace,SFMono-Regular,Menlo,monospace;font-size:12px;line-height:1.6" placeholder="${esc(cfg.prompt_default)}">${esc(cfg.prompt)}</textarea>` +
+    `<div style="display:flex;align-items:center;gap:8px;font-size:11px;color:var(--faint)">` +
+    `<button class="hbtn" id="llm-prompt-reset" type="button">恢复默认</button>` +
+    `<span id="llm-prompt-state">${cfg.prompt ? "已自定义" : "当前为默认提示词"}</span>` +
+    `<span class="sp"></span><span>留空 = 使用默认；数值一律由本地指标接口计算，模型只选工具和组织语言</span></div></div></div>` +
     `<div class="setrow"><span class="lab"></span><div class="ctl">` +
     `<button class="hbtn primary" id="llm-save">保存</button>` +
     `<button class="hbtn" id="llm-test">测试连通</button></div></div>` +
@@ -625,6 +631,16 @@ async function renderLlm(body: HTMLElement): Promise<void> {
     enabled = !enabled;
     (e.currentTarget as HTMLElement).classList.toggle("on", enabled);
   });
+  const promptEl = document.getElementById("llm-prompt") as HTMLTextAreaElement;
+  const promptState = document.getElementById("llm-prompt-state")!;
+  const syncPromptState = () => {
+    promptState.textContent = promptEl.value.trim() ? "已自定义" : "留空将使用默认提示词";
+  };
+  promptEl.addEventListener("input", syncPromptState);
+  document.getElementById("llm-prompt-reset")!.addEventListener("click", () => {
+    promptEl.value = "";
+    syncPromptState();
+  });
   document.getElementById("llm-save")!.addEventListener("click", async () => {
     try {
       await meApi.putLlm({
@@ -632,6 +648,8 @@ async function renderLlm(body: HTMLElement): Promise<void> {
         api_key: (document.getElementById("llm-key") as HTMLInputElement).value.trim() || undefined,
         model: (document.getElementById("llm-model") as HTMLInputElement).value.trim() || undefined,
         enabled,
+        // "" 不是 undefined：显式清空 = 恢复后端默认提示词
+        prompt: promptEl.value.trim(),
       });
       toast("大模型配置已保存");
       document.dispatchEvent(new CustomEvent("yc:llm-changed"));
@@ -670,10 +688,18 @@ function bjHHMM(): number {
   const bj = new Date(Date.now() + (new Date().getTimezoneOffset() + 480) * 60_000);
   return bj.getHours() * 100 + bj.getMinutes();
 }
+/** 是否交易日：先用周末兜底，/data/status 返回后按后端交易日历（含法定节假日）校正 */
+let mktTradingDay = (() => {
+  const bj = new Date(Date.now() + (new Date().getTimezoneOffset() + 480) * 60_000);
+  const wd = bj.getDay();
+  return wd >= 1 && wd <= 5;
+})();
 /** market_snapshot 按时段换词：15:05 后收盘快照还会补一轮（expected_asof 15:10 才切
- *  当日），顶着「盘中行情」跑到 15:2x，盘后看着像还在盘中（2026-11-03 反馈）。 */
+ *  当日），顶着「盘中行情」跑到 15:2x，盘后看着像还在盘中（2026-11-03 反馈）。
+ *  周末/节假日没有盘中：一律「休市补采」，别在休市日报盘中（2026-11-08 反馈）。 */
 const plainLabel = (kind: string, label: string): string => {
   if (kind === "market_snapshot") {
+    if (!mktTradingDay) return "休市补采";
     const hhmm = bjHHMM();
     return hhmm >= 925 && hhmm < 1505 ? "盘中行情" : hhmm < 925 ? "盘前行情" : "收盘行情";
   }
@@ -701,6 +727,12 @@ export async function refreshDatachip(): Promise<void> {
   let face: ChipFace;
   try {
     const st = await dataApi.status();
+    if (typeof st.trading_day === "boolean") {
+      if (mktTradingDay !== st.trading_day) {
+        mktTradingDay = st.trading_day;
+        void refreshUpChip();   // 交易日口径变了（周末 / 节假日），更新中的文案要跟着改
+      }
+    }
     // 「更新至」只认已收盘的日级数据（YYYY-MM-DD）。盘中快照那列是带时刻的
     // （如 2026-11-02 15:12），直接取 max 会把它排到最后，看起来像「盘后没更新、
     // 卡在 15 点」——快照本身收盘后就该停，日线要等 17:00 链位。

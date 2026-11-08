@@ -122,6 +122,7 @@ let linkStock: { symbol: string; name: string } | null = null;  // 分时图头�
 let linkToken = 0;                       // 竞态守卫：快速连点只认最后一次
 let autoLink = true;                     // 首次进页 / 切 tab：自动联动第一行，右栏不留空
 let navRows: { symbol: string; name: string }[] = [];   // 左表当前行（顺序同 tbody），上下键/双击用
+let memRows: { symbol: string; name: string }[] = [];   // 成分股表当前行（双击跳行情页用）
 let selIdx = -1;                         // 左表选中行下标（键盘翻阅 + 行高亮）
 let listKey = "";                        // 列表身份（tab/页码/排序/搜索）：换列表时清选中
 let pendingSel: "first" | "last" | null = null;  // 键盘翻页续选：新一页渲染后选中首/末行
@@ -268,7 +269,7 @@ function ensureTable(): void {
       defaultSort: { label: "涨跌幅", dir: -1 },
       onChange: () => {
         const t = tbl as unknown as DataTable<IndexBarItem>;
-        t.render(t.sort(indexQuery()), 0);
+        t.render(t.sort(indexItems), 0);
       },
       onRow: (it, _ev, tr) => {
         selIdx = rowIndexOf(tr);
@@ -337,12 +338,10 @@ function syncHead(): void {
   const inBlocks = tab === "block";
   document.getElementById("pan-btypes")!.hidden = !inBlocks;
   document.getElementById("pan-members")!.hidden = !inBlocks;
+  // 搜索统一走顶栏（结果选中即直达详情页），本页不再保留筛选框
   const back = document.getElementById("pan-parent") as HTMLButtonElement;
   back.hidden = !inBlocks || !blockParent;
   back.textContent = blockParent ? `← 一级行业 · ${blockParent.name}` : "";
-  // 搜索框语义随模式切换：板块模式只筛板块名
-  const q = document.getElementById("pan-q") as HTMLInputElement;
-  q.placeholder = inBlocks ? "搜板块名称" : tab === "index" ? "搜指数名称" : "搜代码 / 名称";
 }
 
 async function load(): Promise<void> {
@@ -352,11 +351,10 @@ async function load(): Promise<void> {
   try {
     if (!pager) pager = createPager(document.getElementById("pan-pager")!, "panorama", () => void load());
     ensureTable();
-    const q = (document.getElementById("pan-q") as HTMLInputElement).value.trim() || undefined;
     const r = await marketApi.board({
-      tab, sort: sortParam(), page: pager.page, size: pager.size, q,
+      tab, sort: sortParam(), page: pager.page, size: pager.size,
     });
-    const key = `${tab}|${pager.page}|${sortParam()}|${q ?? ""}`;
+    const key = `${tab}|${pager.page}|${sortParam()}`;
     if (key !== listKey) { listKey = key; selIdx = -1; }
     pager.update(r.total);
     (tbl as DataTable<BoardRow>).render(r.items, (pager.page - 1) * pager.size);
@@ -384,9 +382,8 @@ async function loadBlocks(): Promise<void> {
   try {
     if (!blkPager) blkPager = createPager(document.getElementById("pan-pager")!, "panorama_blocks", () => void loadBlocks());
     ensureTable();
-    const q = (document.getElementById("pan-q") as HTMLInputElement).value.trim() || undefined;
     const r = await marketApi.zyBlocks({
-      type_code: blockType, sort: blockSortParam(), page: blkPager.page, size: blkPager.size, q,
+      type_code: blockType, sort: blockSortParam(), page: blkPager.page, size: blkPager.size,
       parent_code: blockParent?.code,
     });
     if (revision !== blockRevision || tab !== "block") return;
@@ -422,6 +419,7 @@ async function loadMembers(): Promise<void> {
   if (!curBlock) {
     memTbl!.render([], 0);
     memPager?.update(0);
+    memRows = [];
     title.textContent = "成分股";
     count.textContent = "";
     return;
@@ -434,6 +432,7 @@ async function loadMembers(): Promise<void> {
     if (revision !== memberRevision || curBlock?.code !== code || tab !== "block") return;
     memPager!.update(r.total);
     memTbl!.render(r.items, (memPager!.page - 1) * memPager!.size);
+    memRows = r.items.map((it) => ({ symbol: it.symbol, name: it.name || it.symbol }));
     title.textContent = `成分股 · ${curBlock.name}`;
     count.textContent = `共 ${r.total} 只`;
     if (autoLink && r.items.length) {
@@ -457,21 +456,14 @@ const INDEX_COLS: DataTableCol<IndexBarItem>[] = [
   { label: "成交额", num: true, sort: "amount", render: (r) => fmtYi(r.amount) },
 ];
 
-function indexQuery(): IndexBarItem[] {
-  const q = (document.getElementById("pan-q") as HTMLInputElement).value.trim().toLowerCase();
-  if (!q) return indexItems;
-  return indexItems.filter((it) => it.symbol.toLowerCase().includes(q) || it.name.toLowerCase().includes(q));
-}
-
 async function loadIndices(): Promise<void> {
   const count = document.getElementById("pan-count")!;
   try {
     ensureTable();
     indexItems = await marketApi.indexBar();
-    const shown = indexQuery();
     const t = tbl as unknown as DataTable<IndexBarItem>;
-    const rows = t.sort(shown);
-    const key = `index|${(document.getElementById("pan-q") as HTMLInputElement).value.trim()}`;
+    const rows = t.sort(indexItems);
+    const key = "index";
     if (key !== listKey) { listKey = key; selIdx = -1; }
     t.render(rows, 0);
     navRows = rows.map((it) => ({ symbol: it.symbol, name: it.name }));
@@ -482,9 +474,9 @@ async function loadIndices(): Promise<void> {
     }
     paintSelection();
     applyPending();
-    count.textContent = `共 ${shown.length} 个指数`;
+    count.textContent = `共 ${rows.length} 个指数`;
     document.getElementById("pan-asof")!.textContent = "";
-    document.getElementById("pan-empty")!.style.display = shown.length ? "none" : "grid";
+    document.getElementById("pan-empty")!.style.display = rows.length ? "none" : "grid";
   } catch {
     count.textContent = "加载失败";
   }
@@ -570,14 +562,6 @@ export function initPanorama(): void {
     blkPager?.reset();
     void loadBlocks();
   });
-  let deb: ReturnType<typeof setTimeout> | null = null;
-  document.getElementById("pan-q")!.addEventListener("input", () => {
-    if (deb) clearTimeout(deb);
-    deb = setTimeout(() => {
-      if (tab === "block") { blkPager?.reset(); void loadBlocks(); }
-      else { pager?.reset(); void load(); }
-    }, 300);
-  });
 
   // 上下键翻阅左表 → 行选中 + 右栏联动（输入框内不抢键；到页尾翻页续选）
   document.addEventListener("keydown", (e) => {
@@ -620,6 +604,17 @@ export function initPanorama(): void {
     if (!row) return;                      // 板块/空态行：无个股可跳
     selIdx = rowIndexOf(tr);
     paintSelection();
+    document.dispatchEvent(new CustomEvent("yc:open-stock", {
+      detail: { symbol: row.symbol, name: row.name, from: { page: "panorama", label: "全景" } },
+    }));
+  });
+
+  // 板块监测下方「成分股」表：双击个股同样进行情页
+  document.getElementById("pan-mem")!.addEventListener("dblclick", (e) => {
+    const tr = (e.target as HTMLElement).closest<HTMLElement>("tbody tr");
+    if (!tr) return;
+    const row = memRows[rowIndexOf(tr)];
+    if (!row) return;
     document.dispatchEvent(new CustomEvent("yc:open-stock", {
       detail: { symbol: row.symbol, name: row.name, from: { page: "panorama", label: "全景" } },
     }));

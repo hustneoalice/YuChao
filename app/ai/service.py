@@ -11,15 +11,19 @@ import time
 from typing import Any, Optional
 
 from . import tools
+from ..foundation import indicator_catalog as ind_catalog
+from .indicators import format_snapshot
 
-SYSTEM_PROMPT = """你是驭潮的 A 股数据助手，只回答个股行情、财务与本地数据相关问题。
+SYSTEM_PROMPT = """你是驭潮的 A 股数据助手，只回答个股/ETF/指数行情、技术指标与本地数据相关问题。
 
 铁律：
 1. 任何数字必须来自工具返回，工具没给就说"本地未收录"，绝不推测。
-2. 回答末尾标注数据日期（取自返回的 trade_date / updated_at）。
-3. 用户没说代码时，先确认是哪只票；上下文已给出标的就直接用。
-4. 不复述 JSON，用简短中文；一次最多 3 句话。
-5. 超出能力范围（预测、内幕、投资建议）明确说"当前不具备"。
+2. 回答末尾标注数据日期（取自返回的 trade_date / updated_at / data_date）。
+3. 用户没说代码时，先确认是哪只标的；上下文已给出标的就直接用。
+4. 技术指标问题（趋势柱线、短线/中线趋势、MACD、KDJ、RSI、BOLL、DKX、六段等）必须先调用 indicator_snapshot 取数，禁止自己计算或估计指标值。
+5. 指标 key 只能从工具返回的 items 里选（short/mid/trendhistogram/macd/kdj/rsi/boll/dkx/sixseg/ma…），不要臆造指标名。
+6. 不复述 JSON，用简短中文；一次最多 3 句话。
+7. 超出能力范围（预测、内幕、投资建议）明确说"当前不具备"。
 """
 
 # 本地答不上来时的补答提示：描述性内容允许用模型常识，但必须标注来源、禁止编数字
@@ -36,14 +40,25 @@ KNOWLEDGE_PROMPT = """你是驭潮的 A 股数据助手，本地数据只是补�
 _PROFILE_KW = ("主营", "做什么", "干什么", "业务", "靠什么", "公司是", "产品", "行业", "简介")
 _QUOTE_KW = ("多少", "现价", "价格", "收盘", "涨", "跌", "成交", "换手")
 _ANALYZE_KW = ("分析", "怎么样", "如何看", "点评", "研判")
-_CODE_RE = re.compile(r"(?<!\d)(\d{6})(?!\d)")
+# 「要解读/要判断/要理由」这类描述性问题：规则只能给数值，语义解读交给模型；
+# 单纯问值（多头吗、多少、金叉没）仍走规则，避免每次问指标都烧模型额度。
+_DEEP_KW = ("分析", "判断", "理由", "为什么", "怎么看", "如何看", "点评", "研判",
+            "解读", "复盘", "综合", "结合", "对比", "建议", "评价", "走势",
+            "强势", "弱势", "风险", "机会", "后市")
+
+
+def wants_deep_answer(question: str) -> bool:
+    """是否值得让模型做语义解读：出现分析类词，且不是「关/开指标」这类操作指令。"""
+    return any(w in question for w in _DEEP_KW)
+
+_CODE_RE = re.compile(r"(?<!\d)(\d{6}(?:\.(?:SH|SZ|BJ))?)(?![\d.])")
 
 
 def resolve_symbol(conn, question: str, ctx_symbol: Optional[str]) -> tuple[Optional[str], list[dict]]:
-    """解析标的：显式代码 > 显式名称 > 页面上下文；名称模糊时返回候选。"""
+    """解析标的：显式代码（含指数后缀）> 显式名称 > 页面上下文；名称模糊时返回候选。"""
     m = _CODE_RE.search(question)
     if m:
-        return m.group(1), []
+        return m.group(1).upper(), []
     rows = conn.execute(
         "SELECT symbol, name FROM stock_universe WHERE name IS NOT NULL"
     ).fetchall()
@@ -110,6 +125,22 @@ def rule_answer(conn, question: str, symbol: str) -> dict:
     parts: list[str] = []
     missing: list[str] = []
     data_date: Optional[str] = None
+
+    # ── 技术指标：命中具体指标名，或出现"指标/趋势/金叉"等泛词 → 指标快照优先 ──
+    keys = ind_catalog.expand_all(question) or ind_catalog.match_keys(question)
+    if not keys and any(w in question for w in ind_catalog.GENERIC_WORDS):
+        keys = [k for k in ind_catalog.DEFAULT_KEYS]
+    if keys:
+        t0 = time.time()
+        snap = tools.indicator_snapshot(conn, symbol, keys)
+        calls.append({"tool": "indicator_snapshot",
+                      "args": {"symbol": symbol, "keys": keys},
+                      "ms": int((time.time() - t0) * 1000),
+                      "data_date": snap.get("data_date"),
+                      "rows": len(snap.get("items") or [])})
+        return {"answer": format_snapshot(snap), "tool_calls": calls,
+                "missing": [] if snap.get("ok") else ["indicator_snapshot"],
+                "data_date": snap.get("data_date")}
 
     has_profile = any(k in question for k in _PROFILE_KW)
     has_quote = any(k in question for k in _QUOTE_KW)
@@ -216,7 +247,8 @@ def llm_answer(conn, question: str, symbol: Optional[str], cfg: dict,
                       provider=OpenAIProvider(openai_client=client))
 
     calls: list[dict] = []
-    agent = Agent(model, system_prompt=KNOWLEDGE_PROMPT if knowledge else SYSTEM_PROMPT)
+    system = str(cfg.get("prompt") or "").strip() or (KNOWLEDGE_PROMPT if knowledge else SYSTEM_PROMPT)
+    agent = Agent(model, system_prompt=system)
 
     @agent.tool_plain
     def get_stock_profile(symbol: str) -> dict:
@@ -247,6 +279,28 @@ def llm_answer(conn, question: str, symbol: Optional[str], cfg: dict,
                       "data_date": d.get("trade_date") or None, "rows": 1})
         return d
 
+    @agent.tool_plain
+    def get_indicator_snapshot(symbol: str, keys: list[str] | None = None) -> dict:
+        """查询技术指标最新值与状态（趋势柱线/短线趋势/MACD/KDJ/RSI/BOLL/DKX/六段等）。
+
+        symbol 支持个股 6 位、ETF 6 位、指数带后缀（如 000001.SH）。
+        keys 缺省为常用组合；可用 key：short, mid, trendhistogram, macd, kdj, rsi,
+        boll, dkx, sixseg, ma, ema, dmi, trix, emv, dma, bias, atr, vol, obv, vr,
+        wr, cci, roc, mtm, psy, wvad, brar, cr。
+        """
+        t0 = time.time()
+        c = open_conn()
+        try:
+            d = tools.indicator_snapshot(c, symbol, keys)
+        finally:
+            c.close()
+        calls.append({"tool": "indicator_snapshot",
+                      "args": {"symbol": symbol, "keys": keys},
+                      "ms": int((time.time() - t0) * 1000),
+                      "data_date": d.get("data_date"),
+                      "rows": len(d.get("items") or [])})
+        return d
+
     hint = f"\n（当前上下文标的：{symbol}，可直接查它）" if symbol else ""
     # pydantic-ai 2.x 的 run 是异步入口；同步请求线程里用 run_sync
     result = agent.run_sync(question + hint)
@@ -257,7 +311,11 @@ def llm_answer(conn, question: str, symbol: Optional[str], cfg: dict,
 
 
 def _rule_covered(conn, question: str, symbol: str) -> bool:
-    """规则是否明确理解问题：主营/行情/分析关键词，或只报了代码/名称。"""
+    """规则是否明确理解问题：主营/行情/指标关键词，或只报了代码/名称。"""
+    if ind_catalog.expand_all(question) or ind_catalog.match_keys(question):
+        return True
+    if any(w in question for w in ind_catalog.GENERIC_WORDS):
+        return True
     if any(k in question for k in _PROFILE_KW + _QUOTE_KW + _ANALYZE_KW):
         return True
     rest = _CODE_RE.sub("", question).replace(symbol, "")
@@ -284,8 +342,18 @@ def answer(conn, question: str, ctx_symbol: Optional[str],
                 "tool_calls": [], "candidates": [], "missing": [],
                 "warnings": [], "data_date": None}
 
-    out = rule_answer(conn, question, symbol)
     cfg = llm_config(user, model)
+    # 语义解读类问题（分析/判断/理由/强弱势）：规则只能报数值，直接交给模型选工具+组织语言
+    if cfg and wants_deep_answer(question):
+        try:
+            fb = llm_answer(conn, question, symbol, cfg)
+            return {"mode": "llm", "fallback": False, "answer": fb["answer"],
+                    "tool_calls": fb["tool_calls"], "missing": [], "warnings": warnings,
+                    "data_date": fb.get("data_date"), "candidates": []}
+        except Exception as e:  # 模型不可用不阻断：继续走规则快照
+            warnings.append(f"模型调用失败，已退回规则模式：{type(e).__name__}: {str(e)[:160]}")
+
+    out = rule_answer(conn, question, symbol)
     # 只有「主营业务等描述性资料缺失」才允许模型用常识补答；行情缺失不猜数字
     gap = any(str(m).startswith("stock_profile") for m in out["missing"]) \
         or not out["answer"].strip()

@@ -165,11 +165,8 @@ export function initQuickAsk(): void {
     input,
     send: document.getElementById("qa-send"),
     chipsList: QUICK_CHIPS,
-    // 只把纯 6 位代码当个股上下文，指数代码（如 000001.SH）不传，避免误判
-    context: () => {
-      const s = mk.cur?.symbol;
-      return s && STOCK_RE.test(s) ? s : undefined;
-    },
+    // 个股 / ETF / 指数都可作为上下文（指标问答支持指数带后缀）
+    context: () => mk.cur?.symbol || undefined,
     model: () => modelId,
     beforeAsk: () => { if (panel.hidden) setOpen(true); },
   });

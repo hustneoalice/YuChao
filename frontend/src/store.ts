@@ -8,9 +8,9 @@ export type CardPrefs = Record<string, CardPref>;
 export type RightTabId = "market" | "chips" | "depth" | "holder";
 /** 右侧抽屉的栏目：一个 tab 下可放多张卡片（CARD_DEFS.tab），后续可继续加 */
 export const RIGHT_TABS = [
+  { id: "depth", name: "盘口" },
   { id: "market", name: "看盘" },
   { id: "chips", name: "筹码" },
-  { id: "depth", name: "盘口" },
   { id: "holder", name: "股东" },
 ] as const;
 

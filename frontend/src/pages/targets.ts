@@ -228,7 +228,7 @@ function segCycle(): { bars: Bar[]; segs: number[]; base: number; label: string 
       if (++want === 7) { end = i; break; }
     }
     if (end < 0 || end - start < 18) continue;
-    const a = Math.max(0, start - 4), b = Math.min(raw.length, end + 3);
+    const a = Math.max(0, start - 10), b = Math.min(raw.length, end + 3);
     return {
       bars: raw.slice(a, b), segs: all.slice(a, b), base: start - a,
       label: `${SEG_SAMPLE.name} ${SEG_SAMPLE.symbol.slice(0, 6)} · ${raw[a].date} → ${raw[b - 1].date}`,
@@ -246,15 +246,29 @@ function segMapSvg(): string {
   const pal = trendPalette();
   const { bars, segs, base } = data;
   const n = bars.length;
-  const X0 = 26, X1 = 566, Y0 = 16, Y1 = 232, TX = 592;
-  const PW = X1 - X0, PH = Y1 - Y0, step = PW / n;
+  /* 与目标页缩略图同款结构：上半 K 线 + 短线趋势线，下半趋势柱 + 零轴 */
+  const X0 = 26, X1 = 604, TX = 618;
+  const Y0 = 14, Y1 = 182, H0 = 200, H1 = 258;
+  const PW = X1 - X0, step = PW / n;
   const xAt = (i: number): number => X0 + (i + 0.5) * step;
   let lo = Infinity, hi = -Infinity;
   bars.forEach((b) => { lo = Math.min(lo, b.low); hi = Math.max(hi, b.high); });
-  const pad = (hi - lo) * 0.05 || 0.1;
+  const pad = (hi - lo) * 0.06 || 0.1;
   lo -= pad; hi += pad;
-  const yAt = (v: number): number => Y1 - ((v - lo) / (hi - lo)) * PH;
-  const bw = Math.min(9, step * 0.62);
+  const yAt = (v: number): number => Y1 - ((v - lo) / (hi - lo)) * (Y1 - Y0);
+  const bw = Math.min(8, step * 0.62);
+
+  /* 0) 六段底色带：按各段实际区间铺淡色，作为标注底板 */
+  const bands: string[] = [];
+  let runStart = 0;
+  for (let i = 1; i <= n; i++) {
+    if (i < n && segs[i] === segs[runStart]) continue;
+    const seg = segs[runStart] || 1;
+    const xa = xAt(runStart) - step / 2, xb = xAt(i - 1) + step / 2;
+    bands.push(`<rect x="${xa.toFixed(1)}" y="${Y0}" width="${(xb - xa).toFixed(1)}"` +
+      ` height="${Y1 - Y0}" style="fill:${SEG_TINTS[seg - 1]}" opacity=".05"/>`);
+    runStart = i;
+  }
 
   /* 1) 真实 K 线：影线用 high/low，实体用开盘/收盘，阳/阴随主题涨跌色 */
   const candles = bars.map((b, i) => {
@@ -267,7 +281,7 @@ function segMapSvg(): string {
       ` rx="1" style="fill:${col}" opacity=".85"/>`;
   }).join("");
 
-  /* 2) 短线操盘：MA7 快 / MA10 慢，收盘站上慢线填多头色（与 K 线页趋势通道同判定） */
+  /* 2) 短线趋势线：MA10 慢线按「站上=橙 / 跌破=蓝」逐段着色，MA7 快线细灰线叠加 */
   const sma = (p: number): (number | null)[] => {
     let sum = 0;
     return bars.map((b, i) => {
@@ -277,35 +291,35 @@ function segMapSvg(): string {
     });
   };
   const fast = sma(7), slow = sma(10);
-  let channel = "";
-  for (let i = 0; i < n; i++) {
-    const f = fast[i], s = slow[i];
-    if (f == null || s == null) continue;
-    const c = bars[i].close >= s ? pal.fr : pal.sr;
-    const x = xAt(i);
-    channel += `<rect x="${(x - bw / 2 + 1).toFixed(1)}" y="${Math.min(yAt(f), yAt(s)).toFixed(1)}"` +
-      ` width="${(bw - 2).toFixed(1)}" height="${Math.max(1, Math.abs(yAt(f) - yAt(s))).toFixed(1)}"` +
-      ` style="fill:rgb(${c.join(",")})" opacity=".22"/>`;
-  }
-  /* 2.5) 短线趋势柱：收盘相对 MA10（慢线）的偏离，叠在 K 线之下——红多头 / 绿空头 */
-  let trendBars = "";
-  for (let i = 0; i < n; i++) {
-    const s = slow[i];
-    if (s == null) continue;
-    const y1 = yAt(s), y2 = yAt(bars[i].close);
-    const col = bars[i].close >= s ? "var(--up)" : "var(--down)";
-    trendBars += `<rect x="${(xAt(i) - bw / 2).toFixed(1)}" y="${Math.min(y1, y2).toFixed(1)}"` +
-      ` width="${bw.toFixed(1)}" height="${Math.max(1, Math.abs(y2 - y1)).toFixed(1)}"` +
-      ` rx="1" style="fill:${col}" opacity=".16"/>`;
-  }
-  const trendLine = (arr: (number | null)[], color: string): string => {
-    let d = "", out = "";
-    arr.forEach((v, i) => {
-      if (v == null) { if (d) { out += d; d = ""; } return; }
-      d += `${d ? " L" : "M"}${xAt(i).toFixed(1)} ${yAt(v).toFixed(1)}`;
-    });
-    return out + d ? `<path d="${out + d}" style="stroke:${color}" stroke-width="1.6" fill="none"/>` : "";
+  const strokeAt = (arr: (number | null)[], colorAt: (i: number) => string, w: number, alpha: number): string => {
+    let out = "";
+    for (let i = 1; i < n; i++) {
+      const a = arr[i - 1], b = arr[i];
+      if (a == null || b == null) continue;
+      out += `<line x1="${xAt(i - 1).toFixed(1)}" y1="${yAt(a).toFixed(1)}"` +
+        ` x2="${xAt(i).toFixed(1)}" y2="${yAt(b).toFixed(1)}"` +
+        ` style="stroke:${colorAt(i)}" stroke-width="${w}" opacity="${alpha}"/>`;
+    }
+    return out;
   };
+  const slowLine = strokeAt(slow, (i) => (bars[i].close >= (slow[i] as number) ? pal.fast : pal.slow), 1.7, .95);
+  const fastLine = strokeAt(fast, () => "var(--dim)", 1, .8);
+
+  /* 3) 趋势柱（收盘 − 慢线）：下半副图，零轴上红下绿 */
+  const histMid = (H0 + H1) / 2;
+  const dev = bars.map((b, i) => (slow[i] == null ? null : b.close - (slow[i] as number)));
+  const maxAbs = Math.max(1, ...dev.filter((v): v is number => v != null).map((v) => Math.abs(v)));
+  let hist = "";
+  for (let i = 0; i < n; i++) {
+    const v = dev[i];
+    if (v == null) continue;
+    const bh = Math.max(1, Math.abs(v) / maxAbs * (H1 - H0) / 2 - 1);
+    hist += `<rect x="${(xAt(i) - bw / 2).toFixed(1)}" y="${(v >= 0 ? histMid - bh : histMid).toFixed(1)}"` +
+      ` width="${bw.toFixed(1)}" height="${bh.toFixed(1)}" rx="1"` +
+      ` style="fill:${v >= 0 ? "var(--up)" : "var(--down)"}" opacity=".85"/>`;
+  }
+  const histAxis = `<line x1="${X0}" y1="${histMid}" x2="${X1}" y2="${histMid}" style="stroke:var(--axis)" stroke-width="1"/>` +
+    `<text x="${X0 - 4}" y="${(histMid + 3.5).toFixed(1)}" text-anchor="end" style="fill:var(--faint)" font-size="9.5">0</text>`;
 
   /* 3) 六段分别拉线：钉在该段首次出现的收盘，右侧标注段名 + 操作含义 */
   const marks: { seg: number; idx: number; x: number; y: number }[] = [];
@@ -315,7 +329,7 @@ function segMapSvg(): string {
   }
   // 右侧固定按 1→6 自上而下排，阅读顺序即理论循环顺序；拉线从各段首次出现点连过去
   const leads = marks.map((m) => {
-    const ly = Y0 + 12 + (m.seg - 1) * ((PH - 26) / 5);
+    const ly = Y0 + 12 + (m.seg - 1) * ((Y1 - Y0 - 26) / 5);
     const tint = SEG_TINTS[m.seg - 1];
     return `<line x1="${(m.x + 3).toFixed(1)}" y1="${m.y.toFixed(1)}" x2="${TX - 6}" y2="${ly.toFixed(1)}"` +
       ` style="stroke:${tint}" stroke-width="1" stroke-dasharray="4 3" opacity=".55"/>` +
@@ -331,13 +345,13 @@ function segMapSvg(): string {
   const last = `<circle cx="${lx.toFixed(1)}" cy="${ly.toFixed(1)}" r="3.6" fill="none"` +
     ` style="stroke:var(--accent)" stroke-width="1.4"/>` +
     `<text x="${(lx - 7).toFixed(1)}" y="${(ly - 7).toFixed(1)}" text-anchor="end"` +
-    ` style="fill:var(--accent)" font-size="10.5">当前 · ${SEGFULL[cur]}</text>`;
+    ` style="fill:var(--accent)" font-size="10.5">当前</text>`;
 
-  return `<svg viewBox="0 0 880 250" role="img"` +
+  return `<svg viewBox="0 0 880 272" role="img"` +
     ` aria-label="六分段理论示意图：真实日 K 走完超跌、反弹、突破、超涨、回踩、跌破六个位置">` +
-    `${channel}${trendBars}${candles}${trendLine(fast, pal.fast)}${trendLine(slow, pal.slow)}${leads}${last}</svg>` +
-    `<div class="segmap-note">${esc(data.label)} · 日K（前复权）｜六段按短线趋势线判定` +
-    `（取最近一个完整六段循环）</div>`;
+    `${bands}${hist}${histAxis}${candles}${fastLine}${slowLine}${leads}${last}</svg>` +
+    `<div class="segmap-note">${esc(data.label)} · 日K（前复权）｜K 线 + 短线趋势线（MA7/MA10），` +
+    `下方为趋势柱（收盘−慢线）｜六段取最近一个完整循环｜当前段：${SEGFULL[cur]}</div>`;
 }
 
 function applySegMapState(): void {
@@ -357,10 +371,10 @@ function renderSegMap(): void {
   const pal = trendPalette();
   const lg = document.getElementById("tgt-segmap-lg");
   if (lg) {
-    lg.innerHTML = `<i style="background:${pal.fast}"></i>快线` +
-      `<i style="background:${pal.slow}"></i>慢线` +
-      `<i class="fill" style="background:rgba(${pal.fr.join(",")},.32)"></i>站上慢线 = 多头` +
-      `<i class="fill" style="background:linear-gradient(90deg,var(--up) 50%,var(--down) 50%)"></i>趋势柱 = 收盘与趋势线比较`;
+    lg.innerHTML = `<i style="background:${pal.fast}"></i>慢线站上（橙）` +
+      `<i style="background:${pal.slow}"></i>慢线跌破（蓝）` +
+      `<i style="background:var(--dim)"></i>快线 MA7` +
+      `<i class="fill" style="background:linear-gradient(90deg,var(--up) 50%,var(--down) 50%)"></i>趋势柱（收盘−慢线）`;
   }
   body.innerHTML = segMapSvg();
   applySegMapState();

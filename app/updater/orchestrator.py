@@ -31,6 +31,7 @@ from typing import Any, Callable, Dict, List, Optional
 
 from ..config import settings
 from ..stream.bus import StreamBus
+from .trading_calendar import is_trading_day
 from .util import expected_asof, now_cst
 from .writer import writer
 
@@ -315,6 +316,10 @@ class UpdateOrchestrator:
             time.sleep(seconds)
             if win is not None:
                 now = now_cst()
+                # 周末 / 法定节假日不提交：任务内部虽会幂等秒跳，但提交会空闪一次
+                # 「正在更新 · 盘中行情」，休市看着像还在盘中（2026-11-08 用户反馈）
+                if not is_trading_day(now):
+                    continue
                 if not (win[0] <= (now.hour, now.minute) <= win[1]):
                     continue
             try:

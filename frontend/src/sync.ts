@@ -32,6 +32,9 @@ function localPrefs(): Prefs {
     k_main: j<string[]>("yc_kmain", []),
     k_sub: j<string[]>("yc_ksub", []),
     k_indfav: j<string[]>("yc_indfav", []),   // ★ 常显指标（工具栏两行）：换浏览器/换端也要一致
+    // 绘图常显：本地未配置过就不上送（否则空数组会把「默认全显」覆盖成空工具栏）
+    ...(localStorage.getItem("yc_linefav") != null
+      ? { k_linefav: j<string[]>("yc_linefav", []) } : {}),
   };
 }
 
@@ -50,6 +53,10 @@ function applyPrefs(p: Prefs): void {
     if (Array.isArray(p.k_main)) localStorage.setItem("yc_kmain", JSON.stringify(p.k_main));
     if (Array.isArray(p.k_sub)) localStorage.setItem("yc_ksub", JSON.stringify(p.k_sub));
     if (Array.isArray(p.k_indfav)) localStorage.setItem("yc_indfav", JSON.stringify(p.k_indfav));
+    // 空集合且本地从未配置过 → 保留默认（全部绘图工具常显）
+    if (Array.isArray(p.k_linefav)
+      && (p.k_linefav.length > 0 || localStorage.getItem("yc_linefav") != null))
+      localStorage.setItem("yc_linefav", JSON.stringify(p.k_linefav));
   } finally {
     endApply();
   }

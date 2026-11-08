@@ -17,4 +17,6 @@ class DataStatus(BaseModel):
     stage: str  # uninitialized | initializing | ready | updating | update_failed
     duckdb_path: str
     tables: List[TableStatus] = []
+    # 是否是交易日（周末/法定节假日为 False）；前端据此避免休市时显示「盘中行情」
+    trading_day: bool = True
     generated_at: datetime = Field(default_factory=datetime.now)

@@ -114,6 +114,7 @@ class LlmIn(BaseModel):
     api_key: Optional[str] = None            # None=不改；""=清除（永不回显）
     model: Optional[str] = None
     enabled: Optional[bool] = None
+    prompt: Optional[str] = None             # 问答系统提示词；None=不改，""=恢复默认
 
 
 class LlmOut(BaseModel):
@@ -121,6 +122,8 @@ class LlmOut(BaseModel):
     model: str = ""
     enabled: bool = False
     key_set: bool = False                    # 只回「是否已配置」，不回 key 本体
+    prompt: str = ""                         # 当前自定义提示词（空=使用默认）
+    prompt_default: str = ""                 # 内置默认提示词，供「恢复默认」
 
 
 class LlmTestIn(BaseModel):

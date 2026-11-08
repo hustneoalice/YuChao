@@ -63,9 +63,12 @@ def put_cards(body: CardsIn, user: dict = Depends(_user)):
 # ── F11 · 大模型 BYOK（配置挂 prefs.llm，随 F04 云同步） ─────────────────
 
 def _llm_out(cfg: dict) -> LlmOut:
+    from ...ai.service import SYSTEM_PROMPT
     return LlmOut(base_url=cfg.get("base_url") or "", model=cfg.get("model") or "",
                   enabled=bool(cfg.get("enabled")),
-                  key_set=bool(cfg.get("api_key")))
+                  key_set=bool(cfg.get("api_key")),
+                  prompt=cfg.get("prompt") or "",
+                  prompt_default=SYSTEM_PROMPT)
 
 
 @router.get("/me/llm", response_model=LlmOut, summary="大模型 BYOK 配置（key 不回显）")

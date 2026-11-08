@@ -1,5 +1,6 @@
 /* 智能助手：问股对话 + 工具调用卡（页面与右下角浮框共用同一套渲染与请求） */
-import { aiApi, ApiError, type AiAnswer, type AiStreamMeta, type AiToolCall } from "../api";
+import { aiApi, ApiError, marketApi, meApi, type AiAnswer, type AiStreamMeta, type AiToolCall } from "../api";
+import { tryIndicatorCommand } from "./ai-ind";
 import { mk } from "./market";
 
 const PAGE_CHIPS = ["这只票做什么的", "主营业务是什么", "现在多少钱", "最近涨跌幅", "换手率多少"];
@@ -119,6 +120,16 @@ export function mountChat(o: ChatMountOptions): void {
     };
     scrollLog();
 
+    // 指标开关指令（打开/关闭 XX 指标）：本地直接执行，不占模型额度
+    const local = await tryIndicatorCommand(text);
+    if (local) {
+      txt.textContent = local;
+      tail.insertAdjacentHTML("beforeend",
+        `<div class="ai-meta">规则模式 · 本地指标指令</div>`);
+      scrollLog();
+      return;
+    }
+
     if (o.send) (o.send as HTMLButtonElement).disabled = true;
     busy = true;
     let body = "";
@@ -230,4 +241,59 @@ export function initAi(): void {
     mode.textContent = h.llm ? `模型模式 · ${h.model}` : "规则模式";
     mode.title = h.llm ? "" : "未配置模型：主营与行情问答仍可用";
   }).catch(() => { /* 未登录或后端未就绪时保持默认文案 */ });
+
+  /* ── 右侧盘面摘要（对齐设计稿）：真实数据，失败行显示「—」 ── */
+  document.getElementById("ai-clear")?.addEventListener("click", () => {
+    log.innerHTML = "";
+    input.focus();
+  });
+  document.querySelectorAll<HTMLElement>("[data-ask]").forEach((b) => {
+    b.addEventListener("click", () => {
+      input.value = b.dataset.ask || "";
+      form.requestSubmit();
+    });
+  });
+  syncAiCur();
+  void loadAiSide();
+  document.addEventListener("yc:open-stock", syncAiCur);
+}
+
+function fmtPct(v?: number | null): string {
+  if (v == null || !Number.isFinite(v)) return "—";
+  return `${v >= 0 ? "+" : ""}${v.toFixed(2)}%`;
+}
+function fmtAmount(v?: number | null): string {
+  if (v == null || !Number.isFinite(v)) return "—";
+  return v >= 1e8 ? `${(v / 1e8).toFixed(1)} 亿` : `${(v / 1e4).toFixed(0)} 万`;
+}
+function setTxt(id: string, v: string): void {
+  const el = document.getElementById(id);
+  if (el) el.textContent = v;
+}
+function syncAiCur(): void {
+  setTxt("ai-k-cur", mk.cur ? `${mk.cur.name} ${mk.cur.symbol}` : "未选择");
+}
+/** 今日盘面摘要：指数 / 成交额 / 涨跌停 / 最强行业 / 自选平均 */
+function loadAiSide(): Promise<void> {
+  void marketApi.indexBar().then((items) => {
+    const sh = items.find((i) => i.symbol.includes("000001"));
+    setTxt("ai-k-index", sh?.current != null ? `${sh.current.toFixed(2)} ${fmtPct(sh.change_rate)}` : "—");
+  }).catch(() => setTxt("ai-k-index", "—"));
+  void marketApi.breadth().then((b) => {
+    setTxt("ai-k-amount", fmtAmount(b.amount));
+    setTxt("ai-k-limit", `${b.limit_up} / ${b.limit_down}`);
+  }).catch(() => { /* 保留「—」 */ });
+  void marketApi.zyBlocks({ type_code: 4, sort: "-avg_change", page: 1, size: 1 })
+    .then((r) => {
+      const top = r.items[0];
+      setTxt("ai-k-sector", top ? `${top.block_name} ${fmtPct(top.avg_change)}` : "—");
+    }).catch(() => { /* 保留「—」 */ });
+  void meApi.watchlist().then(async (w) => {
+    const syms = w.items.map((i) => i.symbol).slice(0, 50);
+    if (!syms.length) { setTxt("ai-k-watch", "—"); return; }
+    const q = await marketApi.quotes(syms);
+    const vals = q.items.map((x) => x.pct_chg).filter((v): v is number => typeof v === "number");
+    setTxt("ai-k-watch", vals.length ? fmtPct(vals.reduce((a, b) => a + b, 0) / vals.length) : "—");
+  }).catch(() => setTxt("ai-k-watch", "—"));
+  return Promise.resolve();
 }

@@ -29,6 +29,14 @@ def list_tools():
     return {"items": registry.catalog(), "count": len(registry.specs())}
 
 
+@router.get("/ai/indicators")
+def indicators():
+    """指标目录：聊天框用于识别开关/问数指令（key 与前端 IND_DEFS 对齐）。"""
+    from ...foundation.indicator_catalog import catalog_public, DEFAULT_KEYS
+    items = catalog_public()
+    return {"items": items, "defaults": DEFAULT_KEYS, "count": len(items)}
+
+
 @router.get("/ai/health")
 def health(user: Optional[dict] = Depends(current_user)):
     cfg = service.llm_config(user)

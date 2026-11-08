@@ -26,6 +26,14 @@ TOOL_SPECS: list[dict] = [
         "description": "查询个股最新收盘价、涨跌幅、换手率与成交额。symbol 必须是 6 位股票代码。",
         "parameters": {"type": "object", "properties": {"symbol": {"type": "string"}},
                        "required": ["symbol"]}}},
+    {"type": "function", "function": {
+        "name": "get_indicator_snapshot",
+        "description": "查询个股/ETF/指数的最新技术指标数值与状态（趋势柱线、短线/中线趋势、MACD、KDJ、RSI、BOLL、DKX、六段等）。",
+        "parameters": {"type": "object", "properties": {
+            "symbol": {"type": "string", "description": "个股 6 位 / ETF 6 位 / 指数带后缀（000001.SH）"},
+            "keys": {"type": "array", "items": {"type": "string"},
+                     "description": "指标 key 列表，可省略；如 short/mid/trendhistogram/macd/kdj/rsi/boll/dkx/sixseg/ma"}},
+            "required": ["symbol"]}}},
 ]
 
 
@@ -54,7 +62,9 @@ def _prepare(question: str, ctx_symbol: Optional[str]) -> dict:
         gap = any(str(m).startswith("stock_profile") for m in out["missing"]) \
             or not out["answer"].strip()
         covered = service._rule_covered(conn, question, symbol)
-        return {"symbol": symbol, "candidates": [], "rule": out, "gap": gap, "covered": covered}
+        deep = service.wants_deep_answer(question)
+        return {"symbol": symbol, "candidates": [], "rule": out, "gap": gap,
+                "covered": covered, "deep": deep}
     finally:
         conn.close()
 
@@ -71,6 +81,8 @@ def _run_tool(name: str, args: dict, symbol: str) -> dict:
             d = tools.stock_quote(conn, sym)
             d["name"] = service._name_of(conn, sym)
             return d
+        if name == "get_indicator_snapshot":
+            return tools.indicator_snapshot(conn, sym, args.get("keys"))
         return {"error": f"未知工具 {name}"}
     finally:
         conn.close()
@@ -80,8 +92,9 @@ async def _llm_events(question: str, symbol: str, cfg: dict, knowledge: bool) ->
     """逐块转发模型输出；工具调用在服务端执行后继续下一轮。"""
     url = _chat_url(cfg.get("base_url") or "")
     headers = {"Authorization": f"Bearer {cfg.get('api_key')}", "Content-Type": "application/json"}
+    system = str(cfg.get("prompt") or "").strip() or (service.KNOWLEDGE_PROMPT if knowledge else service.SYSTEM_PROMPT)
     messages: list[dict] = [
-        {"role": "system", "content": service.KNOWLEDGE_PROMPT if knowledge else service.SYSTEM_PROMPT},
+        {"role": "system", "content": system},
         {"role": "user", "content": question + f"\n（当前上下文标的：{symbol}，可直接查它）"},
     ]
     calls: list[dict] = []
@@ -149,7 +162,8 @@ async def _llm_events(question: str, symbol: str, cfg: dict, knowledge: bool) ->
                 except Exception as e:                     # 工具失败也要让模型继续
                     d = {"error": f"{type(e).__name__}: {e}"}
                 ms = int((time.time() - t0) * 1000)
-                date = d.get("updated_at") or d.get("trade_date") if isinstance(d, dict) else None
+                date = (d.get("updated_at") or d.get("trade_date") or d.get("data_date")
+                        if isinstance(d, dict) else None)
                 data_date = date or data_date
                 call = {"tool": name, "args": args, "ms": ms,
                         "data_date": date, "rows": 1}
@@ -186,7 +200,7 @@ async def stream_answer(question: str, ctx_symbol: Optional[str],
     symbol = stage["symbol"]
     rule = stage["rule"]
     cfg = service.llm_config(user, model)
-    if cfg and (stage["gap"] or not stage["covered"]):
+    if cfg and (stage["gap"] or not stage["covered"] or stage.get("deep")):
         try:
             async for ev in _llm_events(question, symbol, cfg, knowledge=stage["gap"]):
                 yield ev

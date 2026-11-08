@@ -201,7 +201,9 @@ svg{display:block}
   font-size:12px;font-weight:600;color:var(--vip);background:var(--vip-soft);
   border:1px solid color-mix(in srgb,var(--vip) 35%,transparent);cursor:pointer}
 .vipbadge:hover{box-shadow:0 0 0 3px var(--vip-soft)}
-.vipbadge.off{color:var(--dim);background:var(--panel-2);border-color:var(--border)}
+.vipbadge.off{color:var(--dim);background:var(--panel-2);border-color:var(--border);padding:0 10px}
+/* 免费版 / 未登录不展示皇冠：皇冠是 VIP（含管理员）的身份标识 */
+.vipbadge.off svg{display:none}
 .userchip{display:flex;align-items:center;gap:8px;height:34px;padding:0 10px 0 4px;
   border-radius:999px;border:1px solid var(--border);background:var(--panel);cursor:pointer}
 .userchip .ava{width:26px;height:26px;border-radius:50%;background:linear-gradient(140deg,#8A94FF,#5B66D6);
@@ -211,9 +213,11 @@ svg{display:block}
 /* ═══ 图标侧栏（宽度可拖拉调整：--rail-w 由 main.ts 写入并持久化） ═══ */
 .shell{display:grid;grid-template-columns:var(--rail-w, 58px) 1fr;height:calc(100vh - 52px);margin-top:52px}
 .rail{background:var(--panel);border-right:1px solid var(--border);
-  display:flex;flex-direction:column;align-items:center;gap:6px;padding:12px 0;position:relative}
-.rail a{width:40px;height:40px;border-radius:11px;display:grid;place-items:center;
+  display:flex;flex-direction:column;align-items:center;gap:2px;padding:8px 0;position:relative}
+/* 扁平页签：32 高 + 2px 间距，13 个入口一屏放得下（旧 40+6 在矮屏会被挤出滚动） */
+.rail a{width:36px;height:32px;border-radius:8px;display:grid;place-items:center;
   color:var(--faint);position:relative;cursor:pointer}
+.rail a svg{width:19px;height:19px}
 .rail a:hover{color:var(--text);background:var(--panel-2)}
 .rail a.on{color:var(--accent);background:var(--accent-soft)}
 .rail a::after{content:attr(data-t);position:absolute;left:calc(100% + 10px);top:50%;transform:translateY(-50%) translateX(-4px);
@@ -498,7 +502,8 @@ td .lnk:hover{text-decoration:underline}
 /* ============ 页面专属 ============ */
 
 /* 行情页 */
-.backbtn{display:inline-flex;align-items:center;gap:6px;height:28px;padding:0 12px;border-radius:999px;border:1px solid var(--border);background:var(--panel-2);color:var(--dim);font-size:12px;cursor:pointer;transition:.15s}
+.backbtn{display:inline-flex;align-items:center;gap:6px;height:28px;padding:0 12px;border-radius:999px;border:1px solid var(--border);background:var(--panel-2);color:var(--dim);font-size:12px;cursor:pointer;transition:.15s;white-space:nowrap;flex:none}
+#back-label{display:inline-block;max-width:132px;overflow:hidden;text-overflow:ellipsis;vertical-align:middle}
 .backbtn:hover{color:var(--text);border-color:var(--accent);background:var(--panel-3)}
 .backbtn[hidden]{display:none}
 .cmpl{font-size:10.5px;color:var(--faint);line-height:1.55;padding:2px 2px 0}
@@ -664,7 +669,7 @@ body.mobile .rcard .cbar{opacity:1}
 .sh-stats .srow:last-child:nth-child(2){grid-template-columns:repeat(3,auto)}
 .sh-stats b{color:var(--text);font-weight:600;font-size:12px}
 .sh-stats .srow:last-child b{color:var(--dim);font-weight:550}
-.mkt-row{display:flex;gap:8px;flex:1;min-height:0}
+.mkt-row{display:flex;gap:4px;flex:1;min-height:0}
 .kl-col{flex:1;min-width:0;min-height:0;display:flex;flex-direction:column;gap:8px}
 .rightcol{width:var(--rcol-w, 366px);min-width:280px;flex:none;display:flex;flex-direction:column;gap:8px;overflow-y:auto;padding-right:2px}
 /* 右列抽屉的 tab 条：吸顶，切换栏目（一个栏目下可放多张卡片） */
@@ -678,7 +683,7 @@ body.mobile .rcard .cbar{opacity:1}
 .rtab i{font-style:normal;font-size:9.5px;line-height:1;padding:2px 4px;border-radius:99px;background:var(--panel-3);color:var(--faint)}
 .rtab.on i{background:color-mix(in srgb,var(--accent) 22%,transparent);color:var(--accent)}
 .rtab:focus-visible{outline:2px solid var(--accent);outline-offset:1px}
-.rcol-grip{width:6px;flex:none;cursor:col-resize;border-radius:3px;background:transparent;position:relative;margin-left:-4px}
+.rcol-grip{width:6px;flex:none;cursor:col-resize;border-radius:3px;background:transparent;position:relative;margin-left:-6px}
 .rcol-grip::after{content:"";position:absolute;left:50%;top:50%;transform:translate(-50%,-50%);
   width:2px;height:34px;border-radius:2px;background:var(--axis);transition:.14s}
 .rcol-grip:hover::after,.rcol-grip.on::after{background:var(--accent);height:52px}
@@ -1036,6 +1041,17 @@ body.mobile .vpop{width:min(246px,calc(100vw - 16px))}
   border-bottom:2px solid transparent;margin-bottom:-1px;min-height:0}
 .brief-tabs button:hover{color:var(--text)}
 .brief-tabs button.on{color:var(--accent);border-bottom-color:var(--accent);font-weight:600}
+/* 折叠态：只保留 tab 标题条（资讯 / 个股研报 / 行业研报 一目了然），正文收起，高度还给 K 线 */
+.brief.collapsed{height:auto;min-height:0}
+.brief.collapsed .brief-body{display:none}
+.brief.collapsed .brief-tabs{border-bottom:0;padding-top:2px;padding-bottom:2px}
+/* 折叠 / 展开按钮：贴右端，展开后图标翻转朝上 */
+.brief-fold{flex:none;width:26px;height:24px;min-height:24px;padding:0;margin-bottom:0;
+  margin-left:auto;   /* 固定在 tab 行最右侧 */
+  border-bottom:0!important;display:grid;place-items:center;color:var(--faint);border-radius:6px}
+.brief-fold:hover{color:var(--text);background:var(--panel-2)}
+.brief-fold svg{transition:transform .16s}
+.brief-fold[aria-expanded="true"] svg{transform:rotate(180deg)}
 .brief-body{overflow-y:auto}
 .bitem{display:block;padding:8px 14px;border-bottom:1px solid var(--border-soft);text-decoration:none}
 .bitem:last-child{border-bottom:0}
@@ -1109,20 +1125,21 @@ body.mobile .vpop{width:min(246px,calc(100vw - 16px))}
 .factor .k{font-size:10.5px;color:var(--faint)}
 .factor .v{font-size:16px;font-weight:700;margin-top:2px}
 
-/* 卡片页 */
-.cardgrid{display:grid;grid-template-columns:repeat(4,1fr);gap:8px}
-.fcard{background:var(--panel);border:1px solid var(--border);border-radius:10px;padding:14px;display:flex;
-  flex-direction:column;gap:10px;position:relative}
-.fcard .fico{width:34px;height:34px;border-radius:10px;display:grid;place-items:center;color:var(--accent);
-  background:var(--accent-soft)}
-.fcard h4{font-size:13.5px;font-weight:650;display:flex;align-items:center;gap:8px}
-.fcard p{font-size:11.5px;color:var(--dim);line-height:1.55;flex:1}
-.fcard .frow{display:flex;align-items:center;gap:8px;border-top:1px solid var(--border-soft);padding-top:9px}
-.fcard .frow .sp{flex:1}
-.fcard .frow .st{font-size:11px;color:var(--faint)}
+/* 卡片页：对齐设计稿——图标+标题+开关一行，描述，底部状态行 */
+.cardgrid{display:grid;grid-template-columns:repeat(4,1fr);gap:10px}
+.fcard{background:var(--panel);border:1px solid var(--border);border-radius:12px;padding:12px;display:flex;
+  flex-direction:column;gap:8px;transition:border-color .15s}
+.fcard:hover{border-color:var(--axis)}
+.fcard-h{display:flex;align-items:center;gap:8px;min-height:26px}
+.fcard-h .fi{width:26px;height:26px;flex:none;border-radius:8px;display:grid;place-items:center;
+  color:var(--accent);background:var(--accent-soft)}
+.fcard-h b{font-size:12.5px;font-weight:650}
+.fcard-h .sp{flex:1}
+.fcard p{font-size:11px;color:var(--faint);line-height:1.5;min-height:33px;flex:1}
+.ffoot{display:flex;align-items:center;gap:6px;margin-top:auto;padding-top:8px;
+  border-top:1px solid var(--border-soft);font-size:10.5px;color:var(--faint)}
+.ffoot .sp{flex:1}
 .fcard.off{opacity:.55}
-.fcard .fnum{position:absolute;top:10px;right:12px;font-size:10px;color:var(--faint);font-family:var(--mono)}
-.fcard{position:relative}
 
 /* 设置页 */
 .setwrap{display:flex;gap:12px;flex:1;min-height:0}
@@ -1212,6 +1229,8 @@ body.mobile .vpop{width:min(246px,calc(100vw - 16px))}
 
 @media (max-width:1180px){
   .rightcol{display:none}
+  .ai-layout{grid-template-columns:1fr}
+  .ai-side{display:none}
   .cardgrid{grid-template-columns:repeat(3,1fr)}
   .heat{grid-template-columns:repeat(3,1fr)}
 }
@@ -1276,6 +1295,8 @@ body.mobile .tblwrap{max-height:52vh}
 body.mobile #page-sectors .tblwrap{max-height:40vh}
 body.mobile .heat{grid-template-columns:repeat(2,1fr)}
 body.mobile .cardgrid{grid-template-columns:repeat(2,1fr)}
+body.mobile .ai-layout{grid-template-columns:1fr}
+body.mobile .ai-side{display:none}
 body.mobile .setwrap{flex-direction:column}
 body.mobile .setnav{width:auto;flex-direction:row;overflow-x:auto;padding-bottom:2px}
 body.mobile .setnav button{flex:none}
@@ -1342,10 +1363,6 @@ body.mobile.fold .factorgrid{grid-template-columns:1fr 1fr}
 #pan-watch{width:30px;height:30px;min-width:30px}
 #pan-watch svg{width:16px;height:16px}
 .pan-charttitle .pan-sub-tag{font-size:10.5px;font-weight:500;color:var(--faint)}
-.pan-charttitle .pan-lg{display:inline-flex;align-items:center;gap:5px;font-weight:500;color:var(--faint)}
-.pan-charttitle .pan-lg i{display:block;width:11px;height:2px;border-radius:2px;background:var(--text)}
-.pan-charttitle .pan-lg i.a,.pan-charttitle .pan-lg i.b{background:var(--intra-avg)}
-.pan-charttitle .pan-lg i.b{height:0;border-top:1px dashed var(--intra-avg);background:none;border-radius:0}
 .pan-kl{flex:1;min-height:0;position:relative}
 body.mobile .pan-right{width:100%;flex:none}
 body.mobile .pan-split{flex-direction:column}
@@ -1761,6 +1778,25 @@ body.mobile .sec-breadth{padding:0 10px 8px}
 
 
 /* ═══ 智能助手页：对话 + 工具卡 ═══ */
+/* 两栏对齐设计稿：左侧对话，右侧今日盘面摘要 + 可追问 */
+.ai-layout{flex:1;min-height:0;display:grid;grid-template-columns:minmax(0,1fr) 286px;gap:12px}
+.ai-layout .ai-chat{height:100%;min-height:0}
+.ai-head{display:flex;align-items:center;gap:8px;flex:none;padding-bottom:2px}
+.ai-head b{font-size:12.5px;font-weight:650}
+.ai-head .ai-sub{font-size:11px;color:var(--faint)}
+.ai-head .sp{flex:1}
+.ai-head .hbtn{height:28px;padding:0 11px;font-size:11.5px}
+.ai-side{min-height:0;overflow-y:auto;padding:14px;display:flex;flex-direction:column}
+.ai-side h3{font-size:12.5px;font-weight:650;margin-bottom:6px}
+.ai-side h3.mt{margin-top:14px}
+.ai-kv{display:flex;align-items:center;gap:10px;padding:6px 0;
+  border-bottom:1px solid var(--border-soft);font-size:11px;color:var(--faint)}
+.ai-kv b{margin-left:auto;font-weight:600;font-size:11.5px;color:var(--text);white-space:nowrap}
+.ai-asks{display:flex;flex-direction:column;gap:6px}
+.ai-asks button{text-align:left;padding:7px 9px;border-radius:8px;border:1px solid var(--border);
+  background:var(--panel-2);color:var(--dim);font-size:11px;cursor:pointer;transition:.15s}
+.ai-asks button:hover{color:var(--text);border-color:color-mix(in srgb,var(--accent) 40%,transparent)}
+.ai-sidefoot{margin-top:auto;padding-top:12px;font-size:10px;color:var(--faint)}
 .ai-chat{flex:1;min-height:0;display:flex;flex-direction:column;gap:10px;padding:14px 16px}
 .ai-mode{font-size:11px;color:var(--faint);border:1px solid var(--border);border-radius:999px;
   padding:3px 10px;white-space:nowrap}

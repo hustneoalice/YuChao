@@ -16,7 +16,8 @@ function drawUserchip(): void {
     const un = u.username || u.email.split("@")[0];
     name.textContent = un;
     ava.textContent = un.slice(0, 1).toUpperCase();
-    chip.title = `${u.email} · ${u.tier === "pro" ? "VIP" : "免费版"} · 点击进入账户设置`;
+    const tierText = u.role === "admin" ? "管理员" : u.tier === "pro" ? "VIP" : "免费版";
+    chip.title = `${u.email} · ${tierText} · 点击进入账户设置`;
   } else {
     name.textContent = "未登录";
     ava.textContent = "?";
@@ -29,14 +30,22 @@ export function refreshVipUI(): void {
   const badge = document.getElementById("vipbadge")!;
   const tag = document.getElementById("vip-state-tag")!;
   const badgeT = document.getElementById("vipbadge-t")!;
-  if (isVip() && u?.pro_expires_at) {
-    const until = u.pro_expires_at.slice(0, 10);
+  if (u?.role === "admin") {
+    // 管理员 = 永久 VIP：金色皇冠，显示「管理员」而不是免费版
     badge.classList.remove("off");
-    badgeT.textContent = `VIP · 至 ${until}`;
-    tag.textContent = `VIP有效 · ${until} 到期`;
+    badgeT.textContent = "管理员";
+    tag.textContent = "管理员 · 永久 VIP";
+    tag.className = "tag vip";
+  } else if (isVip()) {
+    // pro_expires_at 为空＝永久 VIP，不能因为没到期日就误判成免费版
+    const until = u?.pro_expires_at ? u.pro_expires_at.slice(0, 10) : "";
+    badge.classList.remove("off");
+    badgeT.textContent = until ? `VIP · 至 ${until}` : "VIP";
+    tag.textContent = until ? `VIP有效 · ${until} 到期` : "VIP有效 · 永久";
     tag.className = "tag vip";
   } else if (u) {
-    badge.classList.remove("off");
+    // 免费版不戴皇冠、不用金色：灰色胶囊只标「免费版」
+    badge.classList.add("off");
     badgeT.textContent = "免费版";
     tag.textContent = "免费版 · 无 VIP 指标";
     tag.className = "tag flat";

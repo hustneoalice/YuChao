@@ -19,6 +19,8 @@ from ...foundation.repo.health import assess as health_assess
 from ...foundation.repo.health import updater_alive
 from ...stream.bus import ControlRequests
 from ...updater import registry
+from ...updater.trading_calendar import is_trading_day
+from ...updater.util import now_cst
 
 router = APIRouter(tags=["data"])
 
@@ -50,7 +52,10 @@ class ExportTrigger(BaseModel):
 
 @router.get("/data/status", response_model=DataStatus, summary="底座状态（表清单体检）")
 def status(conn=Depends(get_conn)):
-    return TypeAdapter(DataStatus).validate_python(repo.data.get_status(conn, settings.duckdb_path))
+    data = repo.data.get_status(conn, settings.duckdb_path)
+    # 交易日口径跟后端日历（含法定节假日）走，前端不要用「周一到周五」近似
+    data["trading_day"] = is_trading_day(now_cst())
+    return TypeAdapter(DataStatus).validate_python(data)
 
 
 @router.get("/data/tasks", summary="更新任务清单与调度链")

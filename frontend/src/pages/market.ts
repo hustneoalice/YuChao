@@ -111,6 +111,44 @@ function readIndFavs(): string[] {
 function writeIndFavs(favs: string[]): void {
   localStorage.setItem("yc_indfav", JSON.stringify([...new Set(favs)]));
 }
+
+/* 绘图工具（主图叠加）：也进「＋更多」配置，★ 常显到工具栏绘图行；独立存储避免与指标键冲突 */
+const LINE_DEFS = [
+  { key: "fib", label: "黄金分割", desc: "自动识别高低点，绘制 0.236 / 0.382 / 0.5 / 0.618 / 0.786" },
+  { key: "sr", label: "支撑压力", desc: "按成交量峰与枢轴，绘制近端支撑 / 压力带" },
+  { key: "wave", label: "浪型结构", desc: "艾略特波浪：三条铁律校验后标出 0-5 推动浪与 A-B-C 调整浪" },
+  { key: "box", label: "箱体区间", desc: "自动框出横盘震荡箱体：下沿缩量企稳、上沿滞涨、放量突破/跌破" },
+  { key: "pat", label: "反转形态", desc: "只认最经典的反转结构：W底/M头/头肩底/头肩顶，放量突破或跌破颈线才算确认" },
+] as const;
+type LineKey = (typeof LINE_DEFS)[number]["key"];
+const LINE_BY_KEY = Object.fromEntries(LINE_DEFS.map((d) => [d.key, d])) as
+  Record<LineKey, (typeof LINE_DEFS)[number]>;
+const LINE_FAV_DEF: string[] = LINE_DEFS.map((d) => d.key);
+
+function readLineFavs(): string[] {
+  try {
+    const v = JSON.parse(localStorage.getItem("yc_linefav") || "") as unknown;
+    if (Array.isArray(v))
+      return v.filter((k): k is string => typeof k === "string" && !!LINE_BY_KEY[k as LineKey]);
+  } catch { /* 无值/坏值走默认 */ }
+  return [...LINE_FAV_DEF];
+}
+function writeLineFavs(keys: string[]): void {
+  localStorage.setItem("yc_linefav", JSON.stringify([...new Set(keys)]));
+}
+function lineOn(key: string): boolean {
+  return key === "fib" ? mk.lineFib : key === "sr" ? mk.lineSR
+    : key === "wave" ? mk.lineWave : key === "box" ? mk.lineBox : mk.linePat;
+}
+/** 切换绘图叠加开关：写 mk + 本地记忆（与旧按钮 data-line 同一套口径） */
+function toggleLine(key: string): void {
+  if (key === "sr") mk.lineSR = !mk.lineSR;
+  else if (key === "wave") mk.lineWave = !mk.lineWave;
+  else if (key === "box") mk.lineBox = !mk.lineBox;
+  else if (key === "pat") mk.linePat = !mk.linePat;
+  else mk.lineFib = !mk.lineFib;
+  localStorage.setItem(`yc_k${key}`, lineOn(key) ? "1" : "0");
+}
 /** 应用方案：过滤合法键 → 写状态 → 持久化 → K 线与面板同步（所见即所得） */
 function applyPreset(p: Preset): void {
   mk.mainInds = (p.main || []).filter((k) => KMAIN_OK.includes(k));
@@ -355,6 +393,9 @@ function startPoll(): void {
 /* ── K线下方资讯/研报面板（东财直连，后端 TTL 缓存；会话内按 symbol+tab 缓存） ── */
 type BriefTab = "news" | "reports" | "indrep";
 let briefTab: BriefTab = "news";
+/** 资讯/研报折叠态：每次进页面都默认折叠，只留 tab 标题条（看得出有几块内容），
+ *  高度还给 K 线。不落本地存储——展开只是本次临时查看，刷新后回到默认折叠 */
+let briefCollapsed = true;
 const briefCache = new Map<string, string>(); // key → 渲染好的 HTML
 /** initMarket 接上的「研报高度」同步动作（showBriefing 在模块顶层，拿不到手柄引用） */
 let briefShownHook: (() => void) | null = null;
@@ -596,10 +637,13 @@ export function initMarket(): void {
       document.querySelectorAll<HTMLElement>(".klp").forEach(renderKlpBar); // 顶栏信息条同步实时价
     } catch { /* 静默，下轮再试 */ }
   }, 20000);
-  // 资讯/研报 tab 切换（点击已选 tab 不重复请求，走缓存）
+  // 资讯/研报：折叠开关 + tab 切换（点击已选 tab 不重复请求，走缓存）
   document.getElementById("brief-panel")!.addEventListener("click", (e) => {
-    const b = (e.target as HTMLElement).closest<HTMLButtonElement>("button[data-bt]");
+    const t = e.target as HTMLElement;
+    if (t.closest("#brief-fold")) { applyBriefFold(!briefCollapsed); return; }
+    const b = t.closest<HTMLButtonElement>("button[data-bt]");
     if (!b) return;
+    if (briefCollapsed) applyBriefFold(false);   // 折叠态点 tab 直接展开
     briefTab = b.dataset.bt as BriefTab;
     document.querySelectorAll("#brief-panel .brief-tabs button").forEach((x) =>
       x.classList.toggle("on", x === b));
@@ -752,15 +796,32 @@ export function initMarket(): void {
     chartbox.style.flex = "1";
     chartbox.style.minHeight = "0";
     chartbox.style.height = "";
-    vgrip.hidden = briefPanel.hidden;   // 研报没显示时没有可拖的东西
+    vgrip.hidden = briefPanel.hidden || briefCollapsed;   // 研报没显示 / 折叠时没有可拖的东西
   };
+  /** 折叠/展开资讯研报：折叠只留 tab 标题条，展开回填上次高度（仅本次会话生效） */
+  function applyBriefFold(collapsed: boolean): void {
+    briefCollapsed = collapsed;
+    briefPanel.classList.toggle("collapsed", collapsed);
+    const fold = document.getElementById("brief-fold")!;
+    fold.setAttribute("aria-expanded", String(!collapsed));
+    const label = collapsed ? "展开资讯 / 研报" : "折叠资讯 / 研报";
+    fold.title = label;
+    fold.setAttribute("aria-label", label);
+    if (collapsed) briefPanel.style.height = "";
+    else applyBriefH(savedBriefH());
+    vgrip.hidden = briefPanel.hidden || collapsed;
+  }
   const savedBriefH = (): number | null => {
     const n = Number(localStorage.getItem("yc_briefh"));
     return Number.isFinite(n) && n >= BRIEF_MIN ? n : null;
   };
   localStorage.removeItem("yc_klh");    // 旧口径（图表高度）作废，避免两套互相打架
   applyBriefH(savedBriefH());
-  briefShownHook = () => applyBriefH(savedBriefH());   // 研报首次出现时把手柄放出来
+  briefShownHook = () => {             // 研报首次出现时：折叠则只露标题条，展开则回填高度
+    if (briefCollapsed) { briefPanel.style.height = ""; vgrip.hidden = true; }
+    else applyBriefH(savedBriefH());
+  };
+  applyBriefFold(briefCollapsed);       // 同步折叠态（默认折叠）
 
   vgrip.addEventListener("pointerdown", (e) => {
     if (briefPanel.hidden) return;
@@ -798,6 +859,7 @@ export function initMarket(): void {
   });
   // 视口变化：原高度可能已经超过上限（窗口变矮），收回合法区间
   window.addEventListener("resize", () => {
+    if (briefCollapsed) return;         // 折叠态交给 CSS 自适应，别把高度又钉回去
     const h = savedBriefH();
     if (h == null) return;
     const capped = Math.min(h, briefMax());
@@ -807,17 +869,17 @@ export function initMarket(): void {
   // 指标/方案/配色点击处理：常显两行（#kl-indbar）与方案浮层（#kl-ipanel）共用一套委托
   const indClick = (e: Event): void => {
     const t = e.target as HTMLElement;
+    // 绘图按钮的 ×（必须在 data-line 之前：× 也在按钮里）
+    if (t.closest("i[data-xline]")) {
+      const k = t.closest<HTMLElement>("i[data-xline]")!.dataset.xline!;
+      writeLineFavs(readLineFavs().filter((x) => x !== k));
+      notifyLocal("prefs");              // 常显集合随云同步跨端一致
+      renderIndBar();
+      renderIndMore();
+      return;
+    }
     if (t.closest("button[data-line]")) {                  // 智能画线：黄金分割 / 支撑压力 / 浪型 / 箱体 / 形态
-      const key = (t.closest("button[data-line]") as HTMLElement).dataset.line || "fib";
-      if (key === "sr") mk.lineSR = !mk.lineSR;
-      else if (key === "wave") mk.lineWave = !mk.lineWave;
-      else if (key === "box") mk.lineBox = !mk.lineBox;
-      else if (key === "pat") mk.linePat = !mk.linePat;
-      else mk.lineFib = !mk.lineFib;
-      const on = key === "fib" ? mk.lineFib : key === "sr" ? mk.lineSR
-        : key === "wave" ? mk.lineWave : key === "box" ? mk.lineBox : mk.linePat;
-      localStorage.setItem(key === "fib" ? "yc_kfib" : key === "sr" ? "yc_ksr"
-        : key === "wave" ? "yc_kwave" : key === "box" ? "yc_kbox" : "yc_kpat", on ? "1" : "0");
+      toggleLine((t.closest("button[data-line]") as HTMLElement).dataset.line || "fib");
       notifyLocal("prefs");
       renderIndBar();
       applyLines();
@@ -841,6 +903,27 @@ export function initMarket(): void {
       writeIndFavs([...favs]);
       notifyLocal("prefs");              // ★ 常显集合也走云端偏好：换浏览器/换端一致
       renderIpanel();
+      return;
+    }
+    // 绘图 ★：常显到工具栏绘图行（与上面指标 ★ 平行的独立集合）
+    if (t.closest("i[data-lfav]")) {
+      const k = t.closest<HTMLElement>("i[data-lfav]")!.dataset.lfav!;
+      const favs = new Set(readLineFavs());
+      if (favs.has(k)) favs.delete(k); else favs.add(k);
+      writeLineFavs([...favs]);
+      notifyLocal("prefs");
+      renderIndBar();
+      renderIndMore();
+      return;
+    }
+    // 更多面板「绘图」行：整行点击 = 叠加/取消绘图
+    const lrow = t.closest<HTMLElement>(".imr[data-lrow]");
+    if (lrow) {
+      toggleLine(lrow.dataset.lrow!);
+      notifyLocal("prefs");
+      renderIndBar();
+      renderIndMore();
+      applyLines();
       return;
     }
     // 更多面板行（.imr）：整行点击 = 显影切换
@@ -939,9 +1022,12 @@ export function initMarket(): void {
     }
     mk.mainInds = readInds("yc_kmain", KMAIN_OK, mk.mainInds);
     mk.subInds = readInds("yc_ksub", KSUB_OK, mk.subInds);
-    // 研报高度也随 prefs 回来（换设备登录后同一套版面）
-    const bh = Number(localStorage.getItem("yc_briefh"));
-    applyBriefH(Number.isFinite(bh) && bh >= BRIEF_MIN ? Math.min(bh, briefMax()) : null);
+    // 研报高度也随 prefs 回来（换设备登录后同一套版面）；折叠态不写内联高度，
+    // 否则 CSS 的 auto 会被 108px 覆盖，看起来像一块「展开的空白面板」
+    if (!briefCollapsed) {
+      const bh = Number(localStorage.getItem("yc_briefh"));
+      applyBriefH(Number.isFinite(bh) && bh >= BRIEF_MIN ? Math.min(bh, briefMax()) : null);
+    }
     syncIndUI();
     renderIpanel();
     renderKline();
@@ -1067,6 +1153,10 @@ function renderIndBar(): void {
     `<i class="x" data-xshow="${d.key}" title="移出常显（不影响当前显影）">×</i></button>`;
   const main = favs.map((k) => IND_BY_KEY[k]).filter((d) => d?.where === "main");
   const sub = favs.map((k) => IND_BY_KEY[k]).filter((d) => d?.where === "sub");
+  const lines = readLineFavs().map((k) => LINE_BY_KEY[k as LineKey]);
+  const lineOf = (d: (typeof LINE_DEFS)[number]) =>
+    `<button data-line="${d.key}" class="${lineOn(d.key) ? "on" : ""}" title="${esc(d.desc)} · 点击叠加/取消">${d.label}` +
+    `<i class="x" data-xline="${d.key}" title="移出常显（不影响当前绘图）">×</i></button>`;
   const hint = `<span class="ipempty">在「＋更多」里勾选 ★ 常显</span>`;
   // 单行布局：主图组 + 分割线 + 副图组 + 分割线 + 画线组 + 「＋更多」
   inds.innerHTML =
@@ -1074,14 +1164,8 @@ function renderIndBar(): void {
     `<i class="barsep"></i>` +
     `<div class="iprow"><span class="ipk">副图</span>${sub.map(chipOf).join("") || hint}</div>` +
     `<i class="barsep"></i>` +
-    `<div class="iprow">` +
-      `<button data-line="fib" class="${mk.lineFib ? "on" : ""}" title="自动识别高低点，绘制 0.236 / 0.382 / 0.5 / 0.618 / 0.786">黄金分割</button>` +
-      `<button data-line="sr" class="${mk.lineSR ? "on" : ""}" title="按成交量峰与枢轴，绘制近端支撑 / 压力带">支撑压力</button>` +
-      `<button data-line="wave" class="${mk.lineWave ? "on" : ""}" title="艾略特波浪：三条铁律校验后标出 0-5 推动浪与 A-B-C 调整浪">浪型结构</button>` +
-      `<button data-line="box" class="${mk.lineBox ? "on" : ""}" title="自动框出横盘震荡箱体：下沿缩量企稳、上沿滞涨、放量突破/跌破">箱体区间</button>` +
-      `<button data-line="pat" class="${mk.linePat ? "on" : ""}" title="只认最经典的反转结构：W底/M头/头肩底/头肩顶，放量突破或跌破颈线才算确认">反转形态</button>` +
-    `</div>` +
-    `<button class="imore-open" data-more="1" title="全部指标：搜索 / 配置常显 / 临时叠加">＋更多</button>`;
+    `<div class="iprow"><span class="ipk">绘图</span>${lines.map(lineOf).join("") || hint}</div>` +
+    `<button class="imore-open" data-more="1" title="全部指标 / 绘图工具：搜索 / 配置常显 / 临时叠加">＋更多</button>`;
 }
 
 /** 更多面板列表（#kl-more-list）：搜索过滤 + 分类分组；点行=显影切换，★=常显切换。
@@ -1092,6 +1176,7 @@ function renderIndMore(): void {
   const q = (document.querySelector<HTMLInputElement>("#kl-more input")?.value || "").trim().toLowerCase();
   const mset = new Set(mk.mainInds), sset = new Set(mk.subInds);
   const favs = new Set(readIndFavs());
+  const lfavs = new Set(readLineFavs());
   const hit = (d: (typeof IND_DEFS)[number]) =>
     !q || d.label.toLowerCase().includes(q) || d.desc.toLowerCase().includes(q) || d.key.includes(q) || d.kc.toLowerCase().includes(q);
   const row = (d: (typeof IND_DEFS)[number]) => {
@@ -1101,10 +1186,23 @@ function renderIndMore(): void {
       `<span class="im-desc">${esc(d.desc)}</span>` +
       `<i class="star${favs.has(d.key) ? " on" : ""}" data-fav="${d.key}" title="${favs.has(d.key) ? "取消常显" : "常显到工具栏"}">★</i></div>`;
   };
-  list.innerHTML = IND_CATS.map(({ cat, label }) => {
+  // 绘图工具：与指标同款交互（行=叠加/取消，★=常显到工具栏绘图行）
+  const lineHit = (d: (typeof LINE_DEFS)[number]) =>
+    !q || d.label.toLowerCase().includes(q) || d.desc.toLowerCase().includes(q) || d.key.includes(q);
+  const lineRow = (d: (typeof LINE_DEFS)[number]) => {
+    const isOn = lineOn(d.key);
+    return `<div class="imr${isOn ? " on" : ""}" data-lrow="${d.key}" title="${esc(d.desc)} · 点击${isOn ? "取消叠加" : "叠加到主图"}">` +
+      `<i class="dot" style="--ic:#7E57C2"></i><b>${d.label}</b>` +
+      `<span class="im-desc">${esc(d.desc)}</span>` +
+      `<i class="star${lfavs.has(d.key) ? " on" : ""}" data-lfav="${d.key}" title="${lfavs.has(d.key) ? "取消常显" : "常显到工具栏"}">★</i></div>`;
+  };
+  const indHtml = IND_CATS.map(({ cat, label }) => {
     const defs = IND_DEFS.filter((d) => d.cat === cat && hit(d));
     return defs.length ? `<div class="im-cat">${label}</div>${defs.map(row).join("")}` : "";
-  }).join("") || `<div class="im-none">没有匹配「${esc(q)}」的指标</div>`;
+  }).join("");
+  const lineHtml = LINE_DEFS.filter(lineHit).map(lineRow).join("");
+  list.innerHTML = (indHtml + (lineHtml ? `<div class="im-cat">绘图</div>${lineHtml}` : ""))
+    || `<div class="im-none">没有匹配「${esc(q)}」的指标 / 绘图工具</div>`;
 }
 
 /** 日线 → 自然周/月/季线：确定性重采样（开=首根、高=max、低=min、收=末根、量额求和）。
@@ -2147,10 +2245,12 @@ function renderKlInfo(): void {
 }
 
 /* ── 右侧抽屉栏目（tab）：一个栏目装多张卡片，当前栏目本地记忆 ── */
-const RTAB_KEY = "yc_right_tab";
+/* 栏目顺序变更为「盘口 / 看盘 / 筹码 / 股东」，key 升版一次，旧记忆（默认看盘）作废 */
+const RTAB_KEY = "yc_right_tab_v2";
 function readRightTab(): RightTabId {
   const v = localStorage.getItem(RTAB_KEY);
-  return RIGHT_TABS.some((t) => t.id === v) ? v as RightTabId : "market";
+  // 默认进入「盘口」：右侧第一栏就是现价/五档/成交明细，看盘卡片仍可一键切回
+  return RIGHT_TABS.some((t) => t.id === v) ? v as RightTabId : "depth";
 }
 let rightTab: RightTabId = readRightTab();
 
@@ -2295,4 +2395,25 @@ export function renderRight(): void {
   const wlList = el.querySelector<HTMLElement>('.rcard[data-cid="watch"] .wl-list');
   if (wlList) { bindWlGroupChips(wlList); void refreshSparksIn(wlList); }
   void refreshWlQuotes();
+}
+
+/* ── 聊天指令：指标开关（与手动点指标栏同一套状态 + 持久化） ── */
+export function setIndicator(key: string, on: boolean): boolean {
+  const isMain = KMAIN_OK.includes(key);
+  if (!isMain && !KSUB_OK.includes(key)) return false;
+  const arr: string[] = isMain ? mk.mainInds : mk.subInds;
+  const i = arr.indexOf(key);
+  if (on && i < 0) arr.push(key);
+  if (!on && i >= 0) arr.splice(i, 1);
+  saveKPrefs();
+  syncIndUI();
+  renderIpanel();
+  renderKline();
+  return true;
+}
+
+export function indicatorWhere(key: string): "main" | "sub" | null {
+  if (KMAIN_OK.includes(key)) return "main";
+  if (KSUB_OK.includes(key)) return "sub";
+  return null;
 }
