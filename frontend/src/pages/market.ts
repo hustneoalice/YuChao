@@ -15,8 +15,8 @@ import { TRENDS, setTrendPalette, trendPaletteKey, IND_DEFS, IND_CATS, IND_BY_KE
 import { createChartPanel, quoteHeadHtml, type ChartPanelHandle } from "../chartpanel";
 import { createIntraday, type IntradayHandle } from "../intraday";
 import { shareholderBody, bindShareholders, prefetchShareholders } from "../shareholders";
-import { bindChips, chipBody, prefetchChips } from "../chips";
-import { bindOrderbook, bindTrades, orderbookBody, tradesBody, prefetchDepth, prefetchTrades } from "../depth";
+import { bindChips, chipBody, isIndexSymbol, prefetchChips } from "../chips";
+import { bindOrderbook, bindTrades, headSubHtml, orderbookBody, tradesBody, prefetchDepth, prefetchTrades } from "../depth";
 
 export const SEG6 = ["超跌", "反弹", "突破", "超涨", "回踩", "跌破"];
 
@@ -2034,7 +2034,7 @@ function cardBody(cid: string, mode: string): string {
       const price = wq ? (wq.rt_price ?? wq.close ?? null) : null;
       return `<div class="wl-r${det ? " det" : ""}" data-go-stock="${w.symbol}" data-go-name="${esc(w.name)}" title="打开 ${esc(w.name)}">` +
         `<span class="wl-i num">${i + 1}</span>` +
-        `<div class="wl-nm"><b>${esc(w.name)}</b><span class="num">${w.symbol}<i class="wl-g" title="${esc(w.groups.join("、"))}">· ${esc(w.groups.join(" / "))}</i></span></div>` +
+        `<div class="wl-nm" title="${esc(w.symbol)}"><b>${esc(w.name)}</b><span class="num">${esc(w.symbol.split(".")[0])}</span><i class="wl-g" title="${esc(w.groups.join("、"))}">· ${esc(w.groups.join(" / "))}</i></div>` +
         `<span class="wl-sp">${sparkSvg(w.symbol, 56, 18)}</span>` +
         (det ? `<span class="num wl-d">${fmtYi(wq?.amount ?? null, 1)}</span>` +
           `<span class="num wl-d">${wq?.turnover_rate != null ? fmt(wq.turnover_rate) + "%" : "—"}</span>` : "") +
@@ -2143,10 +2143,14 @@ function cardBody(cid: string, mode: string): string {
   return "";
 }
 
-function cardHead(def: { id: string; name: string; icon: string }): string {
+function cardHead(def: { id: string; name: string; icon: string }, canMode = true): string {
   const p = getState().cards[def.id];
   const wlN = getState().watchlist.filter(inWlFilter).length;
   const mono = def.id === "moneyflow" ? (mk.cur?.symbol || "") : def.id === "corepick" ? "池档案" : def.id === "watch" ? `${wlN}只` : "";
+  // 盘口卡：名称/代码收进标题行，正文第二行放「价格 + 涨跌幅」，省掉重复的身份行
+  const sub = def.id === "orderbook"
+    ? `<span class="rh-sub" data-head-sub>${headSubHtml(mk.cur?.symbol || "", mk.cur?.name || "")}</span>`
+    : `<span class="mono" style="${def.id === "watch" ? "" : "margin-left:auto"}">${mono}</span>`;
   // 模式切换收成单颗按钮（图标指示点击后进入的模式）；整组控制钮悬停卡片才浮现
   const nextIcon = p.mode === "simple" ? "faders-horizontal" : "list";
   const nextTitle = p.mode === "simple" ? "切换为详细模式" : "切换为简单模式";
@@ -2156,10 +2160,18 @@ function cardHead(def: { id: string; name: string; icon: string }): string {
       `<input placeholder="搜索代码 / 名称 / 拼音" maxlength="20"><div class="wl-drop"></div></span>` +
       `<button class="cbtn" data-wl-new title="新增自选（搜索 + 选择分组）">${ic("plus", 12)}</button>`
     : "";
-  return `<div class="rh">${ic(def.icon, 14)}<h4>${def.name}</h4>${headSearch}<span class="mono" style="${def.id === "watch" ? "" : "margin-left:auto"}">${mono}</span>` +
-    `<span class="cbar"><button class="cbtn" data-mode-toggle title="${nextTitle}">${ic(nextIcon, 12)}</button>` +
+  return `<div class="rh">${ic(def.icon, 14)}<h4>${def.name}</h4>${headSearch}${sub}` +
+    `<span class="cbar">${canMode ? `<button class="cbtn" data-mode-toggle title="${nextTitle}">${ic(nextIcon, 12)}</button>` : ""}` +
     `<button class="cbtn" data-fold title="折叠 / 展开">${ic("caret-up", 12)}</button>` +
     `<span class="drag" draggable="true" title="拖动排序">${ic("dots-six-vertical", 13)}</span></span></div>`;
+}
+
+/** 简单/详细切换只在内容确实随模式变化时出现（指数无五档/逐笔/筹码，点了没反应） */
+function modeMatters(cid: string): boolean {
+  if (cid === "corepick") return false;                     // 档案卡内容固定，与模式无关
+  if (cid === "orderbook" || cid === "trades" || cid === "chips" ||
+      cid === "moneyflow" || cid === "shareholders") return !isIndexSymbol(mk.cur?.symbol || "");
+  return true;
 }
 
 /* 右列功能卡宽度：默认 366（原 244 × 1.5），拖拽可调，按登录用户分别记忆 */
@@ -2267,7 +2279,7 @@ export function renderRight(): void {
   ).join("") + `</nav>`;
   for (const def of tabDefs) {
     const p = st.cards[def.id];
-    html += `<div class="rcard" data-cid="${def.id}">${cardHead(def)}` +
+    html += `<div class="rcard" data-cid="${def.id}">${cardHead(def, modeMatters(def.id))}` +
       `<div class="fbody${p.mode === "simple" && def.id === "signals" ? "" : ""}${false ? " hide" : ""}">${cardBody(def.id, p.mode)}</div></div>`;
   }
   if (!tabDefs.length) {
@@ -2305,7 +2317,7 @@ export function renderRight(): void {
     const card = el.querySelector<HTMLElement>(`[data-cid="${cid}"]`);
     if (!card) continue;
     const mode = st.cards[cid].mode;
-    if (cid === "orderbook") bindOrderbook(card, curSymbol, mode, () => mk.quote);
+    if (cid === "orderbook") bindOrderbook(card, curSymbol, mode, () => mk.quote, mk.cur?.name);
     else bindTrades(card, curSymbol, mode);
   }
   el.querySelectorAll<HTMLElement>("[data-vip-open]").forEach((b) =>

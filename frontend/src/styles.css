@@ -517,7 +517,8 @@ body.mobile .rcard .cbar{opacity:1}
 .cseg .cbtn.on{color:var(--accent);background:var(--panel-3)}
 .drag{width:14px;height:20px;display:inline-flex;align-items:center;justify-content:center;color:var(--faint);cursor:grab;flex:none}
 .drag:active{cursor:grabbing}
-.rcard{background:var(--panel);border:1px solid var(--border);border-radius:10px;padding:11px 13px;position:relative}
+.rcard{background:var(--panel);border:1px solid var(--border);border-radius:10px;padding:11px 13px;position:relative;
+  container-type:inline-size}
 .rcard.dragging{opacity:.45;border-style:dashed}
 .rcard.drop-before{border-top:2px solid var(--accent)}
 .rcard.drop-after{border-bottom:2px solid var(--accent)}
@@ -559,9 +560,19 @@ body.mobile .rcard .cbar{opacity:1}
 .wl-r:hover{background:var(--panel-2)}
 .wl-r.det{grid-template-columns:16px minmax(0,1fr) 56px auto auto auto auto 16px}
 .wl-i{color:var(--faint);font-size:10px;text-align:right}
-.wl-nm{min-width:0;line-height:1.25}
-.wl-nm b{display:block;font-size:11.5px;font-weight:600;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
-.wl-nm .num{font-size:10px;color:var(--faint)}
+/* 自选行：名称/代码/分组收成一行，窄宽时先省略分组，再隐藏走势图 */
+.wl-nm{display:flex;align-items:baseline;gap:5px;min-width:0;line-height:1.25;overflow:hidden}
+.wl-nm b{font-size:11.5px;font-weight:600;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;
+  flex:0 1 auto;min-width:0}
+.wl-nm .num{flex:none;font-size:10px;color:var(--faint)}
+.wl-g{flex:0 1 auto;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;
+  font-style:normal;font-size:10px;color:var(--faint)}
+@container (max-width:340px){.wl-g{display:none}}
+@container (max-width:300px){
+  .rcard .wl-sp{display:none}
+  .rcard .wl-r{grid-template-columns:16px minmax(0,1fr) auto auto 16px}
+  .rcard .wl-r.det{grid-template-columns:16px minmax(0,1fr) auto auto auto auto 16px}
+}
 .wl-sp{display:flex;align-items:center}
 .wl-sp svg.spark{display:block;opacity:.9}
 .wl-d{font-size:10.5px;color:var(--dim);text-align:right}
@@ -687,11 +698,19 @@ body.mobile .rcard .cbar{opacity:1}
 .rcol-grip::after{content:"";position:absolute;left:50%;top:50%;transform:translate(-50%,-50%);
   width:2px;height:34px;border-radius:2px;background:var(--axis);transition:.14s}
 .rcol-grip:hover::after,.rcol-grip.on::after{background:var(--accent);height:52px}
-.rcard .rh{display:flex;align-items:center;gap:8px;margin-bottom:7px}
-.rcard .rh h4{font-size:12.5px;font-weight:650}
-.rcard .rh .mono{color:var(--faint);margin-left:auto}
-.rcard .rh svg{width:14px;height:14px;color:var(--accent)}
+.rcard .rh{display:flex;align-items:center;gap:8px;margin-bottom:7px;flex-wrap:nowrap;min-width:0}
+.rcard .rh h4{font-size:12.5px;font-weight:650;flex:none;white-space:nowrap}
+.rcard .rh .mono{color:var(--faint);margin-left:auto;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.rcard .rh svg{width:14px;height:14px;color:var(--accent);flex:none}
 .rcard[data-cid] .rh .mono{margin-left:auto}
+/* 标题行摘要（盘口卡：名称 + 代码同排；窄宽时逐级省略，不换行） */
+.rh-sub{display:flex;align-items:baseline;gap:6px;margin-left:auto;min-width:0;overflow:hidden;white-space:nowrap}
+.rh-nm{min-width:0;max-width:104px;flex:0 1 auto;overflow:hidden;text-overflow:ellipsis;font-size:11.5px;font-weight:600}
+.rh-cd{flex:none;font-size:10px;color:var(--faint)}
+
+/* 容器宽度按卡片内容箱计算：默认 366 外宽≈338 内宽，名称保留；再窄依次省略名称、代码 */
+@container (max-width:300px){.rh-nm{display:none}}
+@container (max-width:260px){.rh-cd{display:none}}
 .locklayer{position:absolute;inset:0;border-radius:10px;background:color-mix(in srgb,var(--panel) 82%,transparent);
   backdrop-filter:blur(3px);display:flex;flex-direction:column;align-items:center;justify-content:center;gap:8px;z-index:5}
 .locklayer svg{width:20px;height:20px;color:var(--vip)}
@@ -940,6 +959,17 @@ body.mobile .vpop{width:min(246px,calc(100vw - 16px))}
   backdrop-filter:blur(7px);-webkit-backdrop-filter:blur(7px);
   border:1px solid var(--border);border-radius:9px;
   box-shadow:var(--shadow);pointer-events:none;font-size:11px;color:var(--dim)}
+/* 十字光标水平价格轴标签：跟随鼠标 Y，价格 + 相对当前 K 线的涨跌幅 */
+.kl-ylab{position:absolute;right:4px;z-index:9;transform:translateY(-50%);
+  display:none;pointer-events:none;text-align:right;white-space:nowrap;
+  padding:2px 5px;border-radius:5px;line-height:1.25;
+  background:color-mix(in srgb,var(--panel) 78%,transparent);
+  backdrop-filter:blur(7px);-webkit-backdrop-filter:blur(7px);
+  border:1px solid var(--border);box-shadow:var(--shadow)}
+.kl-ylab b{display:block;font-size:11px;font-weight:600;color:var(--text)}
+.kl-ylab span{display:block;font-size:10px;font-weight:500;color:var(--dim)}
+.kl-ylab b.up,.kl-ylab span.up{color:var(--up)}
+.kl-ylab b.down,.kl-ylab span.down{color:var(--down)}
 /* 单根选中带（点击蜡烛）：竖向高亮 + 顶部日期徽标，撤选中即隐藏 */
 .kl-pick{position:absolute;z-index:13;top:0;display:none;pointer-events:none;
   background:color-mix(in srgb,var(--accent) 11%,transparent);
@@ -1429,14 +1459,6 @@ body.mobile .sd-grid{grid-template-columns:1fr 1fr}
 .chip-chart text{font-variant-numeric:tabular-nums}
 .chip-tip{margin:8px 0 0;font-size:10px;line-height:1.6;color:var(--faint)}
 /* ── 盘口卡（对标众赢）：基本信息 + 买卖五档 / 逐笔成交 ── */
-.dp-id{display:flex;align-items:center;gap:7px;margin-bottom:2px;min-width:0}
-.dp-id b{font-size:13.5px;font-weight:700;flex:none;letter-spacing:-.01em}
-.dp-id b.up{color:var(--up)}
-.dp-id b.down{color:var(--down)}
-/* 代码做成小胶囊，和名称/涨跌一起形成「身份行」的视觉层次 */
-.dp-id .num{flex:none;font-size:9.5px;line-height:1.5;padding:1px 5px;border-radius:4px;
-  color:var(--faint);font-family:var(--mono);letter-spacing:.04em;
-  background:color-mix(in srgb,var(--panel-2) 70%,transparent);border:1px solid var(--border-soft)}
 /* 两融标识：支持融资买入=强调色实心；非两融=弱化描边 */
 .dp-tag{flex:none;font-size:9px;line-height:1.5;padding:1px 5px;border-radius:4px;
   white-space:nowrap;letter-spacing:.02em}
@@ -1459,14 +1481,15 @@ body.mobile .sd-grid{grid-template-columns:1fr 1fr}
   backdrop-filter:blur(14px);-webkit-backdrop-filter:blur(14px);animation:qaIn .12s ease-out}
 .dp-conpop[hidden]{display:none}
 .dp-conpop span{white-space:nowrap;overflow:hidden;text-overflow:ellipsis;line-height:1.75}
-.dp-head{display:flex;align-items:baseline;gap:10px;margin-bottom:8px}
-/* 涨跌箭头：纯 CSS 三角，跟着方向变色 */
-.dp-arrow{width:0;height:0;flex:none;align-self:center;
+.dp-head{display:flex;align-items:baseline;gap:8px;margin-bottom:7px}
+.dp-last{font-size:19px;font-weight:700;font-variant-numeric:tabular-nums}
+/* 涨跌幅紧跟价格：箭头 + 涨跌额 + 百分比，同一行内不换行 */
+.dp-chg{display:flex;align-items:center;gap:5px;font-size:11.5px;font-variant-numeric:tabular-nums;white-space:nowrap}
+.dp-chg.up{color:var(--up)} .dp-chg.down{color:var(--down)}
+.dp-arrow{width:0;height:0;flex:none;
   border-left:3.5px solid transparent;border-right:3.5px solid transparent}
 .dp-arrow.up{border-bottom:5px solid var(--up)}
 .dp-arrow.down{border-top:5px solid var(--down)}
-.dp-last{font-size:19px;font-weight:700;font-variant-numeric:tabular-nums}
-.dp-chg{display:flex;gap:6px;font-size:11.5px;font-variant-numeric:tabular-nums}
 .dp-time{margin-left:auto;font-size:10px;color:var(--faint);font-variant-numeric:tabular-nums}
 .dp-head .up,.dp-foot b.up{color:var(--up)}
 .dp-head .down,.dp-foot b.down{color:var(--down)}

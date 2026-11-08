@@ -2059,6 +2059,17 @@ export function mountKline(el: HTMLElement): KlineChartHandle {
   tip.className = "kl-tip";
   tip.style.display = "none";
   el.appendChild(tip);
+  /* ── 水平价格轴标签：跟随鼠标 Y，显示该价位 + 相对当前 K 线的涨跌幅（仅主图） ── */
+  const ylab = document.createElement("div");
+  ylab.className = "kl-ylab";
+  ylab.style.display = "none";
+  el.appendChild(ylab);
+  const mainPaneId = (() => {
+    const panes = chart.getPaneOptions() as unknown;
+    const p = (Array.isArray(panes) ? panes[0] : panes) as { id?: string } | null;
+    return p?.id || "candle_pane";
+  })();
+  const hideYlab = () => { ylab.style.display = "none"; };
   let period: TipPeriod = "d";
 
   /* ── 图内右上角指标图例：色块 + 名称；操盘趋势按本面板数据判多空 ── */
@@ -2111,16 +2122,16 @@ export function mountKline(el: HTMLElement): KlineChartHandle {
       } } } });
     }
     // 框选模式下已有区间卡：不再叠一张十字光标卡（两张同风格浮卡会互相打架）
-    if (rangeMode && lastSel) { tip.style.display = "none"; return; }
-    const ch = args[0] as { x?: number; y?: number } | null;
-    if (!ch || ch.x == null || ch.y == null) { tip.style.display = "none"; return; }
+    if (rangeMode && lastSel) { tip.style.display = "none"; hideYlab(); return; }
+    const ch = args[0] as { x?: number; y?: number; paneId?: string } | null;
+    if (!ch || ch.x == null || ch.y == null) { tip.style.display = "none"; hideYlab(); return; }
     const list = chart.getDataList() as { timestamp: number; open: number; high: number; low: number; close: number; volume?: number; amount?: number; date?: string }[];
     // v10 crosshair 事件只带坐标，经 convertFromPixel 反查数据索引（策影同款）
     const hit = chart.convertFromPixel([{ x: ch.x }]) as unknown;
     const di = (Array.isArray(hit) ? hit[0] : hit)?.dataIndex as number | undefined;
     chart.overrideIndicator({ name: "ZY_TREND_HISTOGRAM", extendData: di ?? list.length - 1 });
     const bar = di != null ? list[di] : undefined;
-    if (!bar) { tip.style.display = "none"; return; }
+    if (!bar) { tip.style.display = "none"; hideYlab(); return; }
     const prev = di! > 0 ? list[di! - 1] : undefined;
     const base = prev?.close || bar.open;                 // 涨跌/振幅基准（首根 vs 开盘）
     const chg = bar.close - base;
@@ -2129,6 +2140,20 @@ export function mountKline(el: HTMLElement): KlineChartHandle {
     const pos = rangePosition(list, di!);
     const posTxt = pos == null ? "—" : pos.toFixed(1) + "%";
     const cls = chg > 0 ? "up" : chg < 0 ? "down" : "";
+    // 水平价格轴标签：仅主图显示；价格由像素 Y 反查，涨跌幅以当前 K 线基准计算
+    if (!ch.paneId || ch.paneId === mainPaneId) {
+      const pt = chart.convertFromPixel([{ y: ch.y }], { paneId: mainPaneId }) as unknown;
+      const yv = (Array.isArray(pt) ? pt[0] : pt)?.value as number | undefined;
+      if (yv != null && Number.isFinite(yv)) {
+        const ypct = base ? ((yv - base) / base) * 100 : 0;
+        const ycls = ypct > 0 ? "up" : ypct < 0 ? "down" : "";
+        ylab.innerHTML = `<b class="num ${ycls}">${yv.toFixed(2)}</b>` +
+          `<span class="num ${ycls}">${sgn(ypct)}%</span>`;
+        ylab.style.display = "block";
+        const half = (ylab.offsetHeight || 28) / 2 + 2;
+        ylab.style.top = Math.max(half, Math.min(ch.y, el.clientHeight - half)) + "px";
+      } else hideYlab();
+    } else hideYlab();
     // 紧凑分组：OHLC 一行 · 涨跌/振幅/位置 一行 · 量/额 一行（减少遮挡）
     const kv = (k: string, v: string, c = "") => `<span>${k}<b class="num ${c}">${v}</b></span>`;
     tip.innerHTML =
@@ -2145,6 +2170,48 @@ export function mountKline(el: HTMLElement): KlineChartHandle {
     tip.style.top = (flipY ? ch.y - h - 16 : ch.y + 16) + "px";
   };
   try { chart.subscribeAction("onCrosshairChange", onCross as never); } catch { /* 忽略 */ }
+
+  /* ── 双击吸附：把十字光标水平线锁到该根 K 线的高点/低点（按双击位置判定） ── */
+  const onDbl = (e: MouseEvent) => {
+    if (e.button !== 0 || rangeMode || onWidget(e)) return;
+    const rect = el.getBoundingClientRect();
+    const x = e.clientX - rect.left, y = e.clientY - rect.top;
+    // 只处理主图：成交量 / MACD 等副图双击不参与吸附
+    const pane = chart.getSize(mainPaneId, "main");
+    if (!pane || y < pane.top || y > pane.top + pane.height) return;
+    const list = chart.getDataList() as unknown as Bar[];
+    const hit = chart.convertFromPixel([{ x }]) as unknown;
+    const di = (Array.isArray(hit) ? hit[0] : hit)?.dataIndex as number | undefined;
+    const bar = di != null ? list[di] : undefined;
+    if (!bar) return;
+    const hiPx = chart.convertToPixel(
+      { dataIndex: di, value: bar.high }, { paneId: mainPaneId },
+    ) as unknown as { y?: number };
+    const loPx = chart.convertToPixel(
+      { dataIndex: di, value: bar.low }, { paneId: mainPaneId },
+    ) as unknown as { y?: number };
+    if (hiPx?.y == null || loPx?.y == null) return;
+    // 以影线区间中点分界：靠近上沿吸高点，靠近下沿吸低点
+    const upper = y <= (hiPx.y + loPx.y) / 2;
+    const snapY = upper ? hiPx.y : loPx.y;
+    // executeAction 锁住十字光标但不触发订阅，这里手动补一次浮卡/价格轴标签刷新
+    chart.executeAction("onCrosshairChange", { x, y: snapY, paneId: mainPaneId });
+    onCross({ x, y: snapY, paneId: mainPaneId });
+    // 像素取整会让反查价格略偏离极值，轴标签按精确的 high/low 覆写
+    const snapVal = upper ? bar.high : bar.low;
+    const prev = di! > 0 ? list[di! - 1] : undefined;
+    const base = prev?.close || bar.open;
+    const pct = base ? ((snapVal - base) / base) * 100 : 0;
+    const kcls = pct > 0 ? "up" : pct < 0 ? "down" : "";
+    ylab.innerHTML = `<b class="num ${kcls}">${snapVal.toFixed(2)}</b>` +
+      `<span class="num ${kcls}">${sgn(pct)}%</span>`;
+    ylab.style.display = "block";
+    const half = (ylab.offsetHeight || 28) / 2 + 2;
+    ylab.style.top = Math.max(half, Math.min(snapY, el.clientHeight - half)) + "px";
+    e.preventDefault();
+    e.stopPropagation();
+  };
+  el.addEventListener("dblclick", onDbl, true);
 
   /* ── 框选区间统计（策影鼠标框选移植）：拖拽一段 → 涨跌幅 / 振幅 / 量额 / 资金 ──
    *  · 框选模式（工具栏「框选」）：左键直接拖，无需修饰键；期间禁用图表平移
@@ -2850,12 +2917,14 @@ export function mountKline(el: HTMLElement): KlineChartHandle {
       el.removeEventListener("mousedown", onSelDown, true);
       el.removeEventListener("mousemove", onSelMove, true);
       el.removeEventListener("mouseup", onSelUp, true);
+      el.removeEventListener("dblclick", onDbl, true);
       sel.remove();
       selTip.remove();
       volumeSettings.destroy();
       mainCostSettings.destroy();
       maSettings.destroy();
       tip.remove();
+      ylab.remove();
       legend.remove();
       pick.remove();
       nav.remove();

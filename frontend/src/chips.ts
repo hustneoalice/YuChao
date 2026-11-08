@@ -29,7 +29,7 @@ const TTL = 10 * 60 * 1000;
 const RETRY = 60 * 1000;
 
 /** 指数没有流通筹码概念，和主流软件一样不显示 */
-function isIndexSymbol(symbol: string): boolean {
+export function isIndexSymbol(symbol: string): boolean {
   const [code, market] = symbol.split(".");
   if (market === "SH") return /^(000|999)/.test(code);
   if (market === "SZ") return /^399/.test(code);

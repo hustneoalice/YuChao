@@ -37,14 +37,13 @@ export async function renderCorepicks(): Promise<void> {
     const pending = requestedAt > Date.now() - 15000 && !busy && (!latest || Date.parse(latest.created_at) < requestedAt);
     if (busy || (latest && Date.parse(latest.created_at) >= requestedAt)) requestedAt = 0;
     (el("run") as HTMLButtonElement).disabled = !!busy || pending;
-    el("status").textContent = busy ? `${busy.label} · ${busy.stage || busy.status} ${busy.message || ""}` : pending ? "计算请求已提交，等待后台开始…" : recent?.status === "failed" ? `最近计算失败：${recent.error || recent.message}；保留上一份结果。` : latest ? `${status(latest.status)} · ${latest.message} · ${time(latest.created_at)} · ${latest.trigger === "auto" ? "自动" : "手动"}` : "尚未生成结果，点击立即计算。";
+    el("status").textContent = busy ? `${busy.label} · ${busy.stage || busy.status} ${busy.message || ""}` : pending ? "计算请求已提交，等待后台开始…" : recent?.status === "failed" ? `最近计算失败：${recent.error || recent.message}；保留上一份结果。` : latest ? "" : "尚未生成结果，点击立即计算。";
     history().innerHTML = '<option value="">最新结果</option>' + data.history.map(d => `<option value="${esc(d)}">${esc(d)}</option>`).join("");
     history().value = data.history.includes(date) ? date : "";
     el("run").textContent = date ? "计算该日" : "立即计算";
     el("meta").textContent = result ? `结果交易日 ${result.date} · 生成于 ${time(result.created_at)} · ${result.trigger === "auto" ? "自动" : "手动"} · 合格板块 ${result.selected_blocks.length} 个 · 入选 ${result.items.length} 条${result.previous_available ? ` · 已排除 ${result.previous_date} 优选板块` : ` · ${result.previous_date || "上一交易日"} 无模型记录，本次未执行昨日排除`}` : "";
     table.render(result?.items || []);
     el("empty").textContent = !result ? (date ? `${date} 尚未生成结果，可点击“计算该日”。` : "暂无已完成结果。") : result.items.length < 4 ? `本次符合条件 ${result.items.length} 条，不自动降低条件补足。` : "";
-    el("note").textContent = result ? `${result.note} 本次缺少有效资金或占比剔除 ${result.excluded_stock_records} 条成分记录（跨板块可能重复）。` : "板块涨幅采用成分股平均涨幅，数据缺失不当作0。";
     el("selected").innerHTML = result?.selected_blocks.length ? result.selected_blocks.map(b => `<p><b>${esc(b.category)} · ${esc(b.name)}</b>：涨幅第 ${b.change_rank} 名 / ${pct(b.change_rate)}，主力净额 ${money(b.main.net)}，本板块独立选取最多4只。</p>`).join("") : '<p>没有符合条件的优选板块。</p>';
     renderCandidates();
     el("runs").innerHTML = data.runs.map(r => `<p>${esc(time(r.created_at))} · ${esc(r.date)} · ${r.trigger === "auto" ? "自动" : "手动"} · ${esc(status(r.status))} · ${esc(r.message)}</p>`).join("") || "暂无运行记录";

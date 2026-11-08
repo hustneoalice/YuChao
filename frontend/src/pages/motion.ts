@@ -48,9 +48,8 @@ export async function loadMotion(): Promise<void> {
     }
     el("status").style.color="";
     rows=result.items;paint();dateInput().value=selectedDate || result.as_of || "";
-    el("status").textContent=result.total ? `评分日 ${result.as_of} · ${result.eligible} 只符合评分条件 · 展示前 ${rows.length} 名` : `${result.as_of || "所选日期"} 暂无同日资金数据`;
+    el("status").textContent=result.total ? "" : `${result.as_of || "所选日期"} 暂无同日资金数据`;
     el("meta").textContent=`范围：沪深A股 · 有资金记录 ${result.total} 只 · 净额非正或缺失 ${result.excluded.net} 只 · 缺成交额 ${result.excluded.amount} 只 · 历史量不足或无效 ${result.excluded.history} 只 · ${result.model_version}`;
-    el("note").textContent=result.note;
   } catch(error) {
     if(request.signal.aborted) return;
     el("status").textContent=`加载失败：${error instanceof Error?error.message:"请重试"}`;

@@ -255,8 +255,6 @@
         <button class="hbtn" id="motion-latest">最新资金日</button>
         <span class="tp-sep"></span>
       </div>
-      <div class="tp-note" id="motion-note">试验模型，非众赢原公式。</div>
-      <div class="tp-note">资金净额＋当日占比＋相对20日放量。沪深A股统一评分，只纳入主力净流入为正且同日成交额、此前20日成交量齐全的股票。榜单最多50只；表头排序仅作用于榜内股票。</div>
       <div class="tp-status"><span id="motion-status" role="status" aria-live="polite"></span>
         <span id="motion-meta" class="tp-meta"></span></div>
       <div class="tp-table" id="motion-wrap" aria-label="主力动向近似力度榜" aria-busy="false"></div>
@@ -307,14 +305,14 @@
           <span class="sub" id="tgt-status"></span>
         </div>
         <div id="tgt-conds"></div>
-        <!-- 六分段理论示意图：示意 K 线 + 短线操盘叠加，六段各拉线说明（可收起） -->
+        <!-- 六分段理论示意图：示意 K 线 + 短线趋势指标叠加，六段各拉线说明（默认收起，hover/点击展开） -->
         <div class="segmap" id="tgt-segmap">
           <div class="segmap-head">
             <b>六分段理论示意图</b>
-            <span class="segmap-sub">围绕日线短线趋势线的六个位置 · 超跌 → 反弹 → 突破 → 超涨 → 回踩 → 跌破</span>
+            <span class="segmap-sub">围绕日线短线趋势指标（MA7/MA10）的六个位置 · 超跌 → 反弹 → 突破 → 超涨 → 回踩 → 跌破</span>
             <span class="sp"></span>
             <span class="segmap-lg" id="tgt-segmap-lg"></span>
-            <button class="hbtn" id="tgt-segmap-btn" aria-expanded="true">收起</button>
+            <button class="hbtn" id="tgt-segmap-btn" aria-expanded="false">展开</button>
           </div>
           <div class="segmap-body" id="tgt-segmap-body"></div>
         </div>
@@ -435,8 +433,6 @@
         <button class="hbtn" id="cp-latest">最新结果</button>
         <label>已存结果 <select id="cp-history" aria-label="已保存结果日期"><option value="">最新结果</option></select></label>
       </div>
-      <div class="tp-note">行业 / 题材 / 地域全部涨幅 >2% 且主力净流入为正的板块，排除昨日优选板块。每个板块先取主力净流入前12名，再按当日主力占比降序选最多4只（全部A股统一排名）；同股可入选多个板块，不足4只不自动放宽。</div>
-      <div class="tp-note" id="cp-note"></div>
       <div class="tp-status"><span id="cp-status" role="status" aria-live="polite"></span><span id="cp-meta" class="tp-meta"></span></div>
       <div class="tp-status"><b class="tp-scope">核心标名单</b><span>每个合格板块最多 4 只</span>
         <span id="cp-empty" class="tp-meta"></span></div>

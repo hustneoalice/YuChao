@@ -65,9 +65,8 @@ function capYi(v: number | null | undefined): string {
 }
 
 /* ── 名称 / 行业 / 概念 / 现价 ── */
-function headHtml(d: DepthQuote, q: Quote | null, symbol: string): string {
+function headHtml(d: DepthQuote, q: Quote | null): string {
   const chgCls = pnlClass(d.pct);
-  const arrow = chgCls ? `<i class="dp-arrow ${chgCls}"></i>` : "";
   const cons = (q?.concept ?? "").split(/[,，、;；\s]+/).map((x) => x.trim())
     .filter((c) => c && c !== q?.industry);   // 概念里常回带行业名，避免和行业 chip 重复
   const ind = q?.industry ? `<span class="ind">${esc(q.industry)}</span>` : "";
@@ -81,15 +80,20 @@ function headHtml(d: DepthQuote, q: Quote | null, symbol: string): string {
     : d.margin === false
       ? `<span class="dp-tag no" title="非两融标的：不支持融资买入">非两融</span>`
       : "";
-  return `<div class="dp-id"><b class="${chgCls}">${esc(d.name || q?.name || symbol)}</b>
-      <span class="num">${esc(symbol.split(".")[0])}</span>${rz}</div>
-    <div class="dp-head">
+  const chgTxt = d.pct == null ? "" : (d.pct > 0 ? "+" : "") + fmt(d.pct) + "%";
+  return `<div class="dp-head">
       <div class="dp-last ${chgCls}">${fmt(d.price)}</div>
-      <div class="dp-chg ${chgCls}">${arrow}${d.chg != null ? (d.chg > 0 ? "+" : "") + fmt(d.chg) : "—"}
-        <span>${d.pct != null ? (d.pct > 0 ? "+" : "") + fmt(d.pct) + "%" : "—"}</span></div>
+      ${d.pct == null ? "" : `<div class="dp-chg ${chgCls}"><i class="dp-arrow ${chgCls}"></i>` +
+        `${d.chg != null ? (d.chg > 0 ? "+" : "") + fmt(d.chg) : ""}<span>${chgTxt}</span></div>`}
       <div class="dp-time">${esc(d.time || "")}</div>
     </div>
-    ${ind || shown ? `<div class="dp-con"${dataCons}>${ind}${shown}${more}</div>` : ""}`;
+    ${rz || ind || shown ? `<div class="dp-con"${dataCons}>${rz}${ind}${shown}${more}</div>` : ""}`;
+}
+
+/** 卡片标题行的紧凑摘要：名称 + 代码（随盘口轮询刷新，涨跌幅放在正文价格之后） */
+export function headSubHtml(symbol: string, name: string): string {
+  return `<span class="rh-nm" title="${esc(name)}">${esc(name)}</span>` +
+    `<span class="rh-cd num">${esc(symbol.split(".")[0])}</span>`;
 }
 
 /* ── 概念浮层：默认只露前 5 个，hover 概念行 / 点「更多」展开全量 ── */
@@ -224,7 +228,7 @@ function depthHtml(symbol: string, detailed: boolean, preview: boolean, q: Quote
   if (s.error) return `<div class="bempty">${esc(s.error)}</div>`;
   const d = s.data;
   if (!d) return `<div class="bempty">${s.busy ? "盘口加载中…" : "加载盘口…"}</div>`;
-  const head = headHtml(d, q, symbol);
+  const head = headHtml(d, q);
   const grid = overviewGrid(d, q);
   if (!d.applicable || (!d.bids.length && !d.asks.length)) {
     return `${head}${grid}<div class="dp-sec">买卖五档</div>
@@ -297,7 +301,7 @@ function poll(card: HTMLElement, run: () => Promise<boolean>, paint: () => strin
   timer = window.setInterval(() => void tick(), POLL);
 }
 
-export function bindOrderbook(card: HTMLElement, symbol: string, mode: string, getQuote: () => Quote | null): void {
+export function bindOrderbook(card: HTMLElement, symbol: string, mode: string, getQuote: () => Quote | null, name = ""): void {
   bindConPop(card);
   poll(card,
     async () => {
@@ -313,7 +317,13 @@ export function bindOrderbook(card: HTMLElement, symbol: string, mode: string, g
         return true;
       } finally { s.busy = false; }
     },
-    () => depthHtml(symbol, mode === "detailed", false, getQuote()));
+    () => {
+      // 名称/代码在标题行，随盘口轮询同步刷新，避免头部数据滞后
+      const d = dstate(symbol).data;
+      const sub = card.querySelector<HTMLElement>("[data-head-sub]");
+      if (d && sub) sub.innerHTML = headSubHtml(symbol, d.name || getQuote()?.name || name || symbol);
+      return depthHtml(symbol, mode === "detailed", false, getQuote());
+    });
 }
 
 /** 打开个股即预取首屏五档：切到盘口卡直接有数，不用等 5s 轮询 */

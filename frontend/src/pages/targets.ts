@@ -195,8 +195,9 @@ const SEG_TINTS = ["var(--down)", "var(--down)", "var(--up)", "var(--accent)", "
 const SEG_SAMPLE = { symbol: "002472.SZ", name: "双环传动", bars: [] as Bar[], at: 0, loading: false };
 const SEG_SAMPLE_TTL = 5 * 60 * 1000;
 
-let segMapOn = true;
-try { segMapOn = localStorage.getItem("yc_tgt_segmap") !== "0"; } catch { /* 默认展开 */ }
+let segMapOn = false;
+try { segMapOn = localStorage.getItem("yc_tgt_segmap") === "1"; } catch { /* 默认收起 */ }
+let segMapHover = false;
 
 function segSampleBars(): Bar[] {
   const s = SEG_SAMPLE;
@@ -270,7 +271,28 @@ function segMapSvg(): string {
     runStart = i;
   }
 
-  /* 1) 真实 K 线：影线用 high/low，实体用开盘/收盘，阳/阴随主题涨跌色 */
+  /* 1) 短线趋势指标（与行情页 SHORT_TREND_CHANNEL 同款）：MA7/MA10 通道逐柱填充，
+     站上慢线（强）橙柱、跌破慢线（弱）蓝柱，颜色随趋势主题色 */
+  const sma = (p: number): (number | null)[] => {
+    let sum = 0;
+    return bars.map((b, i) => {
+      sum += b.close;
+      if (i >= p) sum -= bars[i - p].close;
+      return i >= p - 1 ? sum / p : null;
+    });
+  };
+  const fast = sma(7), slow = sma(10);
+  let channel = "";
+  for (let i = 0; i < n; i++) {
+    const f = fast[i], s = slow[i];
+    if (f == null || s == null) continue;
+    const yTop = yAt(Math.max(f, s)), yBot = yAt(Math.min(f, s));
+    channel += `<rect x="${(xAt(i) - bw / 2).toFixed(1)}" y="${yTop.toFixed(1)}"` +
+      ` width="${bw.toFixed(1)}" height="${Math.max(0.8, yBot - yTop).toFixed(1)}" rx="1"` +
+      ` style="fill:${bars[i].close >= s ? pal.fast : pal.slow}" opacity=".82"/>`;
+  }
+
+  /* 2) 真实 K 线：影线用 high/low，实体用开盘/收盘，阳/阴随主题涨跌色 */
   const candles = bars.map((b, i) => {
     const up = b.close >= b.open, x = xAt(i);
     const col = up ? "var(--up)" : "var(--down)";
@@ -281,16 +303,7 @@ function segMapSvg(): string {
       ` rx="1" style="fill:${col}" opacity=".85"/>`;
   }).join("");
 
-  /* 2) 短线趋势线：MA10 慢线按「站上=橙 / 跌破=蓝」逐段着色，MA7 快线细灰线叠加 */
-  const sma = (p: number): (number | null)[] => {
-    let sum = 0;
-    return bars.map((b, i) => {
-      sum += b.close;
-      if (i >= p) sum -= bars[i - p].close;
-      return i >= p - 1 ? sum / p : null;
-    });
-  };
-  const fast = sma(7), slow = sma(10);
+  /* 3) 快慢线：与指标同款配色（快线橙 / 慢线蓝），叠在通道柱之上 */
   const strokeAt = (arr: (number | null)[], colorAt: (i: number) => string, w: number, alpha: number): string => {
     let out = "";
     for (let i = 1; i < n; i++) {
@@ -302,10 +315,10 @@ function segMapSvg(): string {
     }
     return out;
   };
-  const slowLine = strokeAt(slow, (i) => (bars[i].close >= (slow[i] as number) ? pal.fast : pal.slow), 1.7, .95);
-  const fastLine = strokeAt(fast, () => "var(--dim)", 1, .8);
+  const fastLine = strokeAt(fast, () => pal.fast, 1.2, .95);
+  const slowLine = strokeAt(slow, () => pal.slow, 1.2, .95);
 
-  /* 3) 趋势柱（收盘 − 慢线）：下半副图，零轴上红下绿 */
+  /* 4) 趋势柱（收盘 − 慢线）：下半副图，零轴上红下绿 */
   const histMid = (H0 + H1) / 2;
   const dev = bars.map((b, i) => (slow[i] == null ? null : b.close - (slow[i] as number)));
   const maxAbs = Math.max(1, ...dev.filter((v): v is number => v != null).map((v) => Math.abs(v)));
@@ -321,7 +334,7 @@ function segMapSvg(): string {
   const histAxis = `<line x1="${X0}" y1="${histMid}" x2="${X1}" y2="${histMid}" style="stroke:var(--axis)" stroke-width="1"/>` +
     `<text x="${X0 - 4}" y="${(histMid + 3.5).toFixed(1)}" text-anchor="end" style="fill:var(--faint)" font-size="9.5">0</text>`;
 
-  /* 3) 六段分别拉线：钉在该段首次出现的收盘，右侧标注段名 + 操作含义 */
+  /* 5) 六段分别拉线：钉在该段首次出现的收盘，右侧标注段名 + 操作含义 */
   const marks: { seg: number; idx: number; x: number; y: number }[] = [];
   for (let i = 1; i <= 6; i++) {
     const idx = segs.indexOf(i, base);
@@ -349,8 +362,8 @@ function segMapSvg(): string {
 
   return `<svg viewBox="0 0 880 272" role="img"` +
     ` aria-label="六分段理论示意图：真实日 K 走完超跌、反弹、突破、超涨、回踩、跌破六个位置">` +
-    `${bands}${hist}${histAxis}${candles}${fastLine}${slowLine}${leads}${last}</svg>` +
-    `<div class="segmap-note">${esc(data.label)} · 日K（前复权）｜K 线 + 短线趋势线（MA7/MA10），` +
+    `${bands}${channel}${hist}${histAxis}${candles}${fastLine}${slowLine}${leads}${last}</svg>` +
+    `<div class="segmap-note">${esc(data.label)} · 日K（前复权）｜K 线 + 短线趋势指标（MA7/MA10 橙/蓝通道柱），` +
     `下方为趋势柱（收盘−慢线）｜六段取最近一个完整循环｜当前段：${SEGFULL[cur]}</div>`;
 }
 
@@ -358,10 +371,11 @@ function applySegMapState(): void {
   const body = document.getElementById("tgt-segmap-body");
   const btn = document.getElementById("tgt-segmap-btn");
   if (!body) return;
-  body.style.display = segMapOn ? "" : "none";
+  const open = segMapOn || segMapHover;
+  body.style.display = open ? "" : "none";
   if (btn) {
     btn.textContent = segMapOn ? "收起" : "展开";
-    btn.setAttribute("aria-expanded", String(segMapOn));
+    btn.setAttribute("aria-expanded", String(open));
   }
 }
 
@@ -371,9 +385,10 @@ function renderSegMap(): void {
   const pal = trendPalette();
   const lg = document.getElementById("tgt-segmap-lg");
   if (lg) {
-    lg.innerHTML = `<i style="background:${pal.fast}"></i>慢线站上（橙）` +
-      `<i style="background:${pal.slow}"></i>慢线跌破（蓝）` +
-      `<i style="background:var(--dim)"></i>快线 MA7` +
+    lg.innerHTML = `<i class="fill" style="background:${pal.fast}"></i>短线趋势·强（站上慢线）` +
+      `<i class="fill" style="background:${pal.slow}"></i>短线趋势·弱（跌破慢线）` +
+      `<i style="background:${pal.fast}"></i>快线 MA7` +
+      `<i style="background:${pal.slow}"></i>慢线 MA10` +
       `<i class="fill" style="background:linear-gradient(90deg,var(--up) 50%,var(--down) 50%)"></i>趋势柱（收盘−慢线）`;
   }
   body.innerHTML = segMapSvg();
@@ -817,8 +832,17 @@ export function initTargets(): void {
   document.getElementById("tgt-empty-clear")!.addEventListener("click", () => applyPreset("none"));
   /* 六分段示意图：静态内容只在启动渲染一次，展开/收起状态本地记忆 */
   renderSegMap();
+  /* 默认收起：点击按钮保持展开；鼠标移入整块示意图时临时弹出，移出恢复 */
+  const segmapBox = document.getElementById("tgt-segmap");
+  segmapBox?.addEventListener("mouseenter", () => {
+    if (!segMapOn && !segMapHover) { segMapHover = true; applySegMapState(); }
+  });
+  segmapBox?.addEventListener("mouseleave", () => {
+    if (segMapHover) { segMapHover = false; applySegMapState(); }
+  });
   document.getElementById("tgt-segmap-btn")!.addEventListener("click", () => {
     segMapOn = !segMapOn;
+    segMapHover = false;
     localStorage.setItem("yc_tgt_segmap", segMapOn ? "1" : "0");
     applySegMapState();
   });
