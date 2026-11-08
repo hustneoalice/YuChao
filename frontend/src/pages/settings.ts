@@ -1,9 +1,9 @@
 /* 设置页：数据底座（真实 API）· 外观 · VIP · 账户 · 飞书推送（F10）· 大模型（F11） */
-import { authApi, dataApi, meApi, type DataStatus, type HealthReport,
+import { adminApi, authApi, dataApi, meApi, type AdminUser, type DataStatus, type HealthReport,
          type UpdateLogItem, type UpdateSnapshot, type LlmCfg, type FeishuCfg } from "../api";
 import { esc, fmt } from "../fmt";
 import { ic } from "../icons";
-import { getState, patch, setUser, isVip } from "../store";
+import { getState, patch, setUser, isVip, subscribe } from "../store";
 import { toast, openModal } from "../ui";
 import { logout } from "../auth";
 
@@ -15,6 +15,8 @@ const NAV: [string, string, string][] = [
   ["feishu", "飞书推送", "paper-plane-tilt"],
   ["llm", "大模型", "spark"],
 ];
+/* 管理端专属：普通/VIP 用户与可用时间 */
+const NAV_ADMIN: [string, string, string] = ["users", "用户管理", "user"];
 let tab = "data";
 let tasks: { kind: string; label: string; description: string }[] = [];
 
@@ -32,7 +34,9 @@ const STAGE_TEXT: Record<string, [string, string]> = {
 };
 
 async function render(): Promise<void> {
-  document.getElementById("setnav")!.innerHTML = NAV.map((n) =>
+  const nav = getState().user?.role === "admin" ? [...NAV, NAV_ADMIN] : NAV;
+  if (tab === "users" && getState().user?.role !== "admin") tab = "data";
+  document.getElementById("setnav")!.innerHTML = nav.map((n) =>
     `<button data-set="${n[0]}" class="${tab === n[0] ? "on" : ""}">${ic(n[2], 15)}<span>${n[1]}</span></button>`).join("");
   document.querySelectorAll<HTMLElement>("#setnav button").forEach((b) =>
     b.addEventListener("click", () => { tab = b.dataset.set!; void render(); }));
@@ -42,6 +46,7 @@ async function render(): Promise<void> {
   else if (tab === "look") renderLook(body);
   else if (tab === "vip") renderVip(body);
   else if (tab === "account") renderAccount(body);
+  else if (tab === "users") await renderAdminUsers(body);
   else if (tab === "feishu") await renderFeishu(body);
   else if (tab === "llm") await renderLlm(body);
 }
@@ -456,9 +461,16 @@ function renderVip(body: HTMLElement): void {
   const u = getState().user;
   const vip = isVip();
   const until = u?.pro_expires_at?.slice(0, 10);
+  const since = u?.pro_starts_at?.slice(0, 10);
+  const remainDays = until ? Math.max(0, Math.ceil((Date.parse(`${until}T23:59:59`) - Date.now()) / 86400000)) : null;
+  const windowText = !u ? "—"
+    : u.role === "admin" ? "管理员 · 永久"
+    : vip ? `${since || "立即生效"} → ${until || "永久"}` : "未开通 · 由管理员设置可用时间";
   body.innerHTML =
     `<div class="setsec"><div class="sh">${ic("crown-simple", 15)}<h3>VIP 与订阅</h3><span class="sp"></span>` +
     `<span class="tag ${vip ? "vip" : "warn"}">${vip ? `VIP有效${until ? " · " + until + " 到期" : ""}` : u ? "免费版" : "未登录"}</span></div>` +
+    `<div class="setrow"><span class="lab">可用时间</span><div class="ctl"><span style="font-size:12.5px;color:var(--dim)">${windowText}</span>` +
+    (vip && remainDays != null ? `<span style="font-size:11px;color:var(--warn)">剩余 ${remainDays} 天</span>` : "") + `</div></div>` +
     `<div class="setrow"><span class="lab">当前方案</span><div class="ctl"><span style="font-size:12.5px">${vip ? "VIP · 完整指标" : "免费版 · 公开名单与开源指标"}</span>` +
     `<span style="font-size:11px;color:var(--faint)">${vip ? "会员权益由系统实时核对" : "VIP 指标由系统计算，未开通不显示"}</span></div></div>` +
     `<div class="setrow"><span class="lab">解锁能力</span><div class="ctl"><span style="font-size:12px;color:var(--dim)">K线 VIP 通道 · 核心标三因子明细 · 六分段判定 · 短中线趋势</span></div></div>` +
@@ -491,6 +503,116 @@ function renderAccount(body: HTMLElement): void {
   body.querySelectorAll<HTMLElement>("[data-ic]").forEach((el) => {
     if (!el.querySelector("svg")) el.innerHTML = ic(el.dataset.ic!, +(el.dataset.sz || 14)) + el.innerHTML;
   });
+}
+
+/* ── 管理端 · 普通/VIP 用户与可用时间 ── */
+let adminUsers: AdminUser[] = [];
+let adminEditing: string | null = null;
+
+function awText(v?: string | null): string {
+  return v ? v.slice(0, 16).replace("T", " ") : "";
+}
+
+function awValue(v?: string | null): string {
+  return v ? v.slice(0, 16) : "";
+}
+
+function awWindow(u: AdminUser): string {
+  if (!u.pro_starts_at && !u.pro_expires_at) return "未设置";
+  return `${awText(u.pro_starts_at) || "立即"} → ${awText(u.pro_expires_at) || "永久"}`;
+}
+
+function awName(u: AdminUser): string {
+  return u.username || u.email.split("@")[0] || u.email;
+}
+
+function awRow(u: AdminUser): string {
+  const lab = `<span class="lab">${esc(awName(u))}<br>` +
+    `<small style="color:var(--faint);font-weight:400">${esc(u.email)}</small></span>`;
+  if (adminEditing === u.id) {
+    return `<div class="setrow">${lab}<div class="ctl" style="flex-wrap:wrap;gap:6px">` +
+      `<span style="font-size:11px;color:var(--faint)">生效</span>` +
+      `<input class="field" id="aw-s" type="datetime-local" value="${awValue(u.pro_starts_at)}" style="width:168px">` +
+      `<span style="font-size:11px;color:var(--faint)">到期</span>` +
+      `<input class="field" id="aw-e" type="datetime-local" value="${awValue(u.pro_expires_at)}" style="width:168px">` +
+      `<button class="hbtn primary" data-save="${u.id}">保存</button>` +
+      `<button class="hbtn" data-clear="${u.id}">撤销 VIP</button>` +
+      `<button class="hbtn" data-edit="${u.id}">取消</button></div></div>`;
+  }
+  return `<div class="setrow">${lab}<div class="ctl">` +
+    `<span class="tag ${u.tier === "pro" ? "vip" : "flat"}">${u.tier === "pro" ? "VIP" : "普通"}</span>` +
+    `<span style="font-size:11.5px;color:var(--dim)">${awWindow(u)}</span>` +
+    `<button class="hbtn" data-edit="${u.id}">设置时间</button></div></div>`;
+}
+
+function awSection(title: string, list: AdminUser[]): string {
+  return `<div style="margin-top:10px"><div class="sh"><h3 style="font-size:12px">${title}</h3>` +
+    `<span class="sp"></span><span class="tag flat">${list.length}</span></div>` +
+    (list.length ? list.map(awRow).join("") : `<div class="setrow"><span class="lab" style="color:var(--faint)">暂无</span></div>`) +
+    `</div>`;
+}
+
+function bindAdminActions(body: HTMLElement): void {
+  const refresh = (): void => { void renderAdminUsers(body); };
+  body.querySelectorAll<HTMLElement>("[data-edit]").forEach((b) =>
+    b.addEventListener("click", () => {
+      adminEditing = adminEditing === b.dataset.edit ? null : b.dataset.edit!;
+      refresh();
+    }));
+  body.querySelectorAll<HTMLElement>("[data-clear]").forEach((b) =>
+    b.addEventListener("click", async () => {
+      const u = adminUsers.find((x) => x.id === b.dataset.clear);
+      if (!u || !window.confirm(`撤销 ${awName(u)} 的 VIP 权限？`)) return;
+      b.setAttribute("disabled", "true");
+      try {
+        await adminApi.setWindow(u.id, { enabled: false, start_at: null, end_at: null });
+        toast(`已撤销 ${awName(u)} 的 VIP 权限`);
+        adminEditing = null;
+        refresh();
+      } catch (e) {
+        toast((e as Error).message || "操作失败");
+        b.removeAttribute("disabled");
+      }
+    }));
+  body.querySelectorAll<HTMLElement>("[data-save]").forEach((b) =>
+    b.addEventListener("click", async () => {
+      const id = b.dataset.save!;
+      const s = (body.querySelector<HTMLInputElement>("#aw-s")?.value || "").trim();
+      const e = (body.querySelector<HTMLInputElement>("#aw-e")?.value || "").trim();
+      if (s && e && s >= e) { toast("生效时间必须早于到期时间"); return; }
+      b.setAttribute("disabled", "true");
+      try {
+        await adminApi.setWindow(id, { enabled: true, start_at: s || null, end_at: e || null });
+        toast("已更新可用时间");
+        adminEditing = null;
+        refresh();
+      } catch (err) {
+        toast((err as Error).message || "保存失败");
+        b.removeAttribute("disabled");
+      }
+    }));
+}
+
+async function renderAdminUsers(body: HTMLElement): Promise<void> {
+  if (getState().user?.role !== "admin") {
+    body.innerHTML = `<div class="setsec"><div class="empty" style="padding:40px"><b>仅管理员可见</b>` +
+      `<span>该页面用于维护普通用户 / VIP 用户的可用时间</span></div></div>`;
+    return;
+  }
+  try {
+    adminUsers = await adminApi.users();
+  } catch (e) {
+    body.innerHTML = `<div class="setsec"><div style="font-size:12px;color:var(--up)">${esc((e as Error).message || "用户列表读取失败")}</div></div>`;
+    return;
+  }
+  const vip = adminUsers.filter((u) => u.tier === "pro");
+  const free = adminUsers.filter((u) => u.tier !== "pro");
+  body.innerHTML =
+    `<div class="setsec"><div class="sh">${ic("user", 15)}<h3>用户管理</h3><span class="sp"></span>` +
+    `<span class="tag flat">${adminUsers.length} 位</span></div>` +
+    `<div style="font-size:11px;color:var(--faint);padding:2px 2px 8px">设置起止时间后，该用户在窗口内为 VIP，到期自动回落免费版；生效留空＝立即，到期留空＝永久。</div>` +
+    awSection("VIP 用户", vip) + awSection("普通用户", free) + `</div>`;
+  bindAdminActions(body);
 }
 
 /* ── F10 · 飞书推送（webhook/secret 不回显，留空 = 保持不变） ── */
@@ -796,6 +918,14 @@ export async function refreshUpChip(): Promise<void> {
 }
 
 export function initSettings(): void {
+  // 用户角色异步到达（登录 / 会话恢复）时重建导航，管理员专属页签不用等手动切页才出现
+  let lastRole = getState().user?.role;
+  subscribe(() => {
+    const role = getState().user?.role;
+    if (role === lastRole) return;
+    lastRole = role;
+    void render();
+  });
   void render();
   void refreshDatachip();
   void refreshUpChip();          // 启动即查一次更新活动（首屏就有徽章态）

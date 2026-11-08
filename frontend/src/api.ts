@@ -64,9 +64,14 @@ async function req<T>(path: string, init?: ReqOpts): Promise<T> {
 /* ── auth ── */
 export interface UserPublic {
   id: string; email: string; username?: string | null;
-  tier: "free" | "pro"; role: string; pro_expires_at?: string | null; created_at?: string | null;
+  tier: "free" | "pro"; role: string;
+  pro_starts_at?: string | null; pro_expires_at?: string | null; created_at?: string | null;
 }
 export interface TokenPair { token: string; user: UserPublic }
+export interface AdminUser {
+  id: string; email: string; username?: string | null; role: string; tier: "free" | "pro";
+  pro_starts_at?: string | null; pro_expires_at?: string | null; created_at?: string | null;
+}
 
 export const authApi = {
   register: (p: { email: string; password: string; username?: string }) =>
@@ -74,6 +79,13 @@ export const authApi = {
   login: (p: { identifier: string; password: string; remember?: boolean }) =>
     req<TokenPair>("/auth/login", { method: "POST", body: p }),
   me: () => req<UserPublic>("/auth/me"),
+};
+
+/* ── 管理端 · 用户与 VIP 时间 ── */
+export const adminApi = {
+  users: () => req<AdminUser[]>("/admin/users"),
+  setWindow: (id: string, p: { enabled: boolean; start_at: string | null; end_at: string | null }) =>
+    req<AdminUser>(`/admin/users/${encodeURIComponent(id)}/window`, { method: "PUT", body: p }),
 };
 
 /* ── F04 · 按用户设置云同步 ── */

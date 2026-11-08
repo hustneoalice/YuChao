@@ -119,7 +119,7 @@ def ensure_admin() -> Optional[dict]:
             (email, username)).fetchone()
         if taken:
             conn.execute(
-                "UPDATE users SET role='admin', tier='pro', pro_expires_at=NULL WHERE id=?",
+                "UPDATE users SET role='admin', tier='pro', pro_starts_at=NULL, pro_expires_at=NULL WHERE id=?",
                 (taken["id"],))
             conn.commit()
             logger.info("内置管理员已升级：%s", email)
@@ -148,7 +148,7 @@ def login(identifier: str, password: str, remember: bool = True) -> dict:
     try:
         col = "email" if is_email else "username"
         row = conn.execute(
-            f"SELECT id, email, username, password_hash, salt, tier, pro_expires_at, role "
+            f"SELECT id, email, username, password_hash, salt, tier, pro_starts_at, pro_expires_at, role "
             f"FROM users WHERE {col}=?", (identifier,)).fetchone()
     finally:
         conn.close()
@@ -166,7 +166,7 @@ def get_user(user_id: str) -> Optional[dict]:
     conn = get_conn()
     try:
         row = conn.execute(
-            "SELECT id, email, username, tier, pro_expires_at, role, created_at "
+            "SELECT id, email, username, tier, pro_starts_at, pro_expires_at, role, created_at "
             "FROM users WHERE id=?", (user_id,)).fetchone()
     finally:
         conn.close()
@@ -183,10 +183,82 @@ def list_users() -> list[dict]:
     return [{"id": r["id"], "email": r["email"]} for r in rows]
 
 
+# -- 管理端 · 用户与 VIP 时间 ----------------------------------------------
+
+def _admin_user(row: dict) -> dict:
+    """管理端视图：保留原始起止时间（即使当前未生效/已过期），另附实时 tier。"""
+    out = dict(row)
+    out["tier"] = effective_tier(out)
+    return out
+
+
+def admin_list_users() -> list[dict]:
+    """普通用户 / VIP 用户列表（不含 admin 自身）。"""
+    conn = get_conn()
+    try:
+        rows = conn.execute(
+            "SELECT id, email, username, role, tier, pro_starts_at, pro_expires_at, created_at "
+            "FROM users WHERE role<>'admin' ORDER BY created_at DESC").fetchall()
+    finally:
+        conn.close()
+    return [_admin_user(dict(r)) for r in rows]
+
+
+def _window_dt(raw: Optional[str], label: str) -> Optional[datetime]:
+    if not raw:
+        return None
+    try:
+        return datetime.fromisoformat(str(raw).strip())
+    except ValueError:
+        raise AuthError(f"{label}格式不正确")
+
+
+def set_user_window(user_id: str, start_at: Optional[str], end_at: Optional[str],
+                    enabled: bool = True) -> dict:
+    """管理员设置用户 VIP 可用时间：起止为空分别表示「立即生效 / 永久」；
+    enabled=False 则撤销 VIP（回到 free 并清空时间）。"""
+    start = _window_dt(start_at, "生效时间")
+    end = _window_dt(end_at, "到期时间")
+    if enabled and start and end and start >= end:
+        raise AuthError("生效时间必须早于到期时间")
+    conn = get_conn()
+    try:
+        row = conn.execute("SELECT role FROM users WHERE id=?", (user_id,)).fetchone()
+        if not row:
+            raise AuthError("用户不存在", 404)
+        if row["role"] == "admin":
+            raise AuthError("管理员为永久权限，不支持单独设置")
+        if enabled:
+            conn.execute(
+                "UPDATE users SET tier='pro', pro_starts_at=?, pro_expires_at=? WHERE id=?",
+                (start.isoformat() if start else None,
+                 end.isoformat() if end else None, user_id))
+        else:
+            conn.execute(
+                "UPDATE users SET tier='free', pro_starts_at=NULL, pro_expires_at=NULL WHERE id=?",
+                (user_id,))
+        conn.commit()
+        updated = conn.execute(
+            "SELECT id, email, username, role, tier, pro_starts_at, pro_expires_at, created_at "
+            "FROM users WHERE id=?", (user_id,)).fetchone()
+    finally:
+        conn.close()
+    return _admin_user(dict(updated))
+
+
 def effective_tier(user: dict) -> str:
-    """VIP 过期自动回落 free（只读判断）。pro_expires_at 为空 = 永久 VIP。"""
+    """VIP 实时判定：已到期或尚未生效一律回落 free。
+    pro_starts_at 为空 = 立即生效；pro_expires_at 为空 = 永久 VIP。"""
     if user.get("tier") != "pro":
         return "free"
+    now = datetime.now()
+    raw_start = user.get("pro_starts_at")
+    if raw_start not in (None, ""):
+        try:
+            if datetime.fromisoformat(str(raw_start)) > now:
+                return "free"
+        except ValueError:
+            logger.warning("pro_starts_at 解析失败，按已生效处理: %r", raw_start)
     raw = user.get("pro_expires_at")
     if raw in (None, ""):
         return "pro"
@@ -195,13 +267,14 @@ def effective_tier(user: dict) -> str:
     except ValueError:
         logger.warning("pro_expires_at 解析失败，按过期处理: %r", raw)
         return "free"
-    return "pro" if exp > datetime.now() else "free"
+    return "pro" if exp > now else "free"
 
 
 def _public_user(row: dict) -> dict:
     tier = effective_tier(row)
     return {"id": row["id"], "email": row["email"], "username": row.get("username"),
             "tier": tier, "role": row.get("role") or "user",
+            "pro_starts_at": row.get("pro_starts_at") if tier == "pro" else None,
             "pro_expires_at": row.get("pro_expires_at") if tier == "pro" else None,
             "created_at": row.get("created_at")}
 
@@ -215,7 +288,7 @@ def redeem_license(user_id: str, code: str) -> dict:
     conn = get_conn()
     try:
         user = conn.execute(
-            "SELECT id, tier, pro_expires_at FROM users WHERE id=?", (user_id,)).fetchone()
+            "SELECT id, tier, pro_starts_at, pro_expires_at FROM users WHERE id=?", (user_id,)).fetchone()
         if not user:
             raise AuthError("用户不存在", 401)
         # 原子兑换：仅当 status 仍为 unused 时占用，防并发「读后写」一码多用
@@ -236,7 +309,7 @@ def redeem_license(user_id: str, code: str) -> dict:
             except ValueError:
                 pass
         new_expires = base + timedelta(days=redeemed["duration_days"])
-        conn.execute("UPDATE users SET tier='pro', pro_expires_at=? WHERE id=?",
+        conn.execute("UPDATE users SET tier='pro', pro_starts_at=NULL, pro_expires_at=? WHERE id=?",
                      (new_expires.isoformat(), user_id))
         conn.commit()
     finally:

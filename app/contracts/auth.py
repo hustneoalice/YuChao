@@ -23,8 +23,27 @@ class UserPublic(BaseModel):
     username: Optional[str] = None
     tier: str                                  # free | pro（实时判定，非令牌快照）
     role: str
+    pro_starts_at: Optional[datetime] = None
     pro_expires_at: Optional[datetime] = None
     created_at: Optional[datetime] = None
+
+
+class AdminUserOut(BaseModel):
+    """管理端用户行：原始起止时间（含未生效/已过期），tier 为实时判定。"""
+    id: str
+    email: str
+    username: Optional[str] = None
+    role: str
+    tier: str
+    pro_starts_at: Optional[datetime] = None
+    pro_expires_at: Optional[datetime] = None
+    created_at: Optional[datetime] = None
+
+
+class WindowIn(BaseModel):
+    enabled: bool = Field(True, description="False=撤销 VIP；True=按起止时间设置")
+    start_at: Optional[str] = Field(None, description="生效时间（本地时间 ISO；空=立即生效）")
+    end_at: Optional[str] = Field(None, description="到期时间（本地时间 ISO；空=永久）")
 
 
 class TokenPair(BaseModel):

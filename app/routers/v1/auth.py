@@ -10,8 +10,8 @@ from pydantic import TypeAdapter
 
 from ...auth import deps, service
 from ...auth.deps import resolve_token
-from ...contracts.auth import (ActivationCode, CodesIn, LoginIn, RedeemIn,
-                               RedeemOut, RegisterIn, TokenPair, UserPublic)
+from ...contracts.auth import (ActivationCode, AdminUserOut, CodesIn, LoginIn, RedeemIn,
+                               RedeemOut, RegisterIn, TokenPair, UserPublic, WindowIn)
 from ...config import settings
 from ...errors import ApiError
 from ...stream.bus import make_publisher
@@ -84,3 +84,30 @@ def list_codes(limit: int = 100, token: str | None = Depends(resolve_token)):
     deps.require_admin(deps.require_user(token))
     return TypeAdapter(list[ActivationCode]).validate_python(
         service.list_codes(limit))
+
+
+@router.get("/admin/users", response_model=list[AdminUserOut],
+            summary="普通/VIP 用户列表（admin）")
+def admin_users(token: str | None = Depends(resolve_token)):
+    deps.require_admin(deps.require_user(token))
+    return TypeAdapter(list[AdminUserOut]).validate_python(
+        service.admin_list_users())
+
+
+@router.put("/admin/users/{user_id}/window", response_model=AdminUserOut,
+            summary="设置用户 VIP 可用时间（admin）")
+def admin_set_window(user_id: str, body: WindowIn, token: str | None = Depends(resolve_token)):
+    admin = deps.require_admin(deps.require_user(token))
+    try:
+        out = service.set_user_window(user_id, body.start_at, body.end_at, body.enabled)
+    except service.AuthError as e:
+        raise ApiError("auth_error", e.message, e.status_code)
+    # vip.changed → license:{user_id} 频道，前端实时刷新徽章 / VIP 文案
+    try:
+        make_publisher().publish(
+            f"license:{user_id}", "vip.changed",
+            {"status": out["tier"], "starts_at": out["pro_starts_at"],
+             "expires_at": out["pro_expires_at"], "by": admin["id"]})
+    except Exception:
+        logger.debug("vip.changed 广播失败", exc_info=True)
+    return TypeAdapter(AdminUserOut).validate_python(out)

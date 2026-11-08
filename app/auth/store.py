@@ -17,7 +17,8 @@ CREATE TABLE IF NOT EXISTS users (
     username TEXT UNIQUE,
     password_hash TEXT NOT NULL,
     salt TEXT NOT NULL,
-    tier TEXT NOT NULL DEFAULT 'free',       -- free | pro（是否有效看 pro_expires_at）
+    tier TEXT NOT NULL DEFAULT 'free',       -- free | pro（是否有效看 pro_starts_at / pro_expires_at）
+    pro_starts_at TEXT,                      -- VIP 生效起点；NULL = 立即生效
     pro_expires_at TEXT,                     -- NULL = 永久 VIP（内置管理员即此形态）
     role TEXT NOT NULL DEFAULT 'user',       -- user | admin
     created_at TEXT NOT NULL
@@ -95,6 +96,7 @@ def _migrate(conn: sqlite3.Connection) -> None:
         "ALTER TABLE watchlists ADD COLUMN name TEXT",
         "ALTER TABLE watchlists ADD COLUMN notes_json TEXT NOT NULL DEFAULT '[]'",
         "ALTER TABLE card_config ADD COLUMN mode TEXT NOT NULL DEFAULT 'simple'",
+        "ALTER TABLE users ADD COLUMN pro_starts_at TEXT",
     ):
         try:
             conn.execute(stmt)
