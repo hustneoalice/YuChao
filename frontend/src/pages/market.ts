@@ -239,10 +239,10 @@ export async function openStock(s: CurStock, from?: { page: string; label: strin
     if (!mk.subInds.includes("trendhistogram")) mk.subInds = [...mk.subInds, "trendhistogram"];
   }
   mk.from = from ?? null;
-  // 换标的：框选区间 / 单根选中都作废（选区属于上一只票，跨标的同步资金是错误的）
+  // 换标的：框选区间 / 单根选中 / 连线测量都作废（选区属于上一只票，跨标的同步资金是错误的）
   mk.range = null;
   mk.pick = null;
-  kls.forEach((k) => { k?.clearRange(false); k?.clearPick(false); });
+  kls.forEach((k) => { k?.clearRange(false); k?.clearPick(false); k?.clearMeasure(); });
   localStorage.setItem("yc_last_symbol", `${s.symbol}|${s.name}`);
   renderBackbar();
   updateWatchBtn();
@@ -688,22 +688,29 @@ export function initMarket(): void {
       document.querySelectorAll("#kl-panels .klp").forEach((x) =>
         x.classList.toggle("active", x === klp));
       syncPeriodSeg(mk.panels[i]);
-      // 框选/单选模式跟着焦点面板走（同一时刻只有一个面板可操作）
+      // 框选/单选/连线模式跟着焦点面板走（同一时刻只有一个面板可操作）
       if (document.getElementById("kl-range")?.classList.contains("on")) setKlRangeMode(true);
       if (document.getElementById("kl-pick-mode")?.classList.contains("on")) setKlPickMode(true);
+      if (document.getElementById("kl-measure")?.classList.contains("on")) setKlMeasureMode(true);
     }
   });
   // 框选按钮：开=左键直接拖拽统计（图表平移暂停），关=恢复平移并清空区间
   document.getElementById("kl-range")!.addEventListener("click", () => {
     const on = !document.getElementById("kl-range")!.classList.contains("on");
-    if (on) setKlPickMode(false);              // 框选与单选互斥
+    if (on) { setKlMeasureMode(false); setKlPickMode(false); }   // 框选与单选/连线互斥
     setKlRangeMode(on);
   });
   // 单选 K 线：勾选后才开启「鼠标点击选中单根」，不勾选时点击只移十字光标
   document.getElementById("kl-pick-mode-cb")!.addEventListener("change", (e) => {
     const on = (e.target as HTMLInputElement).checked;
-    if (on) setKlRangeMode(false);             // 单选与框选互斥
+    if (on) { setKlMeasureMode(false); setKlRangeMode(false); }   // 单选与框选/连线互斥
     setKlPickMode(on);
+  });
+  // 连线测量：点第一根吸附最低点 → 点第二根吸附最高点 → 测算区间涨跌幅
+  document.getElementById("kl-measure")!.addEventListener("click", () => {
+    const on = !document.getElementById("kl-measure")!.classList.contains("on");
+    if (on) { setKlRangeMode(false); setKlPickMode(false); }       // 连线与框选/单选互斥
+    setKlMeasureMode(on);
   });
   document.addEventListener("yc:kl-range", onKlRange);
   document.addEventListener("yc:kl-pick", onKlPick);
@@ -1322,6 +1329,12 @@ function setKlPickMode(on: boolean): void {
   if (cb) cb.checked = on;
 }
 
+/** 连线测量模式开关：只作用于焦点面板；开=点第一根取最低、点第二根取最高，算涨跌幅 */
+function setKlMeasureMode(on: boolean): void {
+  kls.forEach((k, i) => k?.setMeasureMode(on && i === mk.active));
+  document.getElementById("kl-measure")?.classList.toggle("on", on);
+}
+
 async function fetchRangeFund(rs: RangeStats): Promise<void> {
   const s = mk.cur;
   if (!s) return;
@@ -1543,10 +1556,11 @@ export function renderKline(): void {
   empty.style.display = "none";
   ensurePanelDom();
   kls.forEach((_, i) => applyPanel(i));
-  // 布局/周期切换可能重建面板实例：框选/单选态跟着按钮态恢复（否则按钮亮着但鼠标行为没生效）
+  // 布局/周期切换可能重建面板实例：框选/单选/连线态跟着按钮态恢复（否则按钮亮着但鼠标行为没生效）
   if (document.getElementById("kl-range")?.classList.contains("on")) setKlRangeMode(true);
   const pickCb = document.getElementById("kl-pick-mode-cb") as HTMLInputElement | null;
   if (pickCb?.checked) setKlPickMode(true);
+  if (document.getElementById("kl-measure")?.classList.contains("on")) setKlMeasureMode(true);
   renderKlpBar();
   // 分时/60分面板：换标的后缓存已清，按需补拉（策略图面：先空后满）
   const need = mk.panels.find((p) =>
@@ -1566,13 +1580,14 @@ function syncPeriodSeg(p: PKey): void {
 function setPanelPeriod(i: number, p: PKey): void {
   if (mk.panels[i] === p) { syncPeriodSeg(p); return; }
   mk.panels[i] = p;
-  // 切周期 → 单根选中/框选区间失效（日线的「某一天」在周线/分时上没有对应 bar）
+  // 切周期 → 单根选中/框选区间/连线测量失效（日线的「某一天」在周线/分时上没有对应 bar）
   if (mk.pick || mk.range) {
     mk.pick = null;
     mk.range = null;
     kls.forEach((k) => { k?.clearPick(false); k?.clearRange(false); });
     renderRight();
   }
+  kls.forEach((k) => k?.clearMeasure());
   applyPanel(i);                               // 先渲染（缓存命中即刻有数据）
   void ensurePeriodData(p).then(() => {
     if (mk.panels[i] === p) applyPanel(i);     // 数据到达后重渲（未命中缓存时）

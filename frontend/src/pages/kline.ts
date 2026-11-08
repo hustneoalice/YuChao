@@ -7,7 +7,7 @@
  */
 import { init, dispose, registerIndicator, registerYAxis, type Chart, type CandleType } from "klinecharts";
 import type { Bar } from "../api";
-import { cssv, fmt, fmtYi, fmtVol } from "../fmt";
+import { cssv, esc, fmt, fmtYi, fmtVol } from "../fmt";
 import { ema, sixSegmentSeries } from "../indicators";
 import { accumulationSeries } from "../accumulation";
 import { mainCostSeries } from "../main-cost";
@@ -1849,6 +1849,12 @@ export interface KlineChartHandle {
   setPickMode: (on: boolean) => void;
   /** 单选 K 线模式是否开启 */
   isPickMode: () => boolean;
+  /** 连线测量模式：第一击吸附最低点，第二击吸附最高点，测算区间涨跌幅 */
+  setMeasureMode: (on: boolean) => void;
+  /** 连线测量模式是否开启 */
+  isMeasureMode: () => boolean;
+  /** 清空连线测量（切标的 / 切周期时调用） */
+  clearMeasure: () => void;
   /** 区间资金回填（行情页拉到 /market/fundflow 后写回卡片） */
   setRangeFund: (f: RangeFund | null) => void;
   /** 清空选区（切标的 / 切周期 / 关闭模式时调用，notify=true 会同步清右列） */
@@ -2053,6 +2059,8 @@ export function mountKline(el: HTMLElement): KlineChartHandle {
   let lastSel: RangeStats | null = null;
   /* 单选 K 线模式：默认关闭（点击只移动十字光标，不选单根）；勾选后点击才选中 */
   let pickMode = false;
+  /* 连线测量模式：第一击吸附最低点 → 第二击吸附最高点 → 算涨跌幅（与框选/单选互斥） */
+  let measureMode = false;
 
   /* ── 浮动信息卡：跟随十字光标，边缘翻转避让 ── */
   const tip = document.createElement("div");
@@ -2123,6 +2131,8 @@ export function mountKline(el: HTMLElement): KlineChartHandle {
     }
     // 框选模式下已有区间卡：不再叠一张十字光标卡（两张同风格浮卡会互相打架）
     if (rangeMode && lastSel) { tip.style.display = "none"; hideYlab(); return; }
+    // 连线测量模式：十字光标卡让位给测量卡，只保留十字线
+    if (measureMode) { tip.style.display = "none"; hideYlab(); return; }
     const ch = args[0] as { x?: number; y?: number; paneId?: string } | null;
     if (!ch || ch.x == null || ch.y == null) { tip.style.display = "none"; hideYlab(); return; }
     const list = chart.getDataList() as { timestamp: number; open: number; high: number; low: number; close: number; volume?: number; amount?: number; date?: string }[];
@@ -2173,7 +2183,7 @@ export function mountKline(el: HTMLElement): KlineChartHandle {
 
   /* ── 双击吸附：把十字光标水平线锁到该根 K 线的高点/低点（按双击位置判定） ── */
   const onDbl = (e: MouseEvent) => {
-    if (e.button !== 0 || rangeMode || onWidget(e)) return;
+    if (e.button !== 0 || rangeMode || measureMode || onWidget(e)) return;
     const rect = el.getBoundingClientRect();
     const x = e.clientX - rect.left, y = e.clientY - rect.top;
     // 只处理主图：成交量 / MACD 等副图双击不参与吸附
@@ -2301,6 +2311,7 @@ export function mountKline(el: HTMLElement): KlineChartHandle {
 
   const onSelDown = (e: MouseEvent) => {
     // 只认左键；框选模式或 Shift 手势才进入拖拽，否则视为"点空白关卡片"
+    if (measureMode) return;                                   // 连线测量接管鼠标
     if (e.button !== 0 || onWidget(e)) return;
     downX = e.clientX;
     if (!rangeMode && !e.shiftKey) {
@@ -2317,13 +2328,14 @@ export function mountKline(el: HTMLElement): KlineChartHandle {
     sel.style.display = "block";
   };
   const onSelMove = (e: MouseEvent) => {
-    if (selX0 == null) return;
+    if (measureMode || selX0 == null) return;
     e.preventDefault(); e.stopPropagation();
     const r = el.getBoundingClientRect();
     const a = Math.min(selX0, e.clientX) - r.left, b = Math.max(selX0, e.clientX) - r.left;
     sel.style.left = `${a}px`; sel.style.width = `${b - a}px`;
   };
   const onSelUp = (e: MouseEvent) => {
+    if (measureMode) return;                                   // 连线测量接管鼠标
     if (selX0 == null) {
       if (onWidget(e)) return;                 // 落在按钮上：不参与单根命中
       // 点击（非拖拽）→ 按 x 列命中单根：点在这根 K 线所在的列上就算选中，
@@ -2373,6 +2385,148 @@ export function mountKline(el: HTMLElement): KlineChartHandle {
   el.addEventListener("mousedown", onSelDown, true);
   el.addEventListener("mousemove", onSelMove, true);
   el.addEventListener("mouseup", onSelUp, true);
+
+  /* ── 连线测量（低点 → 高点）：第一击吸附该根最低点，移动预览、第二击吸附另一根最高点，
+   *  然后卡上给出 (高点B - 低点A) / 低点A 的区间涨跌幅。
+   *  交互层自己做（canvas 覆盖层 + 独立鼠标捕获），不依赖 klinecharts 的绘图工具：
+   *  缩放/平移/尺寸变化时按日期重新定位重绘，盘中轮询重灌数据也不丢锚点。 */
+  let mFrom: { date: string; low: number } | null = null;
+  let mTo: { date: string; high: number } | null = null;
+  let mHover: { date: string; high: number } | null = null;
+  const mcv = document.createElement("canvas");
+  mcv.className = "kl-measure";
+  mcv.style.display = "none";
+  el.appendChild(mcv);
+  const mtip = document.createElement("div");
+  mtip.className = "kl-mtip";
+  mtip.style.display = "none";
+  el.appendChild(mtip);
+  const mctx = mcv.getContext("2d")!;
+  let mW = 0, mH = 0, mDpr = 1;
+
+  /** 日期 + 价格 → 主图像素坐标（越界/日期不存在返回 null） */
+  const mPx = (date: string, value: number): { x: number; y: number } | null => {
+    const list = chart.getDataList() as unknown as { date?: string }[];
+    const i = list.findIndex((b) => (b.date ?? "") === date);
+    if (i < 0) return null;
+    const raw = chart.convertToPixel({ dataIndex: i, value }, { paneId: mainPaneId }) as unknown;
+    const p = (Array.isArray(raw) ? raw[0] : raw) as { x?: number; y?: number } | undefined;
+    if (!p || p.x == null || p.y == null) return null;
+    return { x: p.x, y: p.y };
+  };
+
+  /** 重绘连线 + 测量卡（预览虚线 / 完成实线） */
+  const drawMeasure = (): void => {
+    const w = el.clientWidth, h = el.clientHeight;
+    if (!w || !h) return;
+    const dpr = window.devicePixelRatio || 1;
+    if (w !== mW || h !== mH || dpr !== mDpr) {
+      mW = w; mH = h; mDpr = dpr;
+      mcv.width = Math.round(w * dpr);
+      mcv.height = Math.round(h * dpr);
+      mcv.style.width = `${w}px`;
+      mcv.style.height = `${h}px`;
+    }
+    mctx.setTransform(dpr, 0, 0, dpr, 0, 0);
+    mctx.clearRect(0, 0, w, h);
+    const end = mTo ?? mHover;
+    const p1 = mFrom ? mPx(mFrom.date, mFrom.low) : null;
+    const p2 = end ? mPx(end.date, end.high) : null;
+    if (!mFrom || !end || !p1 || !p2) {
+      mcv.style.display = "none";
+      mtip.style.display = "none";
+      return;
+    }
+    const accent = cssv("--accent") || "#FF9F43";
+    mcv.style.display = "block";
+    mctx.save();
+    mctx.strokeStyle = accent;
+    mctx.fillStyle = accent;
+    mctx.lineWidth = 1.5;
+    mctx.setLineDash(mTo ? [] : [5, 4]);
+    mctx.beginPath();
+    mctx.moveTo(p1.x, p1.y);
+    mctx.lineTo(p2.x, p2.y);
+    mctx.stroke();
+    mctx.setLineDash([]);
+    [p1, p2].forEach((p) => {
+      mctx.beginPath();
+      mctx.arc(p.x, p.y, 3.2, 0, Math.PI * 2);
+      mctx.fill();
+      mctx.strokeStyle = "rgba(255,255,255,.72)";
+      mctx.lineWidth = 1;
+      mctx.stroke();
+    });
+    mctx.restore();
+    const diff = end.high - mFrom.low;
+    const pct = mFrom.low ? (diff / mFrom.low) * 100 : 0;
+    const cls = pct >= 0 ? "up" : "down";
+    mtip.innerHTML =
+      `<div class="t">${esc(mFrom.date)} → ${esc(end.date)}</div>` +
+      `<div class="grp"><span>涨跌幅<b class="num ${cls}">${pct >= 0 ? "+" : ""}${pct.toFixed(2)}%</b></span>` +
+      `<span>价差<b class="num ${cls}">${sgn(diff)}</b></span></div>` +
+      `<div class="grp"><span>低<b class="num">${mFrom.low.toFixed(2)}</b></span>` +
+      `<span>高<b class="num">${end.high.toFixed(2)}</b></span></div>` +
+      (mTo
+        ? `<div class="st-f">点击另一根 K 线重新测量 · ESC 清除</div>`
+        : `<div class="st-f">再点击另一根 K 线取最高点</div>`);
+    mtip.style.display = "block";
+    const tw = mtip.offsetWidth, th = mtip.offsetHeight;
+    const flipX = p2.x + 14 + tw > w;
+    const flipY = p2.y - th - 10 < 6;
+    mtip.style.left = `${Math.max(4, Math.min(w - tw - 4, flipX ? p2.x - tw - 14 : p2.x + 14))}px`;
+    mtip.style.top = `${Math.max(6, Math.min(h - th - 6, flipY ? p2.y + 12 : p2.y - th - 10))}px`;
+  };
+
+  /** 清空测量：连同锚点一起（关闭模式 / 切标的 / 切周期 / ESC） */
+  const clearMeasureFn = (): void => {
+    mFrom = null; mTo = null; mHover = null;
+    mtip.style.display = "none";
+    mcv.style.display = "none";
+    mctx.setTransform(1, 0, 0, 1, 0, 0);
+    mctx.clearRect(0, 0, mcv.width, mcv.height);
+  };
+
+  /** 像素 x → 该根 K 线（主图按列命中，未来空白区返回 null） */
+  const mBarAt = (x: number): Bar | null => {
+    const di = diOfX(x);
+    if (di == null) return null;
+    const list = chart.getDataList() as unknown as Bar[];
+    return di >= 0 && di < list.length ? list[di] : null;
+  };
+
+  const onMDown = (e: MouseEvent) => {
+    if (!measureMode || e.button !== 0 || onWidget(e)) return;
+    const pane = chart.getSize(mainPaneId, "main");
+    const rect = el.getBoundingClientRect();
+    const x = e.clientX - rect.left, y = e.clientY - rect.top;
+    if (!pane || y < pane.top || y > pane.top + pane.height) return;
+    const bar = mBarAt(x);
+    if (!bar) return;
+    e.preventDefault(); e.stopPropagation();          // 拦截图表平移
+    const date = bar.date;
+    if (mFrom && !mTo) {
+      // 第二击：吸附这根的最高点，测量成立
+      mTo = { date, high: bar.high };
+      mHover = null;
+    } else {
+      // 第一击（或已完成后重新测量）：吸附这根的最低点
+      mFrom = { date, low: bar.low };
+      mTo = null;
+      mHover = null;
+    }
+    drawMeasure();
+  };
+  const onMMove = (e: MouseEvent) => {
+    if (!measureMode || !mFrom || mTo) return;
+    const rect = el.getBoundingClientRect();
+    const bar = mBarAt(e.clientX - rect.left);
+    if (!bar || mHover?.date === bar.date) return;
+    mHover = { date: bar.date, high: bar.high };      // 预览也吸附悬停这根的最高点
+    drawMeasure();
+  };
+  el.addEventListener("mousedown", onMDown, true);
+  el.addEventListener("mousemove", onMMove, true);
 
   /* ── 底部 K 线控制条（众赢同款）：顶部细时间刻度 + 条内年份段 + 滑块窗口 + 两端翻页箭头 ──
    *  · 时间刻度只保留一条（图表自带 x 轴已隐藏，避免多窗格各自画轴 → 视觉上「两个时间轴」）
@@ -2640,9 +2794,10 @@ export function mountKline(el: HTMLElement): KlineChartHandle {
     }));
   };
 
-  /* ESC 分层取消：单根选中 → 进行中的框选拖拽 → 已成立的区间统计（策影同款手感） */
+  /* ESC 分层取消：连线测量 → 单根选中 → 进行中的框选拖拽 → 已成立的区间统计（策影同款手感） */
   document.addEventListener("keydown", (e) => {
     if (e.key !== "Escape") return;
+    if (measureMode && (mFrom || mTo)) { clearMeasureFn(); return; }
     if (pickDate) { clearPickFn(true); return; }
     if (selX0 != null) { selX0 = null; sel.style.display = "none"; return; }
     if (lastSel) clearSel(true);
@@ -2655,7 +2810,7 @@ export function mountKline(el: HTMLElement): KlineChartHandle {
   // 原生精确点击（点在蜡烛实体上）与上面的按列判定互为补充：重复点同一根会被去重
   try { chart.subscribeAction("onCandleBarClick", onBarClick as never); } catch { /* 忽略 */ }
   // 选中带/选区带跟着视窗走：缩放/滚动/可见范围变化都重算像素位置
-  const onViewRefresh = () => requestAnimationFrame(() => { drawPick(); drawSelBand(); });
+  const onViewRefresh = () => requestAnimationFrame(() => { drawPick(); drawSelBand(); drawMeasure(); });
   try { chart.subscribeAction("onVisibleRangeChange", onViewRefresh as never); } catch { /* 忽略 */ }
   try { chart.subscribeAction("onZoom", onViewRefresh as never); } catch { /* 忽略 */ }
   try { chart.subscribeAction("onScroll", onViewRefresh as never); } catch { /* 忽略 */ }
@@ -2737,6 +2892,7 @@ export function mountKline(el: HTMLElement): KlineChartHandle {
         navDraw();
         restoreView();
         drawPick();
+        drawMeasure();                 // 数据重灌后按日期重定位测量线
       });
       // setDataLoader 的首次回填是异步的：等数据真正就绪后再校一次视图，
       // 否则恢复动作会被后续的加载回调覆盖（视图又跳回默认位置）
@@ -2744,6 +2900,7 @@ export function mountKline(el: HTMLElement): KlineChartHandle {
         restoreView();
         if (focusIndex >= 0 && pickMode) pickAtIndex(focusIndex);
         else drawPick();
+        drawMeasure();
       }, 160);
     },
     setMain(inds: MainKey[]) {
@@ -2890,6 +3047,20 @@ export function mountKline(el: HTMLElement): KlineChartHandle {
       if (!on) clearPickFn(true);        // 关模式即撤选中，右列资金卡退回当日口径
     },
     isPickMode() { return pickMode; },
+    setMeasureMode(on: boolean) {
+      measureMode = on;
+      if (on) {
+        // 与框选/单选互斥：进入测量先撤掉旧选区，避免三类图形同屏
+        clearSel(true);
+        clearPickFn(true);
+        el.style.cursor = "crosshair";
+      } else {
+        el.style.cursor = "";
+        clearMeasureFn();
+      }
+    },
+    isMeasureMode() { return measureMode; },
+    clearMeasure() { clearMeasureFn(); },
     setRangeFund(f: RangeFund | null) {
       selFund = f;
       drawSelTip();
@@ -2906,7 +3077,7 @@ export function mountKline(el: HTMLElement): KlineChartHandle {
     },
     resize() {
       chart.resize();
-      requestAnimationFrame(() => { applyHeights(); volumeSettings.sync(); mainCostSettings.sync(); maSettings.sync(); navDraw(); drawPick(); });
+      requestAnimationFrame(() => { applyHeights(); volumeSettings.sync(); mainCostSettings.sync(); maSettings.sync(); navDraw(); drawPick(); drawMeasure(); });
     },
     destroy() {
       try { chart.unsubscribeAction("onCrosshairChange", onCross as never); } catch { /* 忽略 */ }
@@ -2918,8 +3089,12 @@ export function mountKline(el: HTMLElement): KlineChartHandle {
       el.removeEventListener("mousemove", onSelMove, true);
       el.removeEventListener("mouseup", onSelUp, true);
       el.removeEventListener("dblclick", onDbl, true);
+      el.removeEventListener("mousedown", onMDown, true);
+      el.removeEventListener("mousemove", onMMove, true);
       sel.remove();
       selTip.remove();
+      mcv.remove();
+      mtip.remove();
       volumeSettings.destroy();
       mainCostSettings.destroy();
       maSettings.destroy();

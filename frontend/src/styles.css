@@ -1000,6 +1000,22 @@ body.mobile .vpop{width:min(246px,calc(100vw - 16px))}
 .kl-seltip .st-f{margin-top:4px;padding-top:4px;border-top:1px solid var(--border-soft);
   font-size:9.5px;color:var(--faint);text-align:center;white-space:nowrap}
 
+/* 连线测量：canvas 覆盖层（低点→高点连线，随缩放/平移重绘）+ 涨跌幅卡片 */
+.kl-measure{position:absolute;inset:0;z-index:15;pointer-events:none}
+.kl-mtip{position:absolute;z-index:22;display:none;width:max-content;max-width:280px;
+  padding:6px 10px 7px;border-radius:9px;pointer-events:none;font-size:11px;color:var(--dim);
+  background:color-mix(in srgb,var(--panel) 82%,transparent);
+  backdrop-filter:blur(7px);-webkit-backdrop-filter:blur(7px);
+  border:1px solid var(--border);box-shadow:var(--shadow)}
+.kl-mtip .t{text-align:center;font-weight:600;font-size:11px;color:var(--text);
+  padding-bottom:4px;margin-bottom:4px;border-bottom:1px solid var(--border-soft);white-space:nowrap}
+.kl-mtip .grp{display:flex;align-items:baseline;gap:10px;line-height:1.7;white-space:nowrap}
+.kl-mtip .grp span{display:inline-flex;align-items:baseline;gap:3px}
+.kl-mtip b{font-weight:500;color:var(--text);font-size:11px}
+.kl-mtip b.up{color:var(--up)} .kl-mtip b.down{color:var(--down)}
+.kl-mtip .st-f{margin-top:4px;padding-top:4px;border-top:1px solid var(--border-soft);
+  font-size:9.5px;color:var(--faint);text-align:center;white-space:nowrap}
+
 /* 资金卡「区间态」：标签 + 日期 + 清除 */
 .rg-head{display:flex;align-items:center;gap:6px;margin-bottom:8px;font-size:10.5px;color:var(--faint)}
 .rg-head b{font-weight:500;color:var(--dim);font-size:10.5px;
