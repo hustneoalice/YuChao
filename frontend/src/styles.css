@@ -269,18 +269,31 @@ svg{display:block}
 .barsep{width:1px;height:14px;background:var(--border);margin:0 2px}
 .chartbar .seg button{padding:3px 9px;font-size:11.5px}
 /* 工具栏按钮统一不换行：文字按钮（框选）在窄屏也不会被挤成竖排 */
-.chartbar .cbtn{white-space:nowrap;flex:none;width:auto;min-width:24px;padding:0 7px}
+.chartbar .cbtn{white-space:nowrap;flex:none;width:auto;min-width:24px;padding:0 7px;
+  border:1px solid var(--border);background:var(--panel);color:var(--dim)}
+.chartbar .cbtn:hover{color:var(--text);border-color:var(--axis);background:var(--panel-2)}
+/* 工具条文字按钮（框选/连线/自适应/方案）：选中态统一用强调色描边 */
+.chartbar .cbtn.on{color:var(--accent);border-color:color-mix(in srgb,var(--accent) 45%,transparent);
+  background:var(--accent-soft)}
 /* 单选 K 线开关：与「框选」并排；圆点单选视觉（勾选后才允许鼠标点击选中 K 线） */
-.chartbar .kl-radio{display:inline-flex;align-items:center;gap:5px;cursor:pointer;user-select:none}
+.chartbar .kl-radio{display:inline-flex;align-items:center;gap:5px;cursor:pointer;user-select:none;
+  border:1px solid var(--border);background:var(--panel);color:var(--dim)}
+.chartbar .kl-radio:hover{color:var(--text);border-color:var(--axis)}
 .chartbar .kl-radio input{position:absolute;opacity:0;width:0;height:0;pointer-events:none}
 .chartbar .kl-radio .rdot{width:8px;height:8px;border-radius:50%;box-sizing:border-box;
   border:1px solid var(--axis);flex:none;transition:background .15s,border-color .15s,box-shadow .15s}
-.chartbar .kl-radio.on{color:var(--accent)}
+.chartbar .kl-radio.on{color:var(--accent);
+  border-color:color-mix(in srgb,var(--accent) 45%,transparent);background:var(--accent-soft)}
 .chartbar .kl-radio.on .rdot{border-color:var(--accent);background:var(--accent);
   box-shadow:0 0 0 2px color-mix(in srgb,var(--accent) 20%,transparent)}
 .chartbar .cbtn.text{font-size:11.5px}
 /* 工具条挤窄时按钮不许被压成竖排（方案/框选这类双字按钮中招过） */
 .chartbar .hbtn{white-space:nowrap;flex:none}
+/* 缩放/重置（＋ － ⟲）：实体小方钮，不再是裸符号 */
+.chartbar .zbtn{border-color:var(--border);background:var(--panel);font-weight:600;color:var(--dim)}
+.chartbar .zbtn:hover{color:var(--text);border-color:var(--axis);background:var(--panel-2)}
+/* 「方案」按钮：与工具条同高的紧凑胶囊，不再比其他控件高出一截 */
+.chartbar .hbtn{height:24px;min-height:24px;padding:0 11px;font-size:11.5px}
 /* K线顶部信息条（东财/同花顺网页头部同款）：
    名称 代码 | 现价 涨跌 | 最高 最低 开盘 昨收 | 成交额 换手 …… 总市值 PE */
 .kl-info{display:flex;align-items:center;gap:10px;flex-wrap:wrap;min-height:40px;
@@ -829,6 +842,10 @@ body.mobile .vpop{width:min(246px,calc(100vw - 16px))}
   border:1px solid var(--border);border-radius:11px;box-shadow:var(--shadow);overflow:hidden}
 .kl-more[hidden]{display:none!important}
 .kl-more .im-search{padding:8px 10px;border-bottom:1px solid var(--border-soft)}
+.kl-more .im-tabs{padding:7px 10px 5px;border-bottom:1px solid var(--border-soft);overflow-x:auto;scrollbar-width:none}
+.kl-more .im-tabs::-webkit-scrollbar{display:none}
+.kl-more .im-tabs .seg{width:max-content;gap:1px}
+.kl-more .im-tabs .seg button{padding:2px 8px;font-size:10.5px;min-height:20px}
 .kl-more .im-search input{width:100%;box-sizing:border-box;padding:5px 9px;border-radius:8px;
   border:1px solid var(--border-soft);background:var(--panel-2);color:var(--text);font-size:12px;outline:none}
 .kl-more .im-search input:focus{border-color:var(--accent)}
@@ -839,11 +856,17 @@ body.mobile .vpop{width:min(246px,calc(100vw - 16px))}
 .imr.on{background:var(--accent-soft)}
 .imr .dot{flex:none;width:7px;height:7px;border-radius:50%;background:var(--ic,transparent)}
 .imr b{flex:none;font-size:11.5px;color:var(--text);font-weight:600;min-width:52px}
+.imr .im-vip{flex:none;font-style:normal;font-size:10px;color:var(--vip);line-height:1}
 .imr .im-desc{flex:1;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;
   font-size:10.5px;color:var(--faint)}
 .imr .star{flex:none;font-style:normal;font-size:12px;color:var(--faint);opacity:.45;padding:2px 3px}
 .imr .star:hover{opacity:1}
 .imr .star.on{color:#F2C94C;opacity:1}
+/* VIP 特色指标锁定（免费体验到期）：整行灰显降饱和，点击弹开通 */
+.imr.vip-locked{opacity:.5;filter:saturate(.35)}
+.imr.vip-locked b{color:var(--dim)}
+.imr.vip-locked:hover{background:transparent}
+.imr.vip-locked .im-vip{color:var(--vip);opacity:.9}
 .im-none{padding:18px 10px;text-align:center;font-size:11px;color:var(--faint)}
 .kl-more .im-foot{flex:none;padding:6px 10px;border-top:1px solid var(--border-soft);
   font-size:10px;color:var(--faint)}
@@ -1217,14 +1240,15 @@ body.mobile .vpop{width:min(246px,calc(100vw - 16px))}
 .compliance{font-size:11px;color:var(--faint);line-height:1.8;border-top:1px solid var(--border-soft);padding-top:12px}
 
 /* 数据底座看板（设置 · 数据页签） */
-.dsgrid{display:grid;grid-template-columns:repeat(3,1fr);gap:8px}
-.dscard{border:1px solid var(--border);border-radius:11px;padding:10px 12px;background:var(--panel-2);
-  display:flex;flex-direction:column;gap:6px;min-width:0}
-.dscard .ds-h{display:flex;align-items:center;gap:7px;font-size:12px;color:var(--dim);min-width:0}
-.dscard .ds-h b{color:var(--text);font-size:12.5px;font-weight:600;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
-.dscard .ds-date{font-size:16px;font-weight:700;font-family:var(--mono);letter-spacing:-.01em}
-.dscard .ds-m{display:flex;align-items:center;gap:8px;font-size:10.5px;color:var(--faint)}
+.dsgrid{display:grid;grid-template-columns:repeat(4,1fr);gap:8px}
+.dscard{border:1px solid var(--border);border-radius:9px;padding:8px 10px;background:var(--panel-2);
+  display:flex;flex-direction:column;gap:3px;min-width:0}
+.dscard .ds-h{display:flex;align-items:center;gap:6px;font-size:11.5px;color:var(--dim);min-width:0}
+.dscard .ds-h b{color:var(--text);font-size:12px;font-weight:600;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.dscard .ds-date{font-size:14.5px;font-weight:700;font-family:var(--mono);letter-spacing:-.01em;line-height:1.3}
+.dscard .ds-m{display:flex;align-items:center;gap:6px;font-size:10.5px;color:var(--faint)}
 .dscard .ds-m .fresh{margin-left:auto}
+.dscard .ds-cov{margin-top:2px}
 .fresh{font-size:10px;padding:1px 7px;border-radius:99px;background:var(--panel-3);color:var(--dim);white-space:nowrap}
 .fresh.ok{background:var(--down-soft);color:var(--down)}
 .fresh.warn{background:var(--warn-soft);color:var(--warn)}
@@ -1233,7 +1257,7 @@ body.mobile .vpop{width:min(246px,calc(100vw - 16px))}
 .uprow{display:flex;align-items:center;gap:8px;min-width:0}
 .upbar{height:7px;border-radius:4px;background:var(--panel-3);overflow:hidden;width:100%}
 .upbar i{display:block;height:100%;background:var(--p1);border-radius:4px;transition:width .4s}
-/* 数据更新卡（策影 UpdateProgressCard 同构 · 驭潮皮肤） */
+/* 状态胶囊（数据更新卡头部 / 顶栏 chip） */
 .upstat{display:inline-flex;align-items:center;gap:5px;padding:1px 9px;border-radius:99px;
   font-size:11px;font-weight:600;border:1px solid;white-space:nowrap}
 .upstat::before{content:"";width:6px;height:6px;border-radius:50%;background:currentColor;flex:none}
@@ -1252,6 +1276,37 @@ body.mobile .vpop{width:min(246px,calc(100vw - 16px))}
 .uprecent{font-size:11px;color:var(--faint);cursor:pointer;user-select:none}
 .uprecent:hover{color:var(--dim)}
 .uprecent-list{margin-top:6px;display:flex;flex-direction:column;gap:4px}
+/* 紧凑两栏：更新中心（左 1.5fr）｜ 数据体检（右 1fr） */
+.up-grid{display:grid;grid-template-columns:1.5fr 1fr;gap:10px}
+.up-left{display:flex;flex-direction:column;gap:8px;min-width:0}
+.up-right{display:flex;flex-direction:column;gap:8px;min-width:0;border-left:1px solid var(--border-soft);padding-left:10px}
+.up-actions{display:flex;align-items:center;gap:8px;flex-wrap:wrap}
+.up-actions .hbtn{height:26px;min-height:26px;padding:0 12px;font-size:11.5px}
+.up-note{font-size:10.5px;color:var(--faint);white-space:nowrap;cursor:help}
+.up-rhead{display:flex;align-items:center;gap:8px;min-height:26px}
+.up-rhead b{font-size:13px}
+.up-rhead .hbtn{height:24px;min-height:24px;padding:0 11px;font-size:11px}
+/* 实时明细流：最近一批在顶高亮，旧行渐淡（等宽字体，刷屏感） */
+.up-rate{display:inline-flex;align-items:center;gap:4px;font-size:11px;color:var(--p1);
+  background:color-mix(in srgb,var(--p1) 10%,transparent);border:1px solid color-mix(in srgb,var(--p1) 32%,transparent);
+  border-radius:99px;padding:1px 8px;white-space:nowrap}
+.up-live{display:flex;flex-direction:column;gap:2px;max-height:118px;overflow:hidden;
+  background:var(--panel-2);border:1px solid var(--border-soft);border-radius:8px;padding:5px 9px;
+  font-family:var(--mono);font-size:10.5px;color:var(--faint)}
+.up-live-row{display:flex;align-items:baseline;gap:8px;min-width:0;white-space:nowrap;
+  overflow:hidden;text-overflow:ellipsis;transition:opacity .3s}
+.up-live-row .t{flex:none;color:var(--faint)}
+.up-live-row:first-child .t{color:var(--p1)}
+.up-live-row .m{overflow:hidden;text-overflow:ellipsis}
+.up-live-row:first-child .m{color:var(--text)}
+/* 更新记录紧凑表：时间等宽 / 行高压缩 / 备注截断 */
+.up-tbl{border-collapse:collapse;width:100%;font-size:11.5px}
+.up-tbl th{text-align:left;color:var(--faint);font-weight:500;font-size:10.5px;padding:3px 8px 4px 0}
+.up-tbl th.n{text-align:right}
+.up-tbl td{padding:5px 8px 5px 0;border-top:1px solid var(--border-soft);vertical-align:middle;white-space:nowrap}
+.up-tbl td:first-child{font-family:var(--mono);font-size:10.5px;color:var(--faint)}
+.up-tbl td.num,.up-tbl td.n{text-align:right}
+.up-tbl-note{max-width:220px;overflow:hidden;text-overflow:ellipsis;color:var(--faint)}
 .upstop{padding:2px 12px;font-size:11px;border-color:color-mix(in srgb,var(--up) 45%,transparent);color:var(--up)}
 .upstop:hover{border-color:var(--up);background:color-mix(in srgb,var(--up) 12%,transparent)}
 /* 数据内容卡 · 完整度条（最新截面覆盖标的数 / 全市场） */
@@ -1346,6 +1401,8 @@ body.mobile .setwrap{flex-direction:column}
 body.mobile .setnav{width:auto;flex-direction:row;overflow-x:auto;padding-bottom:2px}
 body.mobile .setnav button{flex:none}
 body.mobile .setbody{overflow:visible;padding-right:0}
+body.mobile .up-grid{grid-template-columns:1fr}
+body.mobile .up-right{border-left:0;padding-left:0;border-top:1px solid var(--border-soft);padding-top:9px}
 body.mobile .dsgrid{grid-template-columns:repeat(2,1fr)}
 body.mobile .factorgrid{grid-template-columns:1fr}
 body.mobile .modal{padding:16px}
@@ -1849,12 +1906,17 @@ body.mobile .sec-breadth{padding:0 10px 8px}
 .ai-txt{white-space:pre-wrap}
 .ai-dim{color:var(--faint)}
 .ai-err{color:var(--up)}
-.ai-tools{max-width:min(78ch,86%);display:flex;flex-direction:column;gap:6px}
-.ai-tool{border:1px solid var(--border);border-radius:10px;background:var(--panel);overflow:hidden}
-.ai-tool-h{display:flex;align-items:center;gap:8px;padding:7px 10px;cursor:pointer;font-size:11.5px}
-.ai-tool-h b{font-family:var(--mono);font-size:11.5px;color:var(--accent)}
+.ai-tools{max-width:min(78ch,86%);display:flex;flex-direction:column;gap:5px}
+.ai-tool{border:1px solid var(--border);border-radius:9px;background:var(--panel);overflow:hidden}
+.ai-tool-h{display:flex;align-items:center;gap:7px;padding:6px 9px;cursor:pointer;font-size:11.5px}
+.ai-tool-dot{width:5px;height:5px;border-radius:50%;flex:none;
+  background:color-mix(in srgb,var(--accent) 62%,transparent)}
+.ai-tool-h b{flex:none;font-size:11.5px;font-weight:600;color:var(--accent);white-space:nowrap}
+/* 次级信息（耗时 / 数据日期）单行截断：窄浮框里宁可省略，也不让它把右侧「展开」挤掉 */
+.ai-tool-sub{flex:1;min-width:0;font-size:10px;color:var(--faint);
+  white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
 .ai-tag{font-size:10px;color:var(--faint);border:1px solid var(--border);border-radius:999px;padding:1px 7px}
-.ai-caret{font-size:10.5px;color:var(--faint)}
+.ai-caret{margin-left:auto;flex:none;font-size:10.5px;color:var(--faint);cursor:pointer}
 .ai-tool-b{display:none;padding:0 10px 9px;border-top:1px solid var(--border-soft)}
 .ai-tool.open .ai-tool-b{display:block}
 .ai-kv{display:flex;gap:8px;font-size:11px;padding-top:7px;color:var(--dim)}
@@ -1881,22 +1943,27 @@ body.mobile .ai-bub,body.mobile .ai-tools,body.mobile .ai-warn{max-width:92%}
   color:var(--faint);cursor:pointer;transition:color .15s,border-color .15s,background .15s}
 .qa-inline:hover{color:var(--text);background:var(--panel-2)}
 .qa-inline.active{color:var(--accent);border-color:color-mix(in srgb,var(--accent) 42%,transparent)}
-/* 配置了大模型 → 点亮成绿色；未配置保持灰色 */
+/* 配置了大模型 → 点亮成绿色并呼吸光晕（与左栏「智能」同图标）；未配置保持灰色 */
 body.llm-on .qa-inline{color:var(--down);border-color:color-mix(in srgb,var(--down) 36%,transparent);
-  background:color-mix(in srgb,var(--down) 8%,transparent)}
-body.llm-on .qa-inline:hover{background:color-mix(in srgb,var(--down) 15%,transparent)}
+  background:color-mix(in srgb,var(--down) 8%,transparent);
+  animation:qaBreath 2.6s ease-in-out infinite}
+body.llm-on .qa-inline:hover{background:color-mix(in srgb,var(--down) 15%,transparent);animation-play-state:paused}
+@keyframes qaBreath{
+  0%,100%{box-shadow:0 0 0 0 color-mix(in srgb,var(--down) 40%,transparent)}
+  50%{box-shadow:0 0 0 5px color-mix(in srgb,var(--down) 0%,transparent)}
+}
 /* 浮框：半透明玻璃，不遮住背后的 K 线；标题栏可拖动 */
 .qa-panel{position:fixed;right:18px;top:92px;z-index:78;
   width:320px;max-width:calc(100vw - 24px);height:min(384px,calc(100vh - 118px));
   display:flex;flex-direction:column;gap:8px;padding:10px 12px;
-  background:color-mix(in srgb,var(--panel) 38%,transparent);
+  background:color-mix(in srgb,var(--panel) 22%,transparent);
   border:1px solid color-mix(in srgb,var(--border) 48%,transparent);border-radius:13px;
   box-shadow:0 22px 56px -22px rgba(0,0,0,.62),0 0 0 1px rgba(255,255,255,.04) inset;
-  backdrop-filter:blur(26px) saturate(1.5);
-  -webkit-backdrop-filter:blur(26px) saturate(1.5);animation:qaIn .16s ease-out}
+  backdrop-filter:blur(6px) saturate(1.2);
+  -webkit-backdrop-filter:blur(6px) saturate(1.2);animation:qaIn .16s ease-out}
 .qa-panel[hidden]{display:none}
-.qa-panel .ai-bub{background:color-mix(in srgb,var(--panel-2) 52%,transparent);font-size:12px}
-.qa-panel .ai-tool,.qa-panel .ai-think{background:color-mix(in srgb,var(--panel) 40%,transparent)}
+.qa-panel .ai-bub{background:color-mix(in srgb,var(--panel-2) 34%,transparent);font-size:12px}
+.qa-panel .ai-tool,.qa-panel .ai-think{background:color-mix(in srgb,var(--panel) 22%,transparent)}
 .qa-head{display:flex;align-items:center;gap:8px;min-height:22px;cursor:grab;
   touch-action:none;user-select:none}
 .qa-head.dragging{cursor:grabbing}

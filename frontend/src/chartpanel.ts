@@ -95,7 +95,7 @@ export function quoteHeadHtml(info: ChartInfo | null, mode: Exclude<ChartHeadMod
   }
   parts.push(`<span class="ksy-q">${q}</span>`);
   if (quickAsk) {
-    parts.push(`<button class="qa-inline" type="button" title="AI 问股" aria-label="AI 问股" aria-expanded="false">${ic("ai-chat", 13)}</button>`);
+    parts.push(`<button class="qa-inline" type="button" title="AI 问股" aria-label="AI 问股" aria-expanded="false">${ic("ai-sparkle", 14)}</button>`);
   }
   return parts.join("");
 }

@@ -21,11 +21,20 @@ class UserPublic(BaseModel):
     id: str
     email: str
     username: Optional[str] = None
-    tier: str                                  # free | pro（实时判定，非令牌快照）
+    tier: str                                  # free | pro（实时判定，含体验期）
     role: str
     pro_starts_at: Optional[datetime] = None
     pro_expires_at: Optional[datetime] = None
     created_at: Optional[datetime] = None
+    trial_until: Optional[str] = None          # 注册体验到期日（YYYY-MM-DD，体验中才非空）
+
+
+class AdminTrialOut(BaseModel):
+    trial_days: int                            # 全局注册体验期天数
+
+
+class AdminTrialIn(BaseModel):
+    trial_days: int = Field(7, ge=0, le=365)
 
 
 class AdminUserOut(BaseModel):

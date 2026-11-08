@@ -37,11 +37,13 @@ def test_register_login_me(userdb, client):
                     json={"email": "neo@yuchao.dev", "password": "password8"})
     assert r.status_code == 200
     body = r.json()
-    assert body["user"]["tier"] == "free" and body["user"]["email"] == "neo@yuchao.dev"
+    # 注册即送体验期（默认 7 天）：tier=pro 且带 trial_until
+    assert body["user"]["tier"] == "pro" and body["user"]["email"] == "neo@yuchao.dev"
+    assert body["user"]["trial_until"]
     token = body["token"]
 
     r = client.get("/api/v1/auth/me", headers={"Authorization": f"Bearer {token}"})
-    assert r.status_code == 200 and r.json()["tier"] == "free"
+    assert r.status_code == 200 and r.json()["tier"] == "pro" and r.json()["trial_until"]
 
     # 重复注册 / 弱密码 / 坏邮箱
     assert client.post("/api/v1/auth/register",
@@ -78,7 +80,14 @@ def test_vip_flow_and_penetration(userdb, duckdb_file, client, tmp_path):
     assert codes.status_code == 200
     code = codes.json()[0]["code"]
 
-    # 未授权：三因子明细不返回数据（403 vip_required）
+    # 未授权：三因子明细不返回数据（403 vip_required）。
+    # 新注册用户在体验期内默认授权——先把注册时间改旧，模拟体验已过期，
+    # 恢复「免费未授权」语义，再走兑换 → 穿透链路。
+    conn0 = store.get_conn()
+    conn0.execute("UPDATE users SET created_at='2020-01-01T00:00:00' WHERE id=?",
+                  (user["user"]["id"],))
+    conn0.commit()
+    conn0.close()
     no_auth = client.get("/api/v1/corepicks/600519/factors")
     assert no_auth.status_code == 403 and no_auth.json()["code"] == "vip_required"
 

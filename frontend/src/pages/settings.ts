@@ -118,8 +118,7 @@ const UP_STATUS: Record<string, { label: string; dot: string; cap: string }> = {
   failed: { label: "失败", dot: "bad", cap: "bad" },
 };
 
-/** 日志级别 → 颜色类（info 灰 / success 绿 / warning 黄 / error 红） */
-const logCls = (lv?: string): string => (["success", "warning", "error"].includes(lv || "") ? lv! : "info");
+/** 更新中任务的状态展示（dot 色 + 胶囊文案） */
 
 /**
  * 数据更新卡（策影 UpdateProgressCard 同构 · 驭潮皮肤）
@@ -169,7 +168,9 @@ async function refreshUpState(): Promise<void> {
       `<b style="font-size:12.5px">${esc(r.label)}</b>` +
       `<span class="upstat ${st.cap}">${esc(st.label)}</span>` +
       `<span style="font-size:11px;color:var(--faint)">${esc(r.trigger === "manual" ? "手动触发" : "自动触发")}</span>` +
-      `<span style="flex:1"></span><b class="num" style="font-size:12.5px">${(r.percent ?? 0).toFixed(1)}%</b>` +
+      `<span style="flex:1"></span>` +
+      (pace && isRun ? `<span class="up-rate" title="当前处理速度">⚡ ${esc(pace)}</span>` : "") +
+      `<b class="num" style="font-size:12.5px">${(r.percent ?? 0).toFixed(1)}%</b>` +
       (isRun ? `<button class="hbtn upstop" id="up-stop" title="排队中的任务会直接取消，正在进行的更新会尽快安全结束">停止</button>` : "") + `</div>`,
       `<div class="upbar"><i style="width:${pct}%"></i></div>`,
       `<div style="display:flex;justify-content:space-between;font-size:11px">` +
@@ -187,10 +188,15 @@ async function refreshUpState(): Promise<void> {
       `<div class="v">${pace || fmtDur(r.elapsed_s)}</div></div></div>`,
     );
     if (r.message) parts.push(`<div style="font-size:11px;color:var(--faint)">${esc(r.message)}</div>`);
-    const logs = (r.logs ?? []).slice(-8).reverse();
+    /* 实时明细流：最近 12 批，最新在顶、旧行渐淡（刷屏感 + 速度可读） */
+    const logs = (r.logs ?? []).slice(-12).reverse();
     if (logs.length)
-      parts.push(`<div class="uplogs">${logs.map((l) =>
-        `<div><i class="${logCls(l.level)}">${esc(l.time || "")}</i> ${esc(l.message || "")}</div>`).join("")}</div>`);
+      parts.push(`<div class="up-live">` +
+        logs.map((l, i) =>
+          `<div class="up-live-row" style="opacity:${Math.max(1 - i * 0.07, 0.35)}">` +
+          `<span class="t">${esc(l.time || "")}</span>` +
+          `<span class="m">${esc(l.message || "")}</span></div>`).join("") +
+        `</div>`);
     if (r.error) parts.push(`<div style="font-size:11px;color:var(--up);background:var(--up-soft);border-radius:8px;padding:7px 9px;line-height:1.5;word-break:break-all">${esc(r.error.slice(0, 300))}</div>`);
   } else if (queued.length) {
     parts.push(queued.map((q) =>
@@ -199,7 +205,7 @@ async function refreshUpState(): Promise<void> {
   } else {
     parts.push(`<div style="font-size:12px;color:var(--dim);line-height:1.6">数据都是最新的。每个交易日收盘后会自动补齐最新行情，错过的也会自动补上，平时不需要手动操作。</div>`);
     if (recent.length) {
-      parts.push(`<details><summary class="uprecent">最近 ${Math.min(recent.length, 5)} 次更新记录</summary>` +
+      parts.push(`<details open><summary class="uprecent">最近 ${Math.min(recent.length, 5)} 次更新记录</summary>` +
         `<div class="uprecent-list">${recent.slice(0, 5).map((t) => {
           const st = UP_STATUS[t.status] ?? UP_STATUS.skipped;
           const tm = (t.finished_at || t.started_at || "").slice(11, 19) || "--:--:--";
@@ -348,24 +354,34 @@ async function renderData(body: HTMLElement): Promise<void> {
     : "数据准备中";
 
   body.innerHTML =
-    /* ① 数据更新（置顶 · 策影 UpdateProgressCard 同构）：现在更新什么/跑到哪了；没在更新时为什么不用管 */
-    `<div class="setsec"><div class="sh">${ic("paper-plane-tilt", 15)}<h3>数据更新</h3>` +
-    `<span id="up-chip" style="display:inline-flex"></span><span class="sp"></span><span class="sub num" id="up-saved"></span></div>` +
-    `<div class="upcard" id="up-body"><span style="color:var(--faint);font-size:11.5px">正在读取更新状态…</span></div>` +
-    `<div class="setrow" style="border-top:1px solid var(--border-soft);margin-top:12px;padding-top:10px"><span class="lab">手动更新</span><div class="ctl" style="gap:8px">` +
-    `<button class="hbtn primary" data-run="kline_update" title="拉取全市场日线增量（核心数据，收盘后自动执行）">立即更新</button>` +
-    `<details style="display:inline-block"><summary class="hbtn" data-sz="13" style="display:inline-flex;cursor:pointer;list-style:none">更多 ▾</summary>` +
-    `<div style="display:flex;gap:8px;flex-wrap:wrap;margin-top:8px">` +
+    /* ① 数据更新 + 数据体检 并排（紧凑两栏，消灭纵向堆叠浪费）：
+       左=更新中心（进度/速度/实时明细流），右=体检四维 + 一键修复 */
+    `<div class="setsec">
+      <div class="sh">${ic("paper-plane-tilt", 15)}<h3>数据更新</h3>
+        <span id="up-chip" style="display:inline-flex"></span><span class="sp"></span>
+        <span class="sub num" id="up-saved"></span></div>
+      <div class="up-grid">
+        <div class="up-left">
+          <div class="up-actions">
+            <button class="hbtn primary" data-run="kline_update" title="拉取全市场日线增量（核心数据，收盘后自动执行）">立即更新</button>
+            <details style="display:inline-block"><summary class="hbtn" data-sz="13" style="display:inline-flex;cursor:pointer;list-style:none">更多 ▾</summary>
+            <div style="display:flex;gap:8px;flex-wrap:wrap;margin-top:8px">` +
     tasks.filter((t) => t.kind !== "kline_update").map((t) => `<button class="hbtn" data-run="${t.kind}" title="${esc(t.description)}">${esc(t.label)}</button>`).join("") +
-    `</div></details></div></div>` +
-    `<div style="font-size:10.5px;color:var(--faint)">平时不需要手动操作；更新失败会自动重试，错过的链位自动补上</div></div>` +
-    /* ①.5 数据体检（P1）：四维卡片（分数+具体事实）+ 问题清单 + 一键修复 */
-    `<div class="setsec"><div class="sh">${ic("database", 15)}<h3>数据体检</h3>` +
-    `<span id="health-chip" style="display:inline-flex"></span><span class="sp"></span>` +
-    `<button class="hbtn primary" id="health-repair" data-sz="13">一键修复</button></div>` +
-    `<div class="upcard" id="health-body"><span style="color:var(--faint);font-size:11.5px">正在体检…</span></div>` +
-    `<div style="font-size:10.5px;color:var(--faint);margin-top:8px">体检看四件事：数据是不是最新、股票覆盖全不全、历史上有没有断档、自动更新是否正常；发现的问题点「一键修复」自动补齐</div></div>` +
-    /* ② 数据内容：每类数据更新到哪天（只展示有数据的卡；卖点 = 数据范围年限） */
+    `</div></details>
+            <span class="sp"></span>
+            <span class="up-note" title="平时不需要手动操作；更新失败自动重试（5/15 分钟），错过的链位自动补上">自动重试 · 补链 ✓</span>
+          </div>
+          <div class="upcard" id="up-body"><span style="color:var(--faint);font-size:11.5px">正在读取更新状态…</span></div>
+        </div>
+        <div class="up-right">
+          <div class="up-rhead">
+            <b>数据体检</b><span id="health-chip" style="display:inline-flex"></span><span class="sp"></span>
+            <button class="hbtn primary" id="health-repair" data-sz="12" title="体检发现问题，一键补齐（补数据 / 补账 / 重启更新）">一键修复</button>
+          </div>
+          <div class="upcard" id="health-body"><span style="color:var(--faint);font-size:11.5px">正在体检…</span></div>
+        </div>
+      </div></div>` +
+    /* ② 数据内容：4 列紧凑卡（每卡 2 行：名称+状态 / 日期+条数；周期转悬停提示） */
     `<div class="setsec"><div class="sh"><h3>数据内容</h3>` +
     `<span class="sub">${esc(rangeSub)} · ${fmtW(totalRows)} 条</span><span class="sp"></span>` +
     `<span class="datachip i-${stage[1] === "ok" ? "up" : stage[1] === "warn" ? "mid" : ""}"><i></i><span>${esc(stage[0])}</span></span></div>` +
@@ -376,27 +392,27 @@ async function renderData(body: HTMLElement): Promise<void> {
       const label = t.fresh_badge || freshLabel(n);
       const cov = typeof t.coverage === "number" ? t.coverage : null;
       const covCls = cov == null ? "" : cov >= 90 ? "" : cov >= 50 ? "mid" : "bad";
-      return `<div class="dscard"><div class="ds-h"><i class="logdot ${cls}"></i><b>${esc(TABLE_ZH[t.table] || "其他数据")}</b></div>` +
+      const title = [t.fresh_note, t.cycle ? `更新周期：${t.cycle}` : ""].filter(Boolean).join(" · ");
+      return `<div class="dscard" title="${esc(title)}"><div class="ds-h"><i class="logdot ${cls}"></i><b>${esc(TABLE_ZH[t.table] || "其他数据")}</b></div>` +
         `<div class="ds-date num">${esc(t.latest_date || "—")}</div>` +
         `<div class="ds-m"><span class="num">${fmtW(t.rows ?? 0)} 条</span>` +
-        `<span class="fresh ${cls}" title="${esc(t.fresh_note || "")}">${esc(label)}</span></div>` +
-        (t.cycle ? `<div style="font-size:10.5px;color:var(--faint);line-height:1.4">更新周期：${esc(t.cycle)}</div>` : "") +
+        `<span class="sp"></span><span class="fresh ${cls}">${esc(label)}</span></div>` +
         (cov != null ? `<div class="ds-cov ${covCls}"><div class="bar"><i style="width:${Math.max(cov, 1.5)}%"></i></div>` +
           `<span class="num">${cov >= 99 ? "完整" : cov.toFixed(0) + "%"}</span></div>` : "") +
         `</div>`;
-    }).join("") : `<div style="color:var(--faint);font-size:12px">数据还在准备中 — 用上方「手动更新」按钮开始第一次更新</div>`) +
+    }).join("") : `<div style="color:var(--faint);font-size:12px">数据还在准备中 — 点上方「立即更新」开始第一次更新</div>`) +
     `</div></div>` +
-    /* ④ 更新记录：每天自动更新了什么、成功与否、新增多少 */
-    `<div class="setsec"><div class="sh"><h3>更新记录</h3><span class="sub">最近的自动 / 手动更新历史</span></div>` +
-    `<table><thead><tr><th>时间</th><th>更新内容</th><th>结果</th><th class="n">新增数据</th><th>备注</th></tr></thead><tbody>` +
+    /* ④ 更新记录：紧凑表格（行高压缩 / 时间等宽 / 备注截断） */
+    `<div class="setsec"><div class="sh"><h3>更新记录</h3><span class="sub">最近 8 次 · 自动 / 手动</span></div>` +
+    `<table class="up-tbl"><thead><tr><th>时间</th><th>更新内容</th><th>结果</th><th class="n">新增</th><th>备注</th></tr></thead><tbody>` +
     (logs.length ? logs.slice(0, 8).map((l) => {
       const [txt, cls] = STATUS_TEXT[String(l.status)] ?? [String(l.status || "—"), "flat"];
-      return `<tr><td class="num">${esc(String(l.created_at || l.started_at || "—")).replace("T", " ").slice(0, 16)}</td>` +
+      return `<tr><td class="num">${esc(String(l.created_at || l.started_at || "—")).replace("T", " ").slice(5, 16)}</td>` +
         `<td>${esc(DATA_TYPE_ZH[String(l.data_type || "")] || (l.data_type ? "其他更新" : "—"))}</td>` +
         `<td><span class="tag ${cls}">${esc(txt)}</span></td>` +
         `<td class="n num">${l.rows != null ? "+" + fmtW(l.rows) : "—"}</td>` +
-        `<td style="max-width:280px;overflow:hidden;text-overflow:ellipsis;color:var(--faint)">${esc(String(l.detail || l.error || l.message || ""))}</td></tr>`;
-    }).join("") : `<tr><td colspan="5" style="text-align:center;color:var(--faint)">${esc("还没有更新记录 — 点上方「手动更新」试试")}</td></tr>`) +
+        `<td class="up-tbl-note" title="${esc(String(l.detail || l.error || l.message || ""))}">${esc(String(l.detail || l.error || l.message || ""))}</td></tr>`;
+    }).join("") : `<tr><td colspan="5" style="text-align:center;color:var(--faint)">${esc("还没有更新记录 — 点「立即更新」试试")}</td></tr>`) +
     `</tbody></table></div>`;
 
   body.querySelectorAll<HTMLElement>("[data-run]").forEach((b) =>
@@ -462,14 +478,20 @@ function renderVip(body: HTMLElement): void {
   const vip = isVip();
   const until = u?.pro_expires_at?.slice(0, 10);
   const since = u?.pro_starts_at?.slice(0, 10);
+  const trial = u?.trial_until?.slice(0, 10);          // 注册体验到期日（体验中才非空）
   const remainDays = until ? Math.max(0, Math.ceil((Date.parse(`${until}T23:59:59`) - Date.now()) / 86400000)) : null;
+  const trialDays = trial ? Math.max(0, Math.ceil((Date.parse(`${trial}T23:59:59`) - Date.now()) / 86400000)) : null;
   const windowText = !u ? "—"
     : u.role === "admin" ? "管理员 · 永久"
-    : vip ? `${since || "立即生效"} → ${until || "永久"}` : "未开通 · 由管理员设置可用时间";
+    : vip && until ? `${since || "立即生效"} → ${until}`
+    : trial ? `注册体验 · 至 ${trial}`              // 体验期无真实起止，单显到期日
+    : vip ? "永久 VIP"
+    : "未开通 · 由管理员设置可用时间";
   body.innerHTML =
     `<div class="setsec"><div class="sh">${ic("crown-simple", 15)}<h3>VIP 与订阅</h3><span class="sp"></span>` +
-    `<span class="tag ${vip ? "vip" : "warn"}">${vip ? `VIP有效${until ? " · " + until + " 到期" : ""}` : u ? "免费版" : "未登录"}</span></div>` +
+    `<span class="tag ${vip ? "vip" : "warn"}">${vip ? `VIP有效${until ? " · " + until + " 到期" : trial ? " · 体验期" : ""}` : u ? "免费版" : "未登录"}</span></div>` +
     `<div class="setrow"><span class="lab">可用时间</span><div class="ctl"><span style="font-size:12.5px;color:var(--dim)">${windowText}</span>` +
+    (trialDays != null ? `<span style="font-size:11px;color:var(--warn)">剩余 ${trialDays} 天体验</span>` : "") +
     (vip && remainDays != null ? `<span style="font-size:11px;color:var(--warn)">剩余 ${remainDays} 天</span>` : "") + `</div></div>` +
     `<div class="setrow"><span class="lab">当前方案</span><div class="ctl"><span style="font-size:12.5px">${vip ? "VIP · 完整指标" : "免费版 · 公开名单与开源指标"}</span>` +
     `<span style="font-size:11px;color:var(--faint)">${vip ? "会员权益由系统实时核对" : "VIP 指标由系统计算，未开通不显示"}</span></div></div>` +
@@ -508,6 +530,7 @@ function renderAccount(body: HTMLElement): void {
 /* ── 管理端 · 普通/VIP 用户与可用时间 ── */
 let adminUsers: AdminUser[] = [];
 let adminEditing: string | null = null;
+let trialDays = 7;
 
 function awText(v?: string | null): string {
   return v ? v.slice(0, 16).replace("T", " ") : "";
@@ -591,6 +614,20 @@ function bindAdminActions(body: HTMLElement): void {
         b.removeAttribute("disabled");
       }
     }));
+  body.querySelector<HTMLElement>("#aw-trial-save")?.addEventListener("click", async (e) => {
+    const btn = e.currentTarget as HTMLElement;
+    const v = Number((body.querySelector<HTMLInputElement>("#aw-trial")?.value || "").trim());
+    if (!Number.isFinite(v) || v < 0 || v > 365) { toast("体验期天数需在 0~365 之间"); return; }
+    btn.setAttribute("disabled", "true");
+    try {
+      await adminApi.setTrial(Math.round(v));
+      toast("已更新注册体验期（新用户生效）");
+      refresh();
+    } catch (err) {
+      toast((err as Error).message || "保存失败");
+      btn.removeAttribute("disabled");
+    }
+  });
 }
 
 async function renderAdminUsers(body: HTMLElement): Promise<void> {
@@ -600,7 +637,7 @@ async function renderAdminUsers(body: HTMLElement): Promise<void> {
     return;
   }
   try {
-    adminUsers = await adminApi.users();
+    [adminUsers, trialDays] = await Promise.all([adminApi.users(), adminApi.trial().then((r) => r.trial_days).catch(() => 7)]);
   } catch (e) {
     body.innerHTML = `<div class="setsec"><div style="font-size:12px;color:var(--up)">${esc((e as Error).message || "用户列表读取失败")}</div></div>`;
     return;
@@ -611,6 +648,13 @@ async function renderAdminUsers(body: HTMLElement): Promise<void> {
     `<div class="setsec"><div class="sh">${ic("user", 15)}<h3>用户管理</h3><span class="sp"></span>` +
     `<span class="tag flat">${adminUsers.length} 位</span></div>` +
     `<div style="font-size:11px;color:var(--faint);padding:2px 2px 8px">设置起止时间后，该用户在窗口内为 VIP，到期自动回落免费版；生效留空＝立即，到期留空＝永久。</div>` +
+    /* 注册体验期（全局）：新用户注册起免费体验 N 天整站 VIP，全系统生效 */
+    `<div class="setrow"><span class="lab">注册体验期</span><div class="ctl">` +
+    `<input type="number" id="aw-trial" min="0" max="365" value="${trialDays}" style="width:70px;height:26px;border-radius:7px;border:1px solid var(--border);background:var(--panel-2);color:var(--text);padding:0 8px;font-size:12px">` +
+    `<span style="font-size:11px;color:var(--faint)">天</span>` +
+    `<button class="hbtn" id="aw-trial-save" style="height:26px;padding:0 12px;font-size:11.5px">保存</button>` +
+    `<span style="font-size:10.5px;color:var(--faint)" title="新注册用户按注册时间免费体验 N 天整站 VIP；设为 0 关闭体验">新注册用户默认免费体验 · 全系统生效</span>` +
+    `</div></div>` +
     awSection("VIP 用户", vip) + awSection("普通用户", free) + `</div>`;
   bindAdminActions(body);
 }

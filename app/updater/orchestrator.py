@@ -588,6 +588,8 @@ class UpdateOrchestrator:
 
     def _publish_state(self, t: UpdateTask, state: str) -> None:
         """data:update 频道：{data_type, state, pct, rows, error}（06.2 协议）。
+        2.3 追加 message + 最近日志：SSE 订阅方（数据页实时明细流）据此渲染
+        「哪一批、哪只股票、速度多少」，无需另开高频轮询。
         skipped = 「数据已是最新、什么都没写」，不必惊动前端。"""
         if t.status == "skipped" and state == t.status:
             return
@@ -600,6 +602,8 @@ class UpdateOrchestrator:
                 "stage": t.stage,
                 "pct": t.percent,
                 "rows": t.rows,
+                "message": t.message,
+                "logs": list(t.logs)[-6:],
                 "error": t.error,
                 "trigger": t.trigger,
             })

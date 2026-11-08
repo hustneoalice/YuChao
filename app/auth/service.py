@@ -79,18 +79,20 @@ def register(email: str, password: str, username: str | None = None) -> dict:
             raise AuthError("该用户名已被使用")
         user_id = secrets.token_hex(8)
         salt = secrets.token_hex(16)
+        created_at = datetime.now().isoformat(timespec="seconds")
         conn.execute(
             "INSERT INTO users (id, email, username, password_hash, salt, tier, role, created_at) "
             "VALUES (?,?,?,?,?,'free','user',?)",
-            (user_id, email, username, hash_password(password, salt), salt,
-             datetime.now().isoformat(timespec="seconds")),
+            (user_id, email, username, hash_password(password, salt), salt, created_at),
         )
         conn.commit()
     finally:
         conn.close()
+    row = {"id": user_id, "email": email, "username": username,
+           "tier": "free", "role": "user", "pro_starts_at": None,
+           "pro_expires_at": None, "created_at": created_at}
     return {"token": issue_token(user_id, email, "free", "user"),
-            "user": {"id": user_id, "email": email, "username": username,
-                     "tier": "free", "role": "user"}}
+            "user": _public_user(row)}
 
 
 def ensure_admin() -> Optional[dict]:
@@ -247,27 +249,83 @@ def set_user_window(user_id: str, start_at: Optional[str], end_at: Optional[str]
 
 
 def effective_tier(user: dict) -> str:
-    """VIP 实时判定：已到期或尚未生效一律回落 free。
-    pro_starts_at 为空 = 立即生效；pro_expires_at 为空 = 永久 VIP。"""
-    if user.get("tier") != "pro":
-        return "free"
-    now = datetime.now()
-    raw_start = user.get("pro_starts_at")
-    if raw_start not in (None, ""):
+    """VIP 实时判定 + 注册体验期（整站 VIP 体验，天数管理员可改）。
+    pro_starts_at 为空 = 立即生效；pro_expires_at 为空 = 永久 VIP。
+    free 用户注册起 trial_days 天内按 pro 处理（体验）；到期自动回落。"""
+    tier = "free"
+    if user.get("tier") == "pro":
+        now = datetime.now()
+        raw_start = user.get("pro_starts_at")
+        if raw_start not in (None, ""):
+            try:
+                if datetime.fromisoformat(str(raw_start)) > now:
+                    return "free"
+            except ValueError:
+                logger.warning("pro_starts_at 解析失败，按已生效处理: %r", raw_start)
+        raw = user.get("pro_expires_at")
+        if raw in (None, ""):
+            return "pro"
         try:
-            if datetime.fromisoformat(str(raw_start)) > now:
-                return "free"
+            exp = datetime.fromisoformat(str(raw))
         except ValueError:
-            logger.warning("pro_starts_at 解析失败，按已生效处理: %r", raw_start)
-    raw = user.get("pro_expires_at")
-    if raw in (None, ""):
-        return "pro"
+            logger.warning("pro_expires_at 解析失败，按过期处理: %r", raw)
+            return "free"
+        tier = "pro" if exp > now else "free"
+    if tier == "free" and user.get("created_at"):
+        try:
+            created = datetime.fromisoformat(str(user["created_at"]))
+            if datetime.now() < created + timedelta(days=_trial_days()):
+                tier = "pro"                    # 体验期 = 整站 VIP
+        except ValueError:
+            pass                                # created_at 异常：不送体验
+    return tier
+
+
+def trial_until(user: dict) -> Optional[str]:
+    """体验到期日（YYYY-MM-DD）；不在体验期返回 None。"""
+    if user.get("tier") == "pro" or not user.get("created_at"):
+        return None                             # 真 VIP 不算体验
     try:
-        exp = datetime.fromisoformat(str(raw))
+        created = datetime.fromisoformat(str(user["created_at"]))
     except ValueError:
-        logger.warning("pro_expires_at 解析失败，按过期处理: %r", raw)
-        return "free"
-    return "pro" if exp > now else "free"
+        return None
+    end = created + timedelta(days=_trial_days())
+    return end.strftime("%Y-%m-%d") if end > datetime.now() else None
+
+
+def _trial_days() -> int:
+    """全局体验期天数（app_meta.trial_days，缺省 7；管理员可改）。"""
+    conn = get_conn()
+    try:
+        row = conn.execute("SELECT value FROM app_meta WHERE key='trial_days'").fetchone()
+    finally:
+        conn.close()
+    if not row:
+        return 7
+    try:
+        days = int(row[0])
+        return days if 0 <= days <= 365 else 7
+    except (TypeError, ValueError):
+        return 7
+
+
+def get_trial_settings() -> dict:
+    return {"trial_days": _trial_days()}
+
+
+def set_trial_days(days: int) -> dict:
+    if not (0 <= days <= 365):
+        raise AuthError("体验期天数需在 0~365 之间")
+    conn = get_conn()
+    try:
+        conn.execute(
+            "INSERT INTO app_meta(key,value) VALUES('trial_days',?) "
+            "ON CONFLICT(key) DO UPDATE SET value=excluded.value",
+            (str(int(days)),))
+        conn.commit()
+    finally:
+        conn.close()
+    return {"trial_days": int(days)}
 
 
 def _public_user(row: dict) -> dict:
@@ -276,7 +334,8 @@ def _public_user(row: dict) -> dict:
             "tier": tier, "role": row.get("role") or "user",
             "pro_starts_at": row.get("pro_starts_at") if tier == "pro" else None,
             "pro_expires_at": row.get("pro_expires_at") if tier == "pro" else None,
-            "created_at": row.get("created_at")}
+            "created_at": row.get("created_at"),
+            "trial_until": trial_until(row)}
 
 
 # -- license（激活码） ------------------------------------------------------

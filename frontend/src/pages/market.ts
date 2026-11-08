@@ -5,7 +5,7 @@ import { cssv, esc, fmt, fmtChg, fmtVol, fmtYi, fmtYiS } from "../fmt";
 import { sma, bollSeries, kdjSeries, atrSeries, sixSegment, SEGNAME, SEGACTION, SEGFULL } from "../indicators";
 export { SEGNAME };
 import { ic } from "../icons";
-import { CARD_DEFS, RIGHT_TABS, addWatch, addWatchGroup, allWatchGroups, getState, inWlFilter, isWatched, notifyLocal, removeWatch, setCardPref, subscribe, toggleWatchGroup, toggleWlGroup, type RightTabId } from "../store";
+import { CARD_DEFS, RIGHT_TABS, addWatch, addWatchGroup, allWatchGroups, getState, inWlFilter, isVip, isWatched, notifyLocal, removeWatch, setCardPref, subscribe, toggleWatchGroup, toggleWlGroup, type RightTabId } from "../store";
 import { openModal, multiPick, toast } from "../ui";
 import { bindNoteHover, hideNotePop, initNoteEditor, noteChipHtml, openNoteModal } from "../note-ui";
 import { openGroupPanel, openWatchPanel } from "../watch";
@@ -923,6 +923,11 @@ export function initMarket(): void {
       renderIndMore();
       return;
     }
+    // 特色指标锁定行：必须先于下面的显影切换，否则点击会直接叠加上图
+    if (t.closest(".imr.vip-locked")) {
+      openModal("modal-vip");
+      return;
+    }
     // 更多面板「绘图」行：整行点击 = 叠加/取消绘图
     const lrow = t.closest<HTMLElement>(".imr[data-lrow]");
     if (lrow) {
@@ -979,6 +984,11 @@ export function initMarket(): void {
       }
       return;
     }
+    if (b.dataset.mtab) {                                  // 更多面板：tab 分类切换
+      localStorage.setItem(MORE_TAB_LS, b.dataset.mtab);
+      renderIndMore();
+      return;
+    }
     if (t.dataset.xshow || t.closest("i[data-xshow]")) {   // chip 悬停 ×：移出常显（显影不变）
       const k = ((t.closest<HTMLElement>("i[data-xshow]") ?? t) as HTMLElement).dataset.xshow;
       if (k) {
@@ -1011,6 +1021,7 @@ export function initMarket(): void {
   // 主题 / 涨跌方向 / 强调色变化 → 各面板图表重上色；右列卡重渲染；
   // 登录态变化 → applyRcolW 按 new user 记忆重放卡片栏宽度
   subscribe(() => {
+    sanitizeVipInds();                       // 登出/体验到期：特色指标立即收起
     kls.forEach((k) => k?.retheme());
     kls.forEach((k) => k?.drawLegend(mk.mainInds));
     applyRcolW();
@@ -1039,6 +1050,7 @@ export function initMarket(): void {
     renderIpanel();
     renderKline();
   });
+  sanitizeVipInds();                       // 启动即清：未登录/免费不落特色指标（默认预设也不含）
 }
 
 /** 布局段按持久化状态点亮（boot 时 seg 默认 on 在单屏） */
@@ -1148,6 +1160,29 @@ function renderIpanel(): void {
 /** 分类色点：chip/更多列表共用（分类归属一眼可辨） */
 const CAT_IC: Record<string, string> = { main: "#FF9F43", trend: "#F2C94C", mom: "#4DD0E1", vol: "#EF5350", swing: "#7E57C2", volat: "#26C6DA" };
 
+/* ── VIP 特色指标（体验期/VIP 解锁，免费到期灰显锁定） ── */
+const VIP_KEYS = ["short", "mid", "qyjj", "strongpullback", "trendhistogram",
+  "stockoperate", "accumulation", "volumeactivity"];
+const vipLocked = (key: string): boolean => VIP_KEYS.includes(key) && !isVip();
+/** 免费/体验到期：把已叠加的特色指标从显影集合清掉（默认预设也不落 VIP 指标） */
+function sanitizeVipInds(): void {
+  if (isVip()) return;
+  const before = mk.mainInds.length + mk.subInds.length;
+  mk.mainInds = mk.mainInds.filter((k) => !VIP_KEYS.includes(k));
+  mk.subInds = mk.subInds.filter((k) => !VIP_KEYS.includes(k));
+  if (mk.mainInds.length + mk.subInds.length !== before) {
+    saveKPrefs();
+    toast("体验期已结束，特色指标已收起");
+  }
+}
+/** 更多面板 tab（全部 + 6 分类 + 绘图），选中持久化 */
+const MORE_TAB_LS = "yc_kl_more_tab";
+function moreTab(): string {
+  const v = localStorage.getItem(MORE_TAB_LS);
+  const ids = ["all", ...IND_CATS.map((c) => c.cat), "lines"];
+  return ids.includes(v || "") ? (v as string) : "all";
+}
+
 /** 常显两行（#ip-inds）：只渲染 yc_indfav 常显集合；chip 点击=显影切换、悬停 × =移出常显；
  *  副图行尾「＋更多」开配置面板（搜索 + 全量 33 指标）。 */
 function renderIndBar(): void {
@@ -1175,27 +1210,42 @@ function renderIndBar(): void {
     `<button class="imore-open" data-more="1" title="全部指标 / 绘图工具：搜索 / 配置常显 / 临时叠加">＋更多</button>`;
 }
 
-/** 更多面板列表（#kl-more-list）：搜索过滤 + 分类分组；点行=显影切换，★=常显切换。
+/** 更多面板列表（#kl-more-list）：tab 分类过滤 + 搜索叠加；点行=显影切换，★=常显切换。
+ *  VIP 特色指标：行尾金色皇冠；免费（体验到期）灰显锁定，点击弹 VIP 开通。
  *  搜索框/底注是 index.html 静态壳，这里只填列表（保住输入焦点）。 */
 function renderIndMore(): void {
   const list = document.getElementById("kl-more-list");
+  const tabsEl = document.getElementById("kl-more-tabs");
   if (!list) return;
   const q = (document.querySelector<HTMLInputElement>("#kl-more input")?.value || "").trim().toLowerCase();
+  const tab = moreTab();
+  if (tabsEl) {
+    const tabs = [{ id: "all", label: "全部" }]
+      .concat(IND_CATS.map((c) => ({ id: c.cat, label: c.label })))
+      .concat([{ id: "lines", label: "绘图" }]);
+    tabsEl.innerHTML = `<span class="seg im-tabs-seg">` +
+      tabs.map((t) => `<button class="${tab === t.id ? "on" : ""}" data-mtab="${t.id}">${t.label}</button>`).join("") +
+      `</span>`;
+  }
   const mset = new Set(mk.mainInds), sset = new Set(mk.subInds);
   const favs = new Set(readIndFavs());
   const lfavs = new Set(readLineFavs());
+  const inTab = (d: (typeof IND_DEFS)[number]): boolean => tab === "all" || d.cat === tab;
   const hit = (d: (typeof IND_DEFS)[number]) =>
-    !q || d.label.toLowerCase().includes(q) || d.desc.toLowerCase().includes(q) || d.key.includes(q) || d.kc.toLowerCase().includes(q);
+    inTab(d) && (!q || d.label.toLowerCase().includes(q) || d.desc.toLowerCase().includes(q) || d.key.includes(q) || d.kc.toLowerCase().includes(q));
   const row = (d: (typeof IND_DEFS)[number]) => {
     const isOn = (d.where === "main" ? mset : sset).has(d.key);
-    return `<div class="imr${isOn ? " on" : ""}" data-${d.where === "main" ? "mi" : "si"}="${d.key}" title="${esc(d.desc)} · 点击${isOn ? "移除显影" : "叠加显影"}">` +
+    const vip = VIP_KEYS.includes(d.key);
+    const locked = vipLocked(d.key);
+    return `<div class="imr${isOn ? " on" : ""}${locked ? " vip-locked" : ""}" data-${d.where === "main" ? "mi" : "si"}="${d.key}" title="${esc(d.desc)} · 点击${isOn ? "移除显影" : "叠加显影"}${locked ? "（VIP 特色指标）" : ""}">` +
       `<i class="dot" style="--ic:${CAT_IC[d.cat] || "transparent"}"></i><b>${d.label}</b>` +
+      (vip ? `<i class="im-vip" title="VIP 特色指标${locked ? " · 开通后解锁" : ""}">◆</i>` : "") +
       `<span class="im-desc">${esc(d.desc)}</span>` +
       `<i class="star${favs.has(d.key) ? " on" : ""}" data-fav="${d.key}" title="${favs.has(d.key) ? "取消常显" : "常显到工具栏"}">★</i></div>`;
   };
-  // 绘图工具：与指标同款交互（行=叠加/取消，★=常显到工具栏绘图行）
+  // 绘图工具：与指标同款交互（行=叠加/取消，★=常显到工具栏绘图行）；绘图不设 VIP 锁
   const lineHit = (d: (typeof LINE_DEFS)[number]) =>
-    !q || d.label.toLowerCase().includes(q) || d.desc.toLowerCase().includes(q) || d.key.includes(q);
+    (tab === "all" || tab === "lines") && (!q || d.label.toLowerCase().includes(q) || d.desc.toLowerCase().includes(q) || d.key.includes(q));
   const lineRow = (d: (typeof LINE_DEFS)[number]) => {
     const isOn = lineOn(d.key);
     return `<div class="imr${isOn ? " on" : ""}" data-lrow="${d.key}" title="${esc(d.desc)} · 点击${isOn ? "取消叠加" : "叠加到主图"}">` +
@@ -1203,11 +1253,13 @@ function renderIndMore(): void {
       `<span class="im-desc">${esc(d.desc)}</span>` +
       `<i class="star${lfavs.has(d.key) ? " on" : ""}" data-lfav="${d.key}" title="${lfavs.has(d.key) ? "取消常显" : "常显到工具栏"}">★</i></div>`;
   };
-  const indHtml = IND_CATS.map(({ cat, label }) => {
-    const defs = IND_DEFS.filter((d) => d.cat === cat && hit(d));
-    return defs.length ? `<div class="im-cat">${label}</div>${defs.map(row).join("")}` : "";
-  }).join("");
-  const lineHtml = LINE_DEFS.filter(lineHit).map(lineRow).join("");
+  const indHtml = IND_CATS.filter(({ cat }) => tab === "all" || cat === tab)
+    .map(({ cat, label }) => {
+      const defs = IND_DEFS.filter((d) => d.cat === cat && hit(d));
+      return defs.length ? `<div class="im-cat">${label}</div>${defs.map(row).join("")}` : "";
+    }).join("");
+  const lineHtml = (tab === "all" || tab === "lines")
+    ? LINE_DEFS.filter(lineHit).map(lineRow).join("") : "";
   list.innerHTML = (indHtml + (lineHtml ? `<div class="im-cat">绘图</div>${lineHtml}` : ""))
     || `<div class="im-none">没有匹配「${esc(q)}」的指标 / 绘图工具</div>`;
 }

@@ -37,11 +37,13 @@ export function refreshVipUI(): void {
     tag.textContent = "管理员 · 永久 VIP";
     tag.className = "tag vip";
   } else if (isVip()) {
-    // pro_expires_at 为空＝永久 VIP，不能因为没到期日就误判成免费版
+    // pro_expires_at 为空＝永久 VIP；注册体验期（trial_until）单独标注，不冒充真实 VIP
     const until = u?.pro_expires_at ? u.pro_expires_at.slice(0, 10) : "";
+    const trial = u?.trial_until ? u.trial_until.slice(0, 10) : "";
     badge.classList.remove("off");
-    badgeT.textContent = until ? `VIP · 至 ${until}` : "VIP";
-    tag.textContent = until ? `VIP有效 · ${until} 到期` : "VIP有效 · 永久";
+    badgeT.textContent = until ? `VIP · 至 ${until}` : trial ? `体验至 ${trial}` : "VIP";
+    tag.textContent = until ? `VIP有效 · ${until} 到期`
+      : trial ? `注册体验 · ${trial} 到期` : "VIP有效 · 永久";
     tag.className = "tag vip";
   } else if (u) {
     // 免费版不戴皇冠、不用金色：灰色胶囊只标「免费版」

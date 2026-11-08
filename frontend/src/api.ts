@@ -66,6 +66,8 @@ export interface UserPublic {
   id: string; email: string; username?: string | null;
   tier: "free" | "pro"; role: string;
   pro_starts_at?: string | null; pro_expires_at?: string | null; created_at?: string | null;
+  /** 注册体验到期日（YYYY-MM-DD，体验中才非空） */
+  trial_until?: string | null;
 }
 export interface TokenPair { token: string; user: UserPublic }
 export interface AdminUser {
@@ -81,11 +83,14 @@ export const authApi = {
   me: () => req<UserPublic>("/auth/me"),
 };
 
-/* ── 管理端 · 用户与 VIP 时间 ── */
+/* ── 管理端 · 用户 / VIP 时间 / 全局体验期 ── */
 export const adminApi = {
   users: () => req<AdminUser[]>("/admin/users"),
   setWindow: (id: string, p: { enabled: boolean; start_at: string | null; end_at: string | null }) =>
     req<AdminUser>(`/admin/users/${encodeURIComponent(id)}/window`, { method: "PUT", body: p }),
+  trial: () => req<{ trial_days: number }>("/admin/trial"),
+  setTrial: (trial_days: number) =>
+    req<{ trial_days: number }>("/admin/trial", { method: "PUT", body: { trial_days } }),
 };
 
 /* ── F04 · 按用户设置云同步 ── */

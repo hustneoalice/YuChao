@@ -102,9 +102,9 @@
               <span class="seg" id="kl-view" title="观察档位：一键显示最近 N 根">
                 <button data-v="20">20</button><button data-v="40">40</button><button data-v="60">60</button>
               </span>
-              <button class="cbtn" id="kl-zin" title="放大（K 线变宽）">＋</button>
-              <button class="cbtn" id="kl-zout" title="缩小（看更长周期）">－</button>
-              <button class="cbtn" id="kl-vreset" title="重置视图">⟲</button>
+              <button class="cbtn zbtn" id="kl-zin" title="放大（K 线变宽）">＋</button>
+              <button class="cbtn zbtn" id="kl-zout" title="缩小（看更长周期）">－</button>
+              <button class="cbtn zbtn" id="kl-vreset" title="重置视图">⟲</button>
               <button class="cbtn" id="kl-range" title="框选：左键拖一段区间，统计涨跌幅 / 量额 / 资金，并同步到右侧资金卡">框选</button>
               <button class="cbtn" id="kl-measure" title="连线：点击 K 线时按光标位置就近吸附该根最高点或最低点，再点另一根即测算两点区间涨跌幅">连线</button>
               <label class="cbtn kl-radio" id="kl-pick-mode" title="单选K线：勾选后左键点击一根K线选中单根，联动右侧当日资金卡（与框选互斥）">
@@ -119,8 +119,9 @@
             <!-- 「更多」指标/绘图配置面板：搜索 + 分类全量；点行=显影切换，★=常显切换 -->
             <div class="kl-more" id="kl-more" hidden>
               <div class="im-search"><input type="text" placeholder="搜索指标 / 绘图：名称 / 说明 / 分类" autocomplete="off"></div>
+              <div class="im-tabs" id="kl-more-tabs"></div>
               <div class="im-list" id="kl-more-list"></div>
-              <div class="im-foot">点行 = 叠加 / 移除 · ★ = 常显到工具栏（绘图在最后）</div>
+              <div class="im-foot">点行 = 叠加 / 移除 · ★ = 常显到工具栏（绘图在最后）· ◆ = VIP 特色指标</div>
             </div>
             <div class="kl-stage" id="kl-stage">
               <div class="kl-panels" id="kl-panels"></div>

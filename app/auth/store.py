@@ -23,6 +23,11 @@ CREATE TABLE IF NOT EXISTS users (
     role TEXT NOT NULL DEFAULT 'user',       -- user | admin
     created_at TEXT NOT NULL
 );
+-- 全局键值配置（trial_days 体验期天数等，管理员可改）
+CREATE TABLE IF NOT EXISTS app_meta (
+    key TEXT PRIMARY KEY,
+    value TEXT NOT NULL
+);
 CREATE TABLE IF NOT EXISTS user_prefs (
     user_id TEXT PRIMARY KEY,
     prefs_json TEXT NOT NULL DEFAULT '{}'    -- 主题/accent/涨跌方向偏好

@@ -13,12 +13,22 @@ function row(cls: string, html: string): string {
   return `<div class="ai-row ${cls}"><div class="ai-bub">${html}</div></div>`;
 }
 
+/** 工具函数名 → 中文展示名：界面不直接暴露模型侧的英文函数名 */
+const TOOL_ZH: Record<string, string> = {
+  get_stock_profile: "个股档案",
+  get_stock_quote: "实时行情",
+  get_indicator_snapshot: "技术指标",
+};
+
 function toolCard(c: AiToolCall): string {
+  const zh = TOOL_ZH[c.tool] || c.tool;
   const args = esc(JSON.stringify(c.args));
-  return `<div class="ai-tool"><div class="ai-tool-h"><b>${esc(c.tool)}</b>` +
-    `<span class="ai-tag">${c.ms} ms</span>` +
-    (c.data_date ? `<span class="ai-tag">数据 ${esc(c.data_date)}</span>` : "") +
-    `<span class="sp"></span><span class="ai-caret" data-fold>展开</span></div>` +
+  const sub = [c.ms != null ? `耗时 ${c.ms} ms` : "", c.data_date ? `数据 ${c.data_date}` : ""]
+    .filter(Boolean).join(" · ");
+  return `<div class="ai-tool"><div class="ai-tool-h">` +
+    `<i class="ai-tool-dot"></i><b title="${esc(c.tool)}">${esc(zh)}</b>` +
+    (sub ? `<span class="ai-tool-sub" title="${esc(sub)}">${esc(sub)}</span>` : `<span class="sp"></span>`) +
+    `<span class="ai-caret" data-fold>展开</span></div>` +
     `<div class="ai-tool-b"><div class="ai-kv"><span>参数</span><code>${args}</code></div></div></div>`;
 }
 
@@ -166,6 +176,9 @@ export function mountChat(o: ChatMountOptions): void {
           if (m.mode === "llm" && !think.hidden) {
             thinkState.textContent = "思考完成";
             think.classList.add("done");
+            // 正文已出来：思考流自动收起，信息流更紧凑（仍可点「展开」回看）
+            think.classList.add("fold");
+            fold.textContent = "展开";
           }
           if (m.candidates?.length) {
             tail.insertAdjacentHTML("beforeend",

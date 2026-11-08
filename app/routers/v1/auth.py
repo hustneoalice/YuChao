@@ -10,8 +10,9 @@ from pydantic import TypeAdapter
 
 from ...auth import deps, service
 from ...auth.deps import resolve_token
-from ...contracts.auth import (ActivationCode, AdminUserOut, CodesIn, LoginIn, RedeemIn,
-                               RedeemOut, RegisterIn, TokenPair, UserPublic, WindowIn)
+from ...contracts.auth import (ActivationCode, AdminTrialIn, AdminTrialOut, AdminUserOut,
+                               CodesIn, LoginIn, RedeemIn, RedeemOut, RegisterIn,
+                               TokenPair, UserPublic, WindowIn)
 from ...config import settings
 from ...errors import ApiError
 from ...stream.bus import make_publisher
@@ -111,3 +112,21 @@ def admin_set_window(user_id: str, body: WindowIn, token: str | None = Depends(r
     except Exception:
         logger.debug("vip.changed 广播失败", exc_info=True)
     return TypeAdapter(AdminUserOut).validate_python(out)
+
+
+@router.get("/admin/trial", response_model=AdminTrialOut,
+            summary="全局注册体验期天数（admin）")
+def admin_trial(token: str | None = Depends(resolve_token)):
+    deps.require_admin(deps.require_user(token))
+    return TypeAdapter(AdminTrialOut).validate_python(service.get_trial_settings())
+
+
+@router.put("/admin/trial", response_model=AdminTrialOut,
+            summary="修改全局注册体验期天数（admin）")
+def admin_set_trial(body: AdminTrialIn, token: str | None = Depends(resolve_token)):
+    deps.require_admin(deps.require_user(token))
+    try:
+        return TypeAdapter(AdminTrialOut).validate_python(
+            service.set_trial_days(body.trial_days))
+    except service.AuthError as e:
+        raise ApiError("auth_error", e.message, e.status_code)
