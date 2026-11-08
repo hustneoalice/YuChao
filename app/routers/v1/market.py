@@ -488,6 +488,7 @@ def search(
     q: str = Query(min_length=1, max_length=20),
     limit: int = Query(default=10, ge=1, le=50),
     kinds: Optional[str] = Query(default=None, description="限定类别：stock,fund,index,sector（缺省全部）"),
+    allow_remote: bool = Query(default=True, description="本地命中不足时是否调用腾讯联想兜底（前端首屏传 false 先出结果）"),
     conn=Depends(get_conn),
 ):
     want = {k.strip() for k in kinds.split(",") if k.strip()} if kinds else None
@@ -500,7 +501,7 @@ def search(
     #   · 纯字母：联想源自带多音字词典（「cd」能给出长电科技，pypinyin 会把「长」读成
     #     zhang 而漏掉），因此字母查询以联想结果优先，本地字面命中（ST/TCL 等）仍在前；
     #   · 其它：仅在本地面命中不足时补新股（stock_universe 16:20 才入池）。
-    if allow_stock and (alpha or len(hits) < limit):
+    if allow_remote and allow_stock and (alpha or len(hits) < limit):
         try:
             from ...updater.collectors import sources as up_sources   # 延迟导入，避免 API 启动耦合采集层
             remote = up_sources.search_suggest(q, limit if alpha else min(limit - len(hits), 8))
@@ -622,7 +623,7 @@ def targets(conds: str = Query(default="vol,short,mid,up20",
             trend_still_above: bool = True,
             trend_above_days: int = Query(default=1, ge=1, le=250),
             tail: bool = Query(default=False,
-                               description="尾盘估算：14:50 后用快照价估算钱袋/地雷（收盘前可能变化）"),
+                               description="尾盘估算：14:50 后用快照价估算阶段反转信号（收盘前可能变化）"),
             conn=Depends(get_conn)):
     """指标层后台定时预计算（target_scan / target_trend），条件层即时过滤：
     改条件或阈值即刻重筛（毫秒级），只有数据更新才重算指标层。
@@ -663,7 +664,7 @@ def _target_scan(conn, conds: str, values: Optional[str],
     meta = {**meta}                          # 预计算缓存 meta 不就地改
     trend_as_of = meta.get("trend_as_of") or meta["as_of"]
     provisional = bool(meta.get("provisional"))
-    # 趋势字段常拼：负柱收敛/距零轴依赖 STICKV，钱袋子列（money_ago/money_cnt）
+    # 趋势字段常拼：负柱收敛/距零轴依赖 STICKV，阶段反转列（money_ago/money_cnt）
     # 无论是否勾选条件都要展示，所以这里不做条件判断（target_trend 行数仅几千，join 开销可忽略）
     trends = repo.market.stock_target_trends(conn) or {}
     rows = [{**row, **trends.get(row['symbol'], {}),
@@ -707,12 +708,12 @@ def _target_scan(conn, conds: str, values: Optional[str],
         # 吸筹榜：个股内强度分位降序（80+ 才进榜），同强度再按操作优先级
         items.sort(key=lambda t: (-(t.get('acc_strength') or 0), -seg_rank(t)))
     elif "money" in want:
-        # 钱袋榜：越新鲜越靠前（距今天数升序），同日出现再按出现次数/操作优先级
+        # 低点反转榜：越新鲜越靠前（距今天数升序），同日出现再按出现次数/操作优先级
         items.sort(key=lambda t: (
             t.get('money_ago') if t.get('money_ago') is not None else 1e9,
             -(t.get('money_cnt') or 0), -seg_rank(t)))
     elif "mine" in want:
-        # 地雷榜：风险信号同样按新鲜度排序（越近越靠前）
+        # 高点反转榜：风险信号同样按新鲜度排序（越近越靠前）
         items.sort(key=lambda t: (
             t.get('mine_ago') if t.get('mine_ago') is not None else 1e9,
             -(t.get('mine_cnt') or 0), -seg_rank(t)))
@@ -775,8 +776,8 @@ def targets_export(conds: str = Query(default="vol,short,mid,up20"),
         ("short_orange", "短线趋势橙", 10, None),
         ("mid_orange", "中线趋势橙", 10, None),
         ("limit_up_cnt", "20日涨停次数", 11, "0"),
-        ("money_ago", "钱袋距今天数", 12, None),
-        ("money_cnt", "20日钱袋次数", 11, "0"),
+        ("money_ago", "低点反转距今天数", 12, None),
+        ("money_cnt", "20日低点反转次数", 11, "0"),
         ("seg", "六分段", 20, None),
         ("state", "短线状态", 13, None),
     ]

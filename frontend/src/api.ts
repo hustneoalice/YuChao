@@ -166,15 +166,15 @@ export interface TargetItem {
   trend_above_days: number;
   neg_run?: number;                       // 连续负柱收窄天数（绿柱缩短）
   neg_abs?: number | null;                // 当前负柱距零轴幅度 |STICKV|（正值时为 null）
-  money_date?: string | null;             // 最近一次钱袋子（ZigZag 低点）日期
-  money_ago?: number | null;              // 钱袋距今交易日数（0=今日；null=近20日未出现）
-  money_cnt?: number;                     // 近 20 个交易日钱袋出现次数
-  mine_date?: string | null;              // 最近一次地雷（ZigZag 高点回落）日期
-  mine_ago?: number | null;               // 地雷距今交易日数（0=今日；null=近20日未出现）
-  mine_cnt?: number;                      // 近 20 个交易日地雷出现次数
+  money_date?: string | null;             // 最近一次低点反转（阶段反转·低点）日期
+  money_ago?: number | null;              // 低点反转距今交易日数（0=今日；null=近20日未出现）
+  money_cnt?: number;                     // 近 20 个交易日低点反转出现次数
+  mine_date?: string | null;              // 最近一次高点反转（阶段反转·高点）日期
+  mine_ago?: number | null;               // 高点反转距今交易日数（0=今日；null=近20日未出现）
+  mine_cnt?: number;                      // 近 20 个交易日高点反转出现次数
   acc_strength?: number | null;           // 主力吸筹强度：近20日柱峰值在本股近250日的百分位(0-100)
   trend_data_date: string; trend_provisional: boolean;
-  tail_provisional?: boolean;             // 钱袋/地雷来自尾盘估算（收盘前可能变化）
+  tail_provisional?: boolean;             // 阶段反转信号来自尾盘估算（收盘前可能变化）
 }
 
 export interface TargetScanOut {
@@ -183,7 +183,7 @@ export interface TargetScanOut {
   values?: Record<string, number>; items: TargetItem[];
   /* 数据断更守卫：stale 为 true 时后端不计算，message 说明落后天数 */
   stale?: boolean; data_date?: string; lag?: number | null; message?: string;
-  /* 尾盘估算：tail_mode=true 时钱袋/地雷按快照价暂估（收盘前可能变化） */
+  /* 尾盘估算：tail_mode=true 时阶段反转信号按快照价暂估（收盘前可能变化） */
   tail_mode?: boolean; tail_at?: string;
 }
 
@@ -381,10 +381,12 @@ export const marketApi = {
     req<BoardRow | null>(`/market/snapshot_one?symbol=${encodeURIComponent(symbol)}`),
   sparks: (symbols: string[]) =>
     req<{ items: { symbol: string; prev_close: number | null; points: number[] }[]; missing: string[] }>(`/market/sparks?symbols=${encodeURIComponent(symbols.join(","))}`),
-  search: (q: string, limit = 10, kinds?: string[]) =>
+  /* remote=false：只查本地库（毫秒级）；本地结果不足时前端再补一次 remote=true 走腾讯联想 */
+  search: (q: string, limit = 10, kinds?: string[], remote = true) =>
     req<{ items: SearchHit[]; total: number }>(
       `/market/search?q=${encodeURIComponent(q)}&limit=${limit}` +
-      (kinds?.length ? `&kinds=${encodeURIComponent(kinds.join(","))}` : "")),
+      (kinds?.length ? `&kinds=${encodeURIComponent(kinds.join(","))}` : "") +
+      (remote ? "" : "&allow_remote=false")),
   indices: () => req<{ items: IndexQuote[]; total_amount?: number }>("/market/indices"),
   /* 实时资讯/研报（后端东财直连 + TTL 缓存，失败降级空列表） */
   news: (symbol: string, limit = 12) => req<{ items: NewsItem[] }>(`/market/news?symbol=${encodeURIComponent(symbol)}&limit=${limit}`),

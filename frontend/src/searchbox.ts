@@ -3,6 +3,7 @@
    交互对齐主流键盘精灵：聚焦/空输入显示历史，点击项保存历史并回调。 */
 import { marketApi, type SearchHit } from "./api";
 import { fmtChg } from "./fmt";
+import { ic } from "./icons";
 
 export interface PickHit { symbol: string; name?: string; kind?: SearchHit["kind"]; sub?: string | null }
 
@@ -57,7 +58,7 @@ export function stockSearch(o: StockSearchOpts): StockSearchHandle {
   clr.className = "s-clear";
   clr.title = "清空";
   clr.setAttribute("aria-label", "清空搜索");
-  clr.textContent = "✕";
+  clr.innerHTML = ic("x", 11);
   wrap.appendChild(clr);
   const syncClear = (): void => { clr.classList.toggle("on", !!o.input.value); };
   o.input.addEventListener("input", syncClear);
@@ -148,11 +149,11 @@ export function stockSearch(o: StockSearchOpts): StockSearchHandle {
 
   const drawHist = (): void => drawWithChg(histHtml(), loadHist());
 
-  const search = (): void => {
-    const q = o.input.value.trim();
-    if (!q) { drawHist(); return; }
-    const mySeq = ++seq;
-    void marketApi.search(q, limit, o.kinds).then((r) => {
+  /* 两段式搜索：先只查本地库（代码/名称/拼音，毫秒级）立刻出结果；
+     本地不足 limit 时再补一次腾讯联想（外网 0.2~1s），用于中文简称和新股。
+     这样绝大多数输入不再为一次外网调用干等。 */
+  const supplement = (q: string, mySeq: number): void => {
+    void marketApi.search(q, limit, o.kinds, true).then((r) => {
       if (mySeq !== seq) return;
       hits = r.items;
       if (!hits.length) {
@@ -161,15 +162,34 @@ export function stockSearch(o: StockSearchOpts): StockSearchHandle {
       }
       drawWithChg(hits.map((u) => itemHtml(u, o.tail?.(u))).join(""), hits, mySeq);
     }).catch(() => {
-      if (mySeq === seq)
-        draw(`<div class="sitem" style="color:var(--faint);cursor:default">搜索服务不可达</div>`);
+      if (mySeq !== seq || hits.length) return;
+      draw(`<div class="sitem" style="color:var(--faint);cursor:default">搜索服务不可达</div>`);
+    });
+  };
+
+  const search = (): void => {
+    const q = o.input.value.trim();
+    if (!q) { drawHist(); return; }
+    const mySeq = ++seq;
+    void marketApi.search(q, limit, o.kinds, false).then((r) => {
+      if (mySeq !== seq) return;
+      hits = r.items;
+      if (hits.length) {
+        drawWithChg(hits.map((u) => itemHtml(u, o.tail?.(u))).join(""), hits, mySeq);
+        if (hits.length >= limit) return;
+      } else {
+        draw(`<div class="sitem" style="color:var(--faint);cursor:default">搜索中…</div>`);
+      }
+      supplement(q, mySeq);
+    }).catch(() => {
+      if (mySeq === seq) supplement(q, mySeq);
     });
   };
 
   let debounce = 0;
   o.input.addEventListener("input", () => {
     window.clearTimeout(debounce);
-    debounce = window.setTimeout(search, 160);
+    debounce = window.setTimeout(search, 120);
   });
   o.input.addEventListener("focus", () => { if (!o.input.value.trim()) drawHist(); });
   o.input.addEventListener("keydown", (e) => {

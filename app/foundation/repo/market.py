@@ -1,6 +1,8 @@
 """行情读取：K 线（复权派生视图）/ 快照 / 搜索。"""
+import json
 import time
 from collections import deque
+from pathlib import Path
 from typing import Optional
 from threading import Lock
 from datetime import datetime
@@ -399,6 +401,7 @@ def search(conn, q: str, limit: int = 10,
     # 拼音兜底：原始命中不足时才展开（避免每次请求都拼全表）；板块/指数同享。
     # 同分（如 cd 命中 长电科技/成都燃气/崇达技术…）按总市值降序，大票优先。
     if want_pinyin and len(cand) < limit:
+        _load_pinyin_disk(conn)                    # 命中落盘索引则跳过全表拼音解析
         caps = _market_caps(conn) if "stock" in kinds else {}
         for kind, items in rows.items():
             for row in items:
@@ -407,6 +410,7 @@ def search(conn, q: str, limit: int = 10,
                 sc = _py_grade(_pinyin_variants(row[1]), ql)
                 if sc is not None:
                     put(kind, row, sc, caps.get(row[0], 0.) if kind == "stock" else 0.)
+        _save_pinyin_disk(conn)
 
     cand.sort(key=lambda x: x[:3])
     return [c[3] for c in cand[:limit]]
@@ -772,11 +776,12 @@ def _py_grade(py: dict, ql: str) -> Optional[int]:
     if not ql:
         return None
     abbrs = py.get("abbrs") or [py.get("abbr", "")]
+    fulls = py.get("fulls") or [py.get("full", "")]
     if any(a == ql for a in abbrs):
         return 4
-    if any(a.startswith(ql) for a in abbrs) or py["full"].startswith(ql):
+    if any(a.startswith(ql) for a in abbrs) or any(f.startswith(ql) for f in fulls):
         return 5
-    if any(ql in a for a in abbrs) or ql in py["full"]:
+    if any(ql in a for a in abbrs) or any(ql in f for f in fulls):
         return 6
     return None
 
@@ -791,6 +796,7 @@ def abbr_grade(name: Optional[str], ql: str, abbr: Optional[str] = None) -> int:
         return 9
     py = _pinyin_variants(name)
     alts = set(py.get("abbrs") or [py.get("abbr", "")])
+    fulls = py.get("fulls") or [py.get("full", "")]
     if abbr:
         alts.add(abbr.lower())
     alts.discard("")
@@ -798,35 +804,97 @@ def abbr_grade(name: Optional[str], ql: str, abbr: Optional[str] = None) -> int:
         return 9
     if ql in alts:
         return 0
-    if any(a.startswith(ql) for a in alts) or py.get("full", "").startswith(ql):
+    if any(a.startswith(ql) for a in alts) or any(f.startswith(ql) for f in fulls):
         return 1
-    if any(ql in a for a in alts) or ql in py.get("full", ""):
+    if any(ql in a for a in alts) or any(ql in f for f in fulls):
         return 2
     return 9
 
 
+# 单字拼音缓存：全市场约五千个名称只共享两千多个汉字，按字缓存后
+# 一次全表拼音扫描从「逐名解析」的数十秒降到数百毫秒。
+_PY_CHAR: dict[str, tuple[list[str], list[str]]] = {}
+
+
+def _char_py(ch: str) -> tuple[list[str], list[str]]:
+    """单字 → (首字母读音变体, 全拼音节变体)。非汉字原样保留；多音字给全部读音。"""
+    hit = _PY_CHAR.get(ch)
+    if hit is not None:
+        return hit
+    try:
+        from pypinyin import Style, pinyin
+        errors = lambda x: list(x)          # noqa: E731
+        ini = pinyin(ch, style=Style.FIRST_LETTER, heteronym=True, errors=errors)
+        syl = pinyin(ch, style=Style.NORMAL, heteronym=True, errors=errors)
+        out = (sorted({o.lower() for o in (ini[0] if ini else [ch])})[:8],
+               sorted({o.lower() for o in (syl[0] if syl else [ch])})[:8])
+    except Exception:                       # pypinyin 缺失时退化为原字符
+        out = ([ch.lower()], [ch.lower()])
+    _PY_CHAR[ch] = out
+    return out
+
+
 def _pinyin_variants(name: str) -> dict:
-    """名称 → {abbr: 主缩写, abbrs: 多音字缩写变体, full: 无分隔全拼}；首调后缓存。"""
+    """名称 → {abbr: 主缩写, abbrs: 多音字缩写变体, full: 全拼, fulls: 全拼变体}。"""
     cached = _PY_CACHE.get(name)
     if cached is not None:
         return cached
-    try:
-        from pypinyin import Style, lazy_pinyin, pinyin
-        # 非汉字（*ST、TCL、300 等）原样保留：否则 *ST长投 会被拼成 "zt"，
-        # 丢掉前缀后「cd」反被当成缩写全等而排到最前
-        errors = lambda x: list(x)          # noqa: E731
-        full = "".join(lazy_pinyin(name, style=Style.NORMAL, errors=errors)).lower()
-        abbr = "".join(lazy_pinyin(name, style=Style.FIRST_LETTER, errors=errors)).lower()
-        # 多音字（长 zhang/chang、重 zhong/chong…）逐字展开首字母组合，封顶 32 组
-        combos = [""]
-        for opts in pinyin(name, style=Style.FIRST_LETTER, heteronym=True, errors=errors):
-            combos = [c + o.lower() for c in combos for o in dict.fromkeys(opts)][:32]
-        abbrs = sorted({a for a in combos if a} | {abbr})
-    except Exception:  # pypinyin 缺失时优雅降级：仅代码/名称检索
-        abbr, full, abbrs = "", "", []
-    out = {"abbr": abbr, "abbrs": abbrs, "full": full}
+    abbrs, fulls = [""], [""]
+    for ch in name:
+        ini, syl = _char_py(ch)
+        abbrs = [a + i for a in abbrs for i in ini][:32]
+        fulls = [f + s for f in fulls for s in syl][:32]
+    abbr, full = abbrs[0], fulls[0]
+    out = {"abbr": abbr, "abbrs": sorted(set(abbrs) | {abbr}),
+           "full": full, "fulls": fulls}
     _PY_CACHE[name] = out
+    _PY_DISK["dirty"] += 1
     return out
+
+
+# 拼音索引落盘：全表冷扫描约 3~4s，落盘后重启直接加载（名称极少变化）。
+# 文件与 DuckDB 同目录，首次全表扫描后写一次，新增名称增量补写。
+_PY_DISK = {"loaded": False, "dirty": 0}
+_PY_DISK_LOCK = Lock()
+
+
+def _py_disk_path(conn) -> Optional[Path]:
+    try:
+        row = conn.execute("PRAGMA database_list").fetchone()
+        return Path(row[2]).parent / "pinyin_cache.json" if row and row[2] else None
+    except Exception:
+        return None
+
+
+def _load_pinyin_disk(conn) -> None:
+    with _PY_DISK_LOCK:
+        if _PY_DISK["loaded"]:
+            return
+        _PY_DISK["loaded"] = True
+        path = _py_disk_path(conn)
+        if not path or not path.exists():
+            return
+        try:
+            saved = json.loads(path.read_text())
+        except (OSError, ValueError):
+            return
+        if isinstance(saved, dict):
+            _PY_CACHE.update({k: v for k, v in saved.items()
+                              if k not in _PY_CACHE and isinstance(v, dict)})
+
+
+def _save_pinyin_disk(conn) -> None:
+    if not _PY_DISK["dirty"]:
+        return
+    path = _py_disk_path(conn)
+    if not path:
+        return
+    with _PY_DISK_LOCK:
+        _PY_DISK["dirty"] = 0
+        try:
+            path.write_text(json.dumps(_PY_CACHE, ensure_ascii=False, separators=(",", ":")))
+        except OSError:
+            pass
 
 
 # -- 2.2 全景大页（market_snapshot 派生层：一条本地 SQL，零上游） -------------
@@ -995,7 +1063,7 @@ def target_trend_snapshot(conn) -> Optional[dict]:
                            # 旧行（补列前算的）money_cnt 为 NULL，统一成 0 才能过契约校验
                            money_cnt=r[10] or 0,
                            mine_date=r[11], mine_ago=r[12],
-                           # 旧行（地雷补列前算的）mine_cnt 为 NULL，统一成 0
+                           # 旧行（高点反转补列前算的）mine_cnt 为 NULL，统一成 0
                            mine_cnt=r[13] or 0)
                 for r in rows}
     except Exception:
@@ -1069,7 +1137,7 @@ _TAIL_HISTORY = 800     # ZigZag 极值判定只依赖近端拐点，800 根足�
 
 
 def compute_target_tail(conn, live: Optional[dict] = None) -> tuple[list[dict], dict]:
-    """尾盘估算：把实时快照价当作「今日收盘」，算钱袋/地雷六字段。
+    """尾盘估算：把实时快照价当作「今日收盘」，算阶段反转六字段。
 
     只在 14:50 之后的盘中任务里调用（收盘前最后 15 分钟价格基本定型）。
     历史取最近 800 根 qfq + 当日快照 close，再跑与正式口径同一个 qyjj；

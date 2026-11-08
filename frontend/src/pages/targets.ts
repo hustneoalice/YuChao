@@ -23,12 +23,12 @@ const FALLBACK_CONDS: TargetCond[] = [
     title: "收盘站上中线趋势线（K 线通道填橙同判定）" },
   { key: "up20", label: "20日内涨停", kind: "flag", default_on: true,
     title: "近 20 个交易日有过涨停（主板 10% / 创业科创 20%）" },
-  { key: "money", label: "钱袋子", kind: "value", op: "<=", default: 5,
+  { key: "money", label: "阶段反转·低点", kind: "value", op: "<=", default: 5,
     min: 0, max: 60, step: 1, unit: "日", default_on: false,
-    title: "近 N 个交易日内出现过钱袋子（阶段低点确认后的反弹信号）；数值为距今天数，越小越新鲜" },
-  { key: "mine", label: "地雷", kind: "value", op: "<=", default: 5,
+    title: "近 N 个交易日内出现过低点反转（阶段低点确认后拐头向上的信号）；数值为距今天数，越小越新鲜" },
+  { key: "mine", label: "阶段反转·高点", kind: "value", op: "<=", default: 5,
     min: 0, max: 60, step: 1, unit: "日", default_on: false,
-    title: "近 N 个交易日内出现过地雷（阶段高点确认后的回落信号）；数值为距今天数，越小越新鲜（风险信号）" },
+    title: "近 N 个交易日内出现过高点反转（阶段高点确认后拐头向下的信号）；数值为距今天数，越小越新鲜（风险信号）" },
 ];
 
 function readJSON<T>(key: string, fallback: T): T {
@@ -80,7 +80,7 @@ try {
 } catch { /* 损坏设置回默认 */ }
 let totalHits = 0;
 
-/* 尾盘估算模式：14:50 后后端用实时快照价估算钱袋/地雷，当天就能看到信号。
+/* 尾盘估算模式：14:50 后后端用实时快照价估算阶段反转信号，当天就能看到。
    开关本地记忆；估算值收盘前可能变化，正式数据落库后自动让位。 */
 let tailOn = false;
 try { tailOn = localStorage.getItem("yc_tgt_tail") === "1"; } catch { /* 默认关闭 */ }
@@ -147,21 +147,21 @@ async function load(resetPage = false): Promise<void> {
       return;
     }
     st.style.color = "";
-    /* 尾盘估算：钱袋/地雷用快照价暂估，必须显式标注「收盘前可能变化」 */
+    /* 尾盘估算：阶段反转信号用快照价暂估，必须显式标注「收盘前可能变化」 */
     if (r.tail_mode) {
       st.style.color = "var(--warn)";
       st.textContent = `尾盘估算 · 快照 ${r.tail_at || "—"} · 收盘前可能变化` +
         (at ? `｜计算于 ${at}` : "") + `｜数据截至 ${r.as_of}`;
       return;
     }
-    /* 日线断更时，钱袋/地雷仍是旧口径；必须写明，避免与"数据截至"混淆 */
+    /* 日线断更时，阶段反转信号仍是旧口径；必须写明，避免与"数据截至"混淆 */
     const signalDay = items.reduce((m, t) =>
       [m, t.money_date || "", t.mine_date || ""].reduce((a, b) => (b > a ? b : a)), "");
-    const moneyNote = signalDay && signalDay !== r.as_of ? `｜钱袋/地雷基于日线 ${signalDay}` : "";
+    const signalNote = signalDay && signalDay !== r.as_of ? `｜阶段反转基于日线 ${signalDay}` : "";
     const tailNote = tailOn ? "｜尾盘估算待生成（14:50 后自动计算）" : "";
     st.textContent = at
-      ? `计算于 ${at}｜数据截至 ${r.as_of}${r.provisional ? "（含实时快照）" : ""}${moneyNote}${tailNote}`
-      : (r.as_of ? `数据截至 ${r.as_of}${r.provisional ? "（今日日线还没入库，按实时行情暂估）" : ""}${moneyNote}${tailNote}` : "");
+      ? `计算于 ${at}｜数据截至 ${r.as_of}${r.provisional ? "（含实时快照）" : ""}${signalNote}${tailNote}`
+      : (r.as_of ? `数据截至 ${r.as_of}${r.provisional ? "（今日日线还没入库，按实时行情暂估）" : ""}${signalNote}${tailNote}` : "");
   } catch {
     if (request !== revision) return;
     st.textContent = "计算失败，稍后自动重试";
@@ -400,13 +400,13 @@ const TGT_COLS: DataTableCol<TargetItem>[] = [
       `<span style="color:${t.mid_orange ? PAL.o : PAL.b}">●</span> ${t.mid_orange ? "橙" : "蓝"}` },
   { label: "20日涨停", num: true, title: "近 20 个交易日涨停次数", sort: (t) => t.limit_up_cnt,
     render: (t) => t.limit_up_20d ? `<span class="tag acc">${t.limit_up_cnt}次</span>` : `<span style="color:var(--faint)">—</span>` },
-  { label: "钱袋子", num: true, title: "近 20 日钱袋（阶段低点确认后的反弹信号）的日期 · 出现次数；越新鲜越靠前，适合打底仓/波段低吸",
+  { label: "低点反转", num: true, title: "近 20 日低点反转（阶段低点确认后拐头向上）的日期 · 出现次数；越新鲜越靠前，适合打底仓/波段低吸",
     sort: (t) => t.money_ago ?? 9999,
     render: (t) => t.money_date == null ? `<span style="color:var(--faint)">—</span>` :
       `<span style="color:${(t.money_ago ?? 9) <= 3 ? PAL.o : "var(--text)"}">${t.money_date.slice(5)}</span>` +
       ((t.money_cnt ?? 0) > 1 ? `<small style="color:var(--faint)"> · ${t.money_cnt}次</small>` : "") +
       tailFlag(t) },
-  { label: "地雷", num: true, title: "近 20 日地雷（阶段高点确认后的回落信号）的日期 · 出现次数；越新鲜越靠前，属风险信号",
+  { label: "高点反转", num: true, title: "近 20 日高点反转（阶段高点确认后拐头向下）的日期 · 出现次数；越新鲜越靠前，属风险信号",
     sort: (t) => t.mine_ago ?? 9999,
     render: (t) => t.mine_date == null ? `<span style="color:var(--faint)">—</span>` :
       `<span style="color:${(t.mine_ago ?? 9) <= 3 ? "var(--down)" : "var(--text)"}">${t.mine_date.slice(5)}</span>` +
@@ -630,7 +630,7 @@ const COND_GROUPS: [string, string[]][] = [
   ["价格结构", ["short", "mid", "up20"]],
   ["信号", ["trend", "negshrink", "nearzero", "money", "mine", "acc"]],
 ];
-/* 钱袋/地雷阈值用自然语言，避免「≤5 日」这种要心算的口径 */
+/* 阶段反转阈值用自然语言，避免「≤5 日」这种要心算的口径 */
 const SIGNAL_PILLS: [string, number][] = [["今日", 0], ["3日", 3], ["5日", 5], ["10日", 10]];
 
 function presetKeys(): Record<string, string[]> {
@@ -686,12 +686,12 @@ function renderConds(): void {
   const conflict = (!!conds["money"] || !!conds["mine"]) && (!!conds["short"] || !!conds["mid"]);
   el.innerHTML =
     `<div class="tgt-presets">` +
-    ([["all", "全部条件"], ["money", "只看钱袋"], ["mine", "只看地雷"], ["trend", "只看趋势"], ["none", "清空"]] as [string, string][])
+    ([["all", "全部条件"], ["money", "只看低点反转"], ["mine", "只看高点反转"], ["trend", "只看趋势"], ["none", "清空"]] as [string, string][])
       .map(([p, label]) => `<button type="button" class="tgt-preset${active === p ? " on" : ""}" data-p="${p}" aria-pressed="${active === p}">${label}</button>`).join("") +
     `<span class="tgt-preset-count">已启用 <b>${onKeys.length}</b>/${meta.length}</span></div>` +
     groups +
     `<div class="tgt-grp-hint">所有勾选条件同时满足 · ST 已剔除 · 未勾选不参与判定</div>` +
-    (conflict ? `<div class="tgt-conflict">钱袋/地雷是拐点确认信号，价格通常在趋势线另一侧，与趋势橙方向相反；叠加后命中极少。<button type="button" class="tgt-conflict-fix" data-p="${conds["mine"] && !conds["money"] ? "mine" : "money"}">只看信号</button></div>` : "");
+    (conflict ? `<div class="tgt-conflict">阶段反转是拐点确认信号，价格通常在趋势线另一侧，与趋势橙方向相反；叠加后命中极少。<button type="button" class="tgt-conflict-fix" data-p="${conds["mine"] && !conds["money"] ? "mine" : "money"}">只看信号</button></div>` : "");
   if (conds["trend"]) {
     el.insertAdjacentHTML("beforeend", `<div class="tgt-trend-set">
       <label>趋势柱线 <select id="tgt-trend-mode"><option value="cross" ${trend.mode === "cross" ? "selected" : ""}>负转正</option><option value="above" ${trend.mode === "above" ? "selected" : ""}>零轴上方</option></select></label>
@@ -731,10 +731,10 @@ function renderConds(): void {
     hideSparkPop();
     drawPage();
   };
-  /* 快捷预设：一键切换条件组合（默认全条件 / 只看钱袋 / 只看趋势 / 清空） */
+  /* 快捷预设：一键切换条件组合（默认全条件 / 只看低点反转 / 只看高点反转 / 只看趋势 / 清空） */
   el.querySelectorAll<HTMLElement>("[data-p]").forEach((b) =>
     b.addEventListener("click", () => applyPreset(b.dataset.p!)));
-  /* 钱袋/地雷时间范围：点选即启用并重筛 */
+  /* 阶段反转时间范围：点选即启用并重筛 */
   el.querySelectorAll<HTMLElement>(".tgt-money-seg i, .tgt-mine-seg i").forEach((b) =>
     b.addEventListener("click", () => {
       const key = b.dataset.k || "money";

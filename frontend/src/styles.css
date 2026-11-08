@@ -100,15 +100,17 @@ svg{display:block}
 .sitem{display:flex;align-items:center;gap:10px;padding:8px 10px;border-radius:8px;cursor:pointer}
 .sitem:hover{background:var(--panel-2)}
 .sitem.on{background:var(--panel-2);box-shadow:inset 2px 0 0 var(--accent)}
-/* 搜索框一键清空：输入内容时右侧浮出 ✕ */
+/* 搜索框一键清空：输入内容时右侧浮出细线 ✕（无底、悬停才出现浅底） */
 .sfield{position:relative;display:flex;align-items:center;flex:1;min-width:0}
-.sfield input{padding-right:20px}
-.s-clear{position:absolute;right:2px;top:50%;transform:translateY(-50%);
-  display:none;align-items:center;justify-content:center;width:18px;height:18px;padding:0;
-  border:0;border-radius:50%;background:var(--panel-3);color:var(--faint);
-  font-size:10px;line-height:1;cursor:pointer}
+.sfield input{padding-right:22px}
+.s-clear{position:absolute;right:1px;top:50%;transform:translateY(-50%);
+  display:none;align-items:center;justify-content:center;width:20px;height:20px;padding:0;
+  border:0;border-radius:6px;background:transparent;color:var(--faint);
+  opacity:.72;cursor:pointer;transition:opacity .15s,background .15s,color .15s}
+.s-clear svg{display:block}
 .s-clear.on{display:flex}
-.s-clear:hover{color:var(--text);background:color-mix(in srgb,var(--accent) 22%,var(--panel-3))}
+.s-clear:hover{opacity:1;color:var(--text);background:color-mix(in srgb,var(--text) 8%,transparent)}
+.s-clear:active{background:color-mix(in srgb,var(--text) 14%,transparent)}
 .sitem b{font-size:12.5px;font-weight:600}
 .sitem span{font-size:11px;color:var(--faint)}
 .sitem .chg{margin-left:auto;font-size:12px;font-weight:600}
@@ -366,7 +368,7 @@ th.n{color:var(--dim)}
 .tgt-money-seg i:hover,.tgt-mine-seg i:hover{color:var(--text)}
 .tgt-money-seg i.on{background:var(--accent-soft);color:var(--accent);font-weight:600}
 .tgt-mine-seg i.on{background:color-mix(in srgb,var(--down) 14%,transparent);color:var(--down);font-weight:600}
-/* 尾盘估算行标记：钱袋/地雷日期旁的小「估」字 */
+/* 尾盘估算行标记：阶段反转日期旁的小「估」字 */
 .tgt-tail-flag{font-size:10px;font-style:normal;margin-left:3px;padding:0 4px;border-radius:4px;
   color:var(--warn);background:color-mix(in srgb,var(--warn) 12%,transparent);
   border:1px solid color-mix(in srgb,var(--warn) 34%,transparent)}
@@ -784,10 +786,10 @@ body.mobile .vpop{width:min(246px,calc(100vw - 16px))}
    不依赖宿主容器有无 position（曾因 .panel 无定位飞到页面右上角） */
 .kl-ipanel{position:fixed;z-index:60;background:var(--panel);
   border:1px solid var(--border);border-radius:11px;box-shadow:var(--shadow);padding:9px 11px;
-  display:flex;flex-direction:column;gap:6px;max-width:min(620px,calc(100vw - 24px))}
+  display:flex;flex-direction:column;gap:7px;width:min(560px,calc(100vw - 24px))}
 /* 常显态（#kl-indbar）：主图组｜分割线｜副图组 单行 flex，放不下自动换行 */
 .kl-ipanel.ip-inline{position:static;z-index:auto;background:none;border:0;border-radius:0;
-  box-shadow:none;padding:4px 8px;max-width:none;gap:3px;flex:none;
+  box-shadow:none;padding:4px 8px;width:auto;max-width:none;gap:3px;flex:none;
   border-bottom:1px solid var(--border-soft)}
 .kl-ipanel.ip-inline #ip-inds{display:flex;align-items:center;flex-wrap:wrap;gap:3px 6px}
 .kl-ipanel.ip-inline #ip-inds > .barsep{height:12px}
@@ -826,7 +828,16 @@ body.mobile .vpop{width:min(246px,calc(100vw - 16px))}
   justify-content:flex-end;background:color-mix(in srgb,var(--panel) 72%,transparent);
   padding:3px 9px;border-radius:8px;backdrop-filter:blur(6px);-webkit-backdrop-filter:blur(6px)}
 .kl-ipanel[hidden]{display:none!important}
-.kl-ipanel .iprow{display:flex;align-items:center;gap:3px;flex-wrap:wrap}
+/* 浮层分区：标题在上、内容在下（设计规范 indsec 同款），不再用左侧标签列留白 */
+#kl-ipanel .ipsec{margin-top:10px}
+#kl-ipanel .ipsec:first-child{margin-top:0}
+#kl-ipanel .ipsec-h{display:flex;align-items:baseline;gap:6px;margin-bottom:6px}
+#kl-ipanel .ipsec-h b{font-size:11.5px;font-weight:650;color:var(--text)}
+#kl-ipanel .ipsec-h span{font-size:9.5px;color:var(--faint)}
+/* 常显态：分组盒子 display:contents 拆掉，chip 全部流式排布，整行自然换行；
+   组间只用竖分割线区分，不再让主图/副图/画线各占一行 */
+.kl-ipanel.ip-inline .iprow{display:contents}
+.kl-ipanel .ipchips{display:flex;align-items:center;flex-wrap:wrap;gap:3px 6px}
 /* 主/副图分组头：归属一目了然 */
 .kl-ipanel .iphead{display:flex;align-items:center;gap:6px;margin:7px 0 3px;font-size:11px;
   font-weight:700;color:var(--text)}
@@ -835,8 +846,9 @@ body.mobile .vpop{width:min(246px,calc(100vw - 16px))}
   font-size:10px;font-weight:400;color:var(--faint);line-height:16px}
 .kl-ipanel .ipk{flex:none;width:56px;line-height:20px;font-size:10px;color:var(--faint);
   white-space:nowrap;overflow:hidden;text-align:right}
-.kl-ipanel.ip-inline .ipk{width:28px}
-.kl-ipanel .ip-hint{font-size:10px;color:var(--faint);text-align:right}
+.kl-ipanel.ip-inline .ipk{width:auto;padding-right:1px}
+.kl-ipanel .ip-hint{margin-top:10px;padding-top:8px;border-top:1px solid var(--border-soft);
+  font-size:9.5px;color:var(--faint);text-align:left;line-height:1.5}
 /* 指标 chip 右上角 ★ 常显标：hover 浮现，点亮常驻金色 */
 .kl-ipanel .iprow button{position:relative}
 .kl-ipanel .iprow .star{position:absolute;top:-5px;right:-4px;font-size:9px;line-height:1;
@@ -850,27 +862,33 @@ body.mobile .vpop{width:min(246px,calc(100vw - 16px))}
   font-weight:600;color:var(--faint);cursor:pointer;line-height:1.3}
 .favseg button:hover{color:var(--text);background:var(--panel-3)}
 .favseg button.on{color:var(--accent);background:var(--accent-soft)}
-/* 自定义方案 chip：按钮 + 行内 × 删除 */
-.kl-ipanel .chipx{display:inline-flex;align-items:stretch}
-.kl-ipanel .chipx button{border-radius:8px 0 0 8px;border-right:none}
-.kl-ipanel .chipx i{display:inline-flex;align-items:center;padding:0 6px;font-size:12px;
-  border:1px solid var(--border-soft);border-radius:0 8px 8px 0;color:var(--faint);cursor:pointer}
-.kl-ipanel .chipx i:hover{color:var(--down);background:var(--panel-2)}
-/* 存为方案：虚线边框弱化态 */
-.kl-ipanel button.psave{border-style:dashed;color:var(--accent)}
-/* 指标显影（TradingView 惯例）：每按钮左侧「指标本色」圆点，
-   实心 = 已显示、空心环 = 未启用，一眼分辨；选中行另加底色+边框强化 */
-.kl-ipanel button:not([data-pre]):not([data-tpl]){display:inline-flex;align-items:center;gap:5px}
-.kl-ipanel button:not([data-pre]):not([data-tpl])::before{content:"";flex:none;width:7px;height:7px;
-  border-radius:50%;background:var(--ic,transparent);transition:opacity .12s,background .12s}
-.kl-ipanel button:not(.on):not([data-pre]):not([data-tpl])::before{
-  background:transparent;box-shadow:inset 0 0 0 1.5px var(--ic,var(--faint))}
+/* 方案卡：两行（方案名 + 主/副图指标明细），两列等宽；明细完整换行，卡高自动撑开 */
+#kl-ipanel .presgrid{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:6px}
+.kl-ipanel .preset{display:flex;flex-direction:column;align-items:flex-start;justify-content:center;
+  gap:2px;min-height:38px;padding:6px 9px;border-radius:8px;text-align:left;line-height:1.35;
+  border:1px solid var(--border-soft);background:var(--panel-2)}
+.kl-ipanel .preset b{font-size:11px;font-weight:650;color:var(--text)}
+.kl-ipanel .preset span{display:block;max-width:100%;font-size:9.5px;color:var(--faint);
+  white-space:normal;overflow-wrap:break-word}
+.kl-ipanel .preset.on span{color:color-mix(in srgb,var(--accent) 65%,var(--faint))}
+/* 自定义方案：hover 右上角浮出删除 × */
+.kl-ipanel .presetwrap{position:relative;display:flex}
+.kl-ipanel .presetwrap .preset{flex:1;min-width:0}
+.kl-ipanel .presetwrap .pdel{position:absolute;top:-5px;right:-5px;display:none;align-items:center;
+  justify-content:center;width:14px;height:14px;border-radius:50%;font:10px/1 system-ui,sans-serif;
+  font-style:normal;color:var(--faint);background:var(--panel-3);border:1px solid var(--border-soft);
+  cursor:pointer}
+.kl-ipanel .presetwrap:hover .pdel{display:flex}
+.kl-ipanel .presetwrap .pdel:hover{color:var(--down)}
+/* 存为方案：虚线弱化态，横跨整行，避免最后一行只占半格留右侧空洞 */
+.kl-ipanel .preset.psave{grid-column:1/-1;align-items:center;justify-content:center;
+  border-style:dashed;background:transparent}
+.kl-ipanel .preset.psave b{color:var(--accent);font-weight:600}
 .kl-ipanel button{padding:1.5px 6px;border-radius:6px;font-size:11px;color:var(--dim);
   border:1px solid var(--border-soft);min-height:0;line-height:1.5}
 .kl-ipanel button:hover{color:var(--text);background:var(--panel-2)}
 .kl-ipanel button.on{color:var(--text);border-color:color-mix(in srgb,var(--accent) 60%,transparent);
   background:color-mix(in srgb,var(--accent) 14%,var(--panel-2));font-weight:600}
-.kl-ipanel button.on::before{opacity:1}
 .kl-ipanel .iprow:first-child button{color:var(--dim)}
 .kl-ipanel .iprow:first-child button:hover{color:var(--text)}
 

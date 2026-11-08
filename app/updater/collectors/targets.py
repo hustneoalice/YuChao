@@ -112,7 +112,7 @@ def update_target_scan_live(progress=None, ctx=None) -> dict:
         conn.commit()
         result.update(status="completed", rows=len(scan), as_of=meta["as_of"],
                       detail=f"盘中快照 {live['updated_at'][:16]}：目标指标 {len(scan)} 只")
-        # 尾盘估算（14:50 起）：价格基本定型，提前把今日快照当收盘算钱袋/地雷，
+        # 尾盘估算（14:50 起）：价格基本定型，提前把今日快照当收盘算阶段反转，
         # 写 target_tail 留档（同一日多轮覆盖）。正式 target_trend 收盘后追上当日，
         # API 自动优先正式口径。失败只告警，不影响已完成的指标层。
         if datetime.now().time() >= dtime(14, 50):

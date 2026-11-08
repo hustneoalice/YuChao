@@ -43,8 +43,9 @@ data/scratch_*/
 # 逆向调查产物（客户端二进制与反汇编中间件，体积大且不入库）
 docs/investigations/
 
-# 本地运行产物：数据备份 / 主力军情缓存 / 自动化截图 / 分享包
+# 本地运行产物：数据备份 / 主力军情缓存 / 拼音索引 / 自动化截图 / 分享包
 data/backups/
 data/mainforce_cache/
+data/pinyin_cache.json
 .screenshots/
 .trae-html-share-packages/

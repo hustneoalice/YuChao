@@ -167,15 +167,15 @@ NEW_TABLES_DDL = """
         cross_date  VARCHAR, cross_ago INTEGER, above_days INTEGER,
         neg_run     INTEGER,   -- 连续负柱收窄天数（绿柱缩短，提前捕捉上穿零轴）
         neg_abs     DOUBLE,    -- 当前负柱距零轴幅度 |STICKV|（正值时为 NULL）
-        money_date  VARCHAR,   -- 最近一次钱袋（ZigZag 低点）日期
+        money_date  VARCHAR,   -- 最近一次低点反转（阶段反转·低点）日期
         money_ago   INTEGER,   -- 距今天数（0=今日；None=近20日未出现）
         money_cnt   INTEGER,   -- 近 20 个交易日出现次数
-        mine_date   VARCHAR,   -- 最近一次地雷（ZigZag 高点回落）日期
+        mine_date   VARCHAR,   -- 最近一次高点反转（阶段反转·高点）日期
         mine_ago    INTEGER,   -- 距今天数（0=今日；None=近20日未出现）
         mine_cnt    INTEGER    -- 近 20 个交易日出现次数
     );
 
-    -- 尾盘估算（14:50 后用实时快照价充当当日收盘算钱袋/地雷，按日留档）。
+    -- 尾盘估算（14:50 后用实时快照价充当当日收盘算阶段反转，按日留档）。
     -- 只供目标页「尾盘估算」开关展示，收盘后正式 target_trend 一旦追上当日
     -- 自动让位；PK 保证同日多轮（14:50/14:55/15:00/15:05）覆盖不叠加。
     CREATE TABLE IF NOT EXISTS target_tail (

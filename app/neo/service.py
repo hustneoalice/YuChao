@@ -21,7 +21,7 @@ _RULE_VERSION = {
 
 
 def _series(capability, bars, dates):
-    """Return (逐 bar 数值, 摘要, 警告)。数值统一为 float|None，钱袋 1=钱袋 / -1=地雷。"""
+    """Return (逐 bar 数值, 摘要, 警告)。数值统一为 float|None，阶段反转 1=低点反转 / -1=高点反转。"""
     if capability == 'neo.six_segment':
         values = six_segment_series(bars)
         latest = six_segment_summary(dates, values) if bars else None

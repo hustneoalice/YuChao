@@ -21,16 +21,16 @@ import { bindOrderbook, bindTrades, orderbookBody, tradesBody, prefetchDepth, pr
 export const SEG6 = ["超跌", "反弹", "突破", "超涨", "回踩", "跌破"];
 
 export interface CurStock { symbol: string; name: string; trendFocus?: { date?: string } }
-/** 多周期布局：single 单屏 / h 左右双列 / v 上下两层 / quad 四宫格（策影同款） */
+/** 多周期布局：single 单屏 / h 左右双列 / v 上下两层 / quad 四格（策影同款） */
 export type KLayout = "single" | "h" | "v" | "quad";
 type PKey = "t" | "60" | "d" | "w" | "m" | "q";
 
 const P_LABEL: Record<PKey, string> = { t: "分时", "60": "60分", d: "日", w: "周", m: "月", q: "季" };
-/** 各布局的面板周期槽位（默认：左右/上下=日+周，四宫格=日周月季） */
+/** 各布局的面板周期槽位（默认：左右/上下=日+周，四格=日周月季） */
 const LAYOUT_PANELS: Record<KLayout, PKey[]> = {
   single: ["d"], h: ["d", "w"], v: ["d", "w"], quad: ["d", "w", "m", "q"],
 };
-/** 副图仅左右布局保留（上下/四宫格格子里只显主图，塞副图太挤） */
+/** 副图仅左右布局保留（上下/四格格子里只显主图，塞副图太挤） */
 const SUB_OK: Record<KLayout, boolean[]> = {
   single: [true], h: [true, true], v: [false, false], quad: [false, false, false, false],
 };
@@ -620,7 +620,7 @@ export function initMarket(): void {
     toggleSeg("kl-period", b);
     setPanelPeriod(mk.active, b.dataset.p as PKey);
   });
-  // 布局切换：单屏 / 左右 / 上下 / 四宫格（上下、四宫格只显主图，左右可带副图）
+  // 布局切换：单屏 / 左右 / 上下 / 四格（上下、四格只显主图，左右可带副图）
   document.getElementById("kl-layout")!.addEventListener("click", (e) => {
     const b = (e.target as HTMLElement).closest<HTMLElement>("button[data-ly]");
     if (!b) return;
@@ -1034,13 +1034,20 @@ function renderIpanel(): void {
   if (!pres) return;
   const custom = readCustomPresets();
   const sig = JSON.stringify([mk.mainInds, mk.subInds]);
-  const on = (p: Preset) => (JSON.stringify([p.main, p.sub]) === sig ? ' class="on"' : "");
-  const chips: string[] = Object.entries(PRESETS)
-    .map(([n, p]) => `<button data-pre="${esc(n)}" title="应用内置方案${n}"${on(p)}>${n}</button>`)
+  const isOn = (p: Preset) => JSON.stringify([p.main, p.sub]) === sig;
+  // 方案卡第二行：主/副图指标名，选方案前就能看清里面装了什么（设计图同款）
+  const names = (keys: (MainKey | SubKey)[]) => keys.map((k) => IND_BY_KEY[k]?.label ?? k).join("+");
+  const metaOf = (p: Preset) => `主 ${names(p.main) || "仅K线"} · 副 ${names(p.sub) || "无"}`;
+  const card = (n: string, p: Preset) =>
+    `<button class="preset${isOn(p) ? " on" : ""}" data-pre="${esc(n)}" title="应用方案「${esc(n)}」：${esc(metaOf(p))}">` +
+    `<b>${esc(n)}</b><span>${esc(metaOf(p))}</span></button>`;
+  const cards: string[] = Object.entries(PRESETS)
+    .map(([n, p]) => card(n, p))
     .concat(Object.entries(custom).map(([n, p]) =>
-      `<span class="chipx"><button data-pre="${esc(n)}" title="应用自定义方案${esc(n)}"${on(p)}>${esc(n)}</button><i data-pdel="${esc(n)}" title="删除方案">×</i></span>`))
-    .concat(['<button class="psave" data-psave="1" title="把当前主/副图指标组合保存为自定义方案">＋存方案</button>']);
-  pres.innerHTML = `<span class="ipk">方案</span>${chips.join("")}`;
+      `<span class="presetwrap">${card(n, p)}<i class="pdel" data-pdel="${esc(n)}" title="删除方案">×</i></span>`))
+    .concat([`<button class="preset psave" data-psave="1" title="把当前主/副图指标组合保存为自定义方案">` +
+      `<b>＋存方案</b><span>保存当前组合</span></button>`]);
+  pres.innerHTML = cards.join("");
   renderIndBar();
   renderIndMore();
 }

@@ -74,17 +74,17 @@ def trend_matches(row, mode, recent, still_above, above_days):
     return age is not None and age < recent and (not still_above or positive)
 
 
-# -- 钱眼掘金「钱袋子」（与前端 qyjj.ts 同口径：收盘 ZigZag 6% 反转） ----------
+# -- 阶段反转（与前端 qyjj.ts 同口径：收盘 ZigZag 6% 反转） ----------
 _MONEY_PCT = 0.06
 _MONEY_MIN_BARS = 30
 _MONEY_WINDOW = 20
 
 
 def qyjj_signals(bars):
-    """钱袋/地雷信号下标：低点/高点后反转 6% 确认，信号落在拐点后一根。
+    """阶段反转信号下标：低点/高点后反转 6% 确认，信号落在拐点后一根。
 
     返回 (下标, 'money'|'mine') 升序列表，与前端 qyjj.ts 同口径：
-    钱袋=阶段低点（画在最低价下方），地雷=阶段高点（画在最高价上方）。"""
+    money=低点反转（阶段低点后拐头向上），mine=高点反转（阶段高点后拐头向下）。"""
     n = len(bars)
     if n < _MONEY_MIN_BARS:
         return []
@@ -118,15 +118,15 @@ def qyjj_signals(bars):
 
 
 def money_indexes(bars):
-    """钱袋信号所在下标：低点后反弹 6% 确认，信号落在拐点后一根（原模型 1 日滞后）。"""
+    """低点反转信号所在下标：低点后反弹 6% 确认，信号落在拐点后一根（原模型 1 日滞后）。"""
     return [i for i, kind in qyjj_signals(bars) if kind == 'money']
 
 
 def qyjj_summary(dates, bars, window=_MONEY_WINDOW):
-    """近 window 个交易日的钱袋与地雷：最近日期 / 距今天数 / 出现次数。
+    """近 window 个交易日的低点/高点反转：最近日期 / 距今天数 / 出现次数。
 
-    钱袋是「低点反弹确认」的早期信号，地雷是「高点回落确认」的风险信号；
-    目标页按距今天数排序比按强度更实用。"""
+    低点反转是「低点拐头向上确认」的早期信号，高点反转是「高点拐头向下确认」
+    的风险信号；目标页按距今天数排序比按强度更实用。"""
     n = len(bars)
     buckets: dict[str, list[int]] = {"money": [], "mine": []}
     for i, kind in qyjj_signals(bars):
@@ -146,7 +146,7 @@ def qyjj_summary(dates, bars, window=_MONEY_WINDOW):
 
 
 def qyjj_money_summary(dates, bars, window=_MONEY_WINDOW):
-    """兼容旧调用：只取钱袋子三字段。"""
+    """兼容旧调用：只取低点反转三字段。"""
     full = qyjj_summary(dates, bars, window)
     return {k: full[k] for k in ("money_date", "money_ago", "money_cnt")}
 

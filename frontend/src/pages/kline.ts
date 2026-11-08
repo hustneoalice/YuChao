@@ -15,7 +15,7 @@ import { stockOperateSeries } from "../stock-operate";
 import { volumeActivitySeries } from "../volume-activity";
 import { trendHistogramSeries } from "../trend-histogram";
 import { strongPullbackSeries } from "../strong-pullback";
-import { drawQyjjIcon, qyjjSeries, type QyjjRow } from "../qyjj";
+import { drawReversalMark, qyjjSeries, type QyjjRow } from "../qyjj";
 import { volumeAverageSeries } from "../volume-average";
 import { mountVolumeSettings, readVolumeSettings } from "../volume-settings";
 import { mountMainCostSettings } from "../main-cost-settings";
@@ -1387,7 +1387,8 @@ function ensureRegistered(): void {
       ctx.restore();return true;
     },
   });
-  // 钱眼掘金·近似：钱袋=阶段低点（画在最低价下方），地雷=阶段高点（画在最高价上方）
+  // 阶段反转·近似：低点反转=阶段低点确认后拐头向上（画在最低价下方），
+  // 高点反转=阶段高点确认后拐头向下（画在最高价上方）
   registerIndicator({
     name: "ZY_QYJJ", shortName: "阶段反转", precision: 2, shouldFormatBigNumber: false,
     calc: list => qyjjSeries(list).map(v => ({ ...v, px: v.close })),
@@ -1404,9 +1405,9 @@ function ensureRegistered(): void {
         if (!row?.signal || row.anchor == null) continue;
         const x = xAxis.convertToPixel(i);
         const y = yAxis.convertToPixel(row.anchor);
-        // 图标贴 K 线外侧；靠边时夹到绘图区内，避免被裁剪
-        if (row.signal === "money") drawQyjjIcon(ctx, "money", x, Math.min(bounding.height - 11, y + 15));
-        else drawQyjjIcon(ctx, "mine", x, Math.max(11, y - 15));
+        // 标记贴 K 线外侧；靠边时夹到绘图区内，避免被裁剪
+        if (row.signal === "money") drawReversalMark(ctx, "money", x, Math.min(bounding.height - 11, y + 15));
+        else drawReversalMark(ctx, "mine", x, Math.max(11, y - 15));
       }
       ctx.restore();
       return false;
@@ -1431,6 +1432,35 @@ function ensureRegistered(): void {
         });
       },
       figures: [{ key: "atr", title: "ATR", type: "line", styles: () => ({ color: "#F2C94C" }) }],
+    });
+  } catch { /* 重复注册忽略 */ }
+  // DKX 多空线（klinecharts 未内置）：近 20 日收盘价按 20…1 加权平滑，再套 10 日均线
+  try {
+    registerIndicator({
+      name: "ZY_DKX",
+      shortName: "DKX",
+      precision: 2,
+      calc: (kLineDataList) => {
+        const list = kLineDataList as unknown as { close: number }[];
+        const n = 20, wsum = n * (n + 1) / 2;
+        const dkx: (number | null)[] = list.map((_, i) => {
+          if (i < n - 1) return null;
+          let acc = 0;
+          for (let j = 0; j < n; j++) acc += list[i - j].close * (n - j);
+          return acc / wsum;
+        });
+        const madkx: (number | null)[] = dkx.map((_, i) => {
+          if (i < n + 8) return null;               // 需 10 个有效 DKX
+          let acc = 0;
+          for (let j = 0; j < 10; j++) acc += dkx[i - j]!;
+          return acc / 10;
+        });
+        return list.map((_, i) => ({ dkx: dkx[i], madkx: madkx[i] }));
+      },
+      figures: [
+        { key: "dkx", title: "DKX", type: "line", styles: () => ({ color: trendPalette().fast, lineWidth: 1.2 }) },
+        { key: "madkx", title: "MADKX", type: "line", styles: () => ({ color: trendPalette().slow, lineWidth: 1.2 }) },
+      ],
     });
   } catch { /* 重复注册忽略 */ }
   // VOLX 自研成交量：量柱涨红跌绿，两条均量线周期可调。
@@ -1698,7 +1728,7 @@ export const IND_CATS: { cat: IndCat; label: string }[] = [
 ];
 export const IND_DEFS: IndDef[] = [
   // 主图叠加
-  { key: "qyjj", kc: "ZY_QYJJ", label: "阶段反转", cat: "main", where: "main", desc: "阶段反转信号：钱袋=阶段低点、地雷=阶段高点，信号落在拐点后一根" },
+  { key: "qyjj", kc: "ZY_QYJJ", label: "阶段反转", cat: "main", where: "main", desc: "拐点确认信号：低点反转=阶段低点后拐头向上，高点反转=阶段高点后拐头向下，信号落在拐点后一根" },
   { key: "strongpullback", kc: "ZY_STRONG_PULLBACK", label: "强势调整", cat: "main", where: "main", desc: "起点后限定周期内连线，随后结束；量能配合、收盘站上中线趋势；破保护位或缩量结束；同组眼睛连线" },
   { key: "ma", kc: "MA", label: "均线", cat: "main", where: "main", desc: "移动平均线（周期可设置）" },
   { key: "td", kc: "ZY_TD_SEQ", label: "九转序列", cat: "main", where: "main", desc: "TD Sequential：只在成立的计数节点处标数字（需完美检验）" },
@@ -1718,6 +1748,7 @@ export const IND_DEFS: IndDef[] = [
   { key: "trix", kc: "TRIX", label: "TRIX", cat: "trend", where: "sub", desc: "三重指数平滑平均线" },
   { key: "emv", kc: "EMV", label: "EMV", cat: "trend", where: "sub", desc: "简易波动指标（量价趋势）" },
   { key: "dma", kc: "DMA", label: "DMA", cat: "trend", where: "sub", desc: "平均线差（快慢均线差值）" },
+  { key: "dkx", kc: "ZY_DKX", label: "DKX", cat: "trend", where: "sub", desc: "多空线：近 20 日收盘价加权（20…1）平滑，再取 10 日均线；DKX 上穿 MADKX 偏多、下穿偏空" },
   // 动量类
   { key: "stockoperate", kc: "ZY_STOCK_OPERATE", label: "个股操盘", cat: "mom", where: "sub", desc: "收盘在近期高低区间的位置平滑；红柱=站上慢线、绿柱=跌破慢线；三根水平参考线；波段/反弹/超跌进场时信号线上移" },
   { key: "kdj", kc: "KDJX", label: "KDJ", cat: "mom", where: "sub", desc: "随机指标（超买/超卖参考线）" },
