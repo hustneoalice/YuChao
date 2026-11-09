@@ -867,7 +867,12 @@ const plainLabel = (kind: string, label: string): string => {
   if (kind === "market_snapshot") {
     if (!mktTradingDay) return "休市补采";
     const hhmm = bjHHMM();
-    return hhmm >= 925 && hhmm < 1505 ? "盘中行情" : hhmm < 925 ? "盘前行情" : "收盘行情";
+    // 午休 11:30–13:00 没有连续竞价，不能算「盘中」（2026-11-09 反馈）
+    if (hhmm < 925) return "盘前行情";
+    if (hhmm < 1130) return "盘中行情";
+    if (hhmm < 1300) return "午间休市";
+    if (hhmm < 1505) return "盘中行情";
+    return "收盘行情";
   }
   return PLAIN_KIND[kind] ?? label;
 };

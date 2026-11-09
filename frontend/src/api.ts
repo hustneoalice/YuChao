@@ -193,6 +193,8 @@ export interface TargetItem {
   mine_ago?: number | null;               // 高点反转距今交易日数（0=今日；null=近20日未出现）
   mine_cnt?: number;                      // 近 20 个交易日高点反转出现次数
   acc_strength?: number | null;           // 主力吸筹强度：近20日柱峰值在本股近250日的百分位(0-100)
+  dkx_gold_ago?: number | null;           // DKX 金叉距今交易日数（0=今日；null=近30日未金叉）
+  dkx_death_ago?: number | null;          // DKX 死叉距今交易日数（0=今日；null=近30日未死叉）
   trend_data_date: string; trend_provisional: boolean;
   tail_provisional?: boolean;             // 阶段反转信号来自尾盘估算（收盘前可能变化）
 }

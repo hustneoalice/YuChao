@@ -1,6 +1,7 @@
 import type { Chart } from 'klinecharts';
 import { ic } from './icons';
 import { cssv } from './fmt';
+import { gearHost } from './chart-gears';
 
 /* 主图均线设置：7 条线固定“色位”，周期可改、可逐条显隐。
    色位对齐主流软件：白/黄/紫/绿/蓝/青/橙；60=季线、120=半年线、250=年线。 */
@@ -82,7 +83,7 @@ export function applyMA(chart: Chart, onChange?: () => void): void {
   onChange?.();
 }
 
-/** 齿轮随主图窗格定位；与主力成本齿轮并排（right:58 / 34），不压图例。 */
+/** 齿轮收在图表右上角（gearHost 统一排布）。 */
 export function mountMASettings(chart: Chart, el: HTMLElement, onChange: () => void) {
   const button = document.createElement('button');
   button.type = 'button';
@@ -91,7 +92,7 @@ export function mountMASettings(chart: Chart, el: HTMLElement, onChange: () => v
   button.title = '均线参数';
   button.setAttribute('aria-label', button.title);
   button.setAttribute('aria-haspopup', 'dialog');
-  el.appendChild(button);
+  gearHost(el).appendChild(button);
 
   const pop = document.createElement('div');
   pop.className = 'vpop';
@@ -268,7 +269,6 @@ export function mountMASettings(chart: Chart, el: HTMLElement, onChange: () => v
     const pane = indicator ? chart.getDom(indicator.paneId) : null;
     button.style.display = pane ? 'grid' : 'none';
     if (!pane) close();
-    if (pane) button.style.top = `${pane.getBoundingClientRect().top - el.getBoundingClientRect().top + 4}px`;
     reflow();
   };
   const observer = new ResizeObserver(sync);

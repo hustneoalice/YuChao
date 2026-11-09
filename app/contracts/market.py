@@ -223,6 +223,10 @@ class TargetItem(BaseModel):
     acc_strength: Optional[float] = Field(
         default=None,
         description="主力吸筹强度：近 20 日柱峰值在本股过去一年各 20 日窗口峰值的百分位（0-100）")
+    dkx_gold_ago: Optional[int] = Field(
+        default=None, description="DKX 金叉距今交易日数（0=今日；null=近 30 日未金叉）")
+    dkx_death_ago: Optional[int] = Field(
+        default=None, description="DKX 死叉距今交易日数（0=今日；null=近 30 日未死叉）")
     trend_data_date: str = ""
     trend_provisional: bool = False
     tail_provisional: bool = Field(default=False, description="该行阶段反转信号来自尾盘估算（收盘前可能变化）")

@@ -22,7 +22,7 @@ logger = logging.getLogger("yuchao.updater")
 _SCAN_COLS = ("symbol", "name", "close", "pct_chg", "vol_ma40", "vol_ratio",
               "vol_hit", "short_orange", "mid_orange", "limit_up_20d",
               "limit_up_cnt", "seg", "seg_name", "pullback", "acc_strength",
-              "as_of")
+              "dkx_gold_ago", "dkx_death_ago", "as_of")
 
 
 def update_target_scan(progress=None, ctx=None) -> dict:
@@ -47,7 +47,7 @@ def update_target_scan(progress=None, ctx=None) -> dict:
         conn.execute("DELETE FROM target_scan")
         conn.executemany(
             "INSERT OR REPLACE INTO target_scan (" + ",".join(_SCAN_COLS) + ") "
-            "VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)",
+            "VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)",
             [tuple(r.get(c) for c in _SCAN_COLS[:-1]) + (as_of,) for r in scan])
         conn.execute("DELETE FROM target_trend")
         tr_rows = [(sym, r.get("trend_data_date"), r.get("trend_value"),
@@ -107,7 +107,7 @@ def update_target_scan_live(progress=None, ctx=None) -> dict:
         conn.execute("DELETE FROM target_scan")
         conn.executemany(
             "INSERT OR REPLACE INTO target_scan (" + ",".join(_SCAN_COLS) + ") "
-            "VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)",
+            "VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)",
             [tuple(r.get(c) for c in _SCAN_COLS[:-1]) + (meta["as_of"],) for r in scan])
         conn.commit()
         result.update(status="completed", rows=len(scan), as_of=meta["as_of"],

@@ -23,12 +23,12 @@ const FALLBACK_CONDS: TargetCond[] = [
     title: "收盘站上中线趋势线（K 线通道填橙同判定）" },
   { key: "up20", label: "20日内涨停", kind: "flag", default_on: true,
     title: "近 20 个交易日有过涨停（主板 10% / 创业科创 20%）" },
-  { key: "money", label: "阶段反转·低点", kind: "value", op: "<=", default: 5,
+  { key: "money", label: "阶段拐点·低点", kind: "value", op: "<=", default: 5,
     min: 0, max: 60, step: 1, unit: "日", default_on: false,
-    title: "近 N 个交易日内出现过低点反转（阶段低点确认后拐头向上的信号）；数值为距今天数，越小越新鲜" },
-  { key: "mine", label: "阶段反转·高点", kind: "value", op: "<=", default: 5,
+    title: "近 N 个交易日内出现过低点拐头（阶段低点确认后向上拐头）的信号；数值为距今天数，越小越新鲜" },
+  { key: "mine", label: "阶段拐点·高点", kind: "value", op: "<=", default: 5,
     min: 0, max: 60, step: 1, unit: "日", default_on: false,
-    title: "近 N 个交易日内出现过高点反转（阶段高点确认后拐头向下的信号）；数值为距今天数，越小越新鲜（风险信号）" },
+    title: "近 N 个交易日内出现过高点拐头（阶段高点确认后向下拐头）的信号；数值为距今天数，越小越新鲜（风险信号）" },
 ];
 
 function readJSON<T>(key: string, fallback: T): T {
@@ -157,7 +157,7 @@ async function load(resetPage = false): Promise<void> {
     /* 日线断更时，阶段反转信号仍是旧口径；必须写明，避免与"数据截至"混淆 */
     const signalDay = items.reduce((m, t) =>
       [m, t.money_date || "", t.mine_date || ""].reduce((a, b) => (b > a ? b : a)), "");
-    const signalNote = signalDay && signalDay !== r.as_of ? `｜阶段反转基于日线 ${signalDay}` : "";
+    const signalNote = signalDay && signalDay !== r.as_of ? `｜阶段拐点基于日线 ${signalDay}` : "";
     const tailNote = tailOn ? "｜尾盘估算待生成（14:50 后自动计算）" : "";
     st.textContent = at
       ? `计算于 ${at}｜数据截至 ${r.as_of}${r.provisional ? "（含实时快照）" : ""}${signalNote}${tailNote}`
@@ -429,18 +429,27 @@ const TGT_COLS: DataTableCol<TargetItem>[] = [
       `<span style="color:${t.mid_orange ? PAL.o : PAL.b}">●</span> ${t.mid_orange ? "橙" : "蓝"}` },
   { label: "20日涨停", num: true, title: "近 20 个交易日涨停次数", sort: (t) => t.limit_up_cnt,
     render: (t) => t.limit_up_20d ? `<span class="tag acc">${t.limit_up_cnt}次</span>` : `<span style="color:var(--faint)">—</span>` },
-  { label: "低点反转", num: true, title: "近 20 日低点反转（阶段低点确认后拐头向上）的日期 · 出现次数；越新鲜越靠前，适合打底仓/波段低吸",
+  { label: "低点拐头", num: true, title: "近 20 日低点拐头（阶段低点确认后向上拐头）的日期 · 出现次数；越新鲜越靠前，便于观察波段节奏",
     sort: (t) => t.money_ago ?? 9999,
     render: (t) => t.money_date == null ? `<span style="color:var(--faint)">—</span>` :
       `<span style="color:${(t.money_ago ?? 9) <= 3 ? PAL.o : "var(--text)"}">${t.money_date.slice(5)}</span>` +
       ((t.money_cnt ?? 0) > 1 ? `<small style="color:var(--faint)"> · ${t.money_cnt}次</small>` : "") +
       tailFlag(t) },
-  { label: "高点反转", num: true, title: "近 20 日高点反转（阶段高点确认后拐头向下）的日期 · 出现次数；越新鲜越靠前，属风险信号",
+  { label: "高点拐头", num: true, title: "近 20 日高点拐头（阶段高点确认后向下拐头）的日期 · 出现次数；越新鲜越靠前，属风险提示",
     sort: (t) => t.mine_ago ?? 9999,
     render: (t) => t.mine_date == null ? `<span style="color:var(--faint)">—</span>` :
       `<span style="color:${(t.mine_ago ?? 9) <= 3 ? "var(--down)" : "var(--text)"}">${t.mine_date.slice(5)}</span>` +
       ((t.mine_cnt ?? 0) > 1 ? `<small style="color:var(--faint)"> · ${t.mine_cnt}次</small>` : "") +
       tailFlag(t) },
+  { label: "DKX交叉", num: true, title: "最近一次 DKX 金叉/死叉距今交易日数（金叉=DKX 上穿 MADKX，死叉=下穿）；越新鲜越靠前",
+    sort: (t) => Math.min(t.dkx_gold_ago ?? 9999, t.dkx_death_ago ?? 9999),
+    render: (t) => {
+      const g = t.dkx_gold_ago, d = t.dkx_death_ago;
+      if (g == null && d == null) return `<span style="color:var(--faint)">—</span>`;
+      const gold = g != null && (d == null || g < d);
+      const ago = gold ? g! : d!;
+      return `<span style="color:${gold ? "var(--up)" : "var(--down)"}">${gold ? "金叉" : "死叉"} ${ago === 0 ? "当日" : `${ago}日前`}</span>`;
+    } },
   { label: "六分段", sort: "seg", title: "六分段理论：围绕日线短线趋势线的六个位置，1 趋势线超跌 → 2 反弹趋势线 → 3 趋势线突破 → 4 趋势线超涨 → 5 回踩趋势线 → 6 趋势线跌破；亮格为当前所在位置",
     render: (t) => (t.seg ? segMeter(t.seg, t.seg_name) : `<span style="color:var(--faint)">—</span>`) },
   { label: "短线状态", sort: (t) => (t.pullback ? 0 : 1), render: (t) =>
@@ -657,7 +666,7 @@ function showSparkPop(cv: HTMLCanvasElement, ev: MouseEvent): void {
 const COND_GROUPS: [string, string[]][] = [
   ["量能", ["vol"]],
   ["价格结构", ["short", "mid", "up20"]],
-  ["信号", ["trend", "negshrink", "nearzero", "money", "mine", "acc"]],
+  ["信号", ["trend", "negshrink", "nearzero", "money", "mine", "acc", "dkxgold", "dkxdeath"]],
 ];
 /* 阶段反转阈值用自然语言，避免「≤5 日」这种要心算的口径 */
 const SIGNAL_PILLS: [string, number][] = [["今日", 0], ["3日", 3], ["5日", 5], ["10日", 10]];
@@ -685,9 +694,9 @@ function condControl(d: TargetCond): string {
   const on = !!conds[d.key];
   const chip = `<button type="button" class="chip${on ? " on" : ""}" aria-pressed="${on}" data-c="${d.key}" title="${esc(d.title || "")}">${esc(d.label)}</button>`;
   if (d.kind !== "value") return chip;
-  if (d.key === "money" || d.key === "mine") {
+  if (d.key === "money" || d.key === "mine" || d.key === "dkxgold" || d.key === "dkxdeath") {
     const cur = Number(tvals[d.key]);
-    const cls = d.key === "money" ? "tgt-money-seg" : "tgt-mine-seg";
+    const cls = d.key === "money" || d.key === "dkxgold" ? "tgt-money-seg" : "tgt-mine-seg";
     return `<span class="tgt-val${on ? "" : " off"}">${chip}<span class="${cls}" role="group" aria-label="${esc(d.label)}时间范围">` +
       SIGNAL_PILLS.map(([label, v]) => `<i data-k="${d.key}" data-mv="${v}" class="${cur === v ? "on" : ""}">${label}</i>`).join("") +
       `</span></span>`;
@@ -715,12 +724,12 @@ function renderConds(): void {
   const conflict = (!!conds["money"] || !!conds["mine"]) && (!!conds["short"] || !!conds["mid"]);
   el.innerHTML =
     `<div class="tgt-presets">` +
-    ([["all", "全部条件"], ["money", "只看低点反转"], ["mine", "只看高点反转"], ["trend", "只看趋势"], ["none", "清空"]] as [string, string][])
+    ([["all", "全部条件"], ["money", "只看低点拐头"], ["mine", "只看高点拐头"], ["trend", "只看趋势"], ["none", "清空"]] as [string, string][])
       .map(([p, label]) => `<button type="button" class="tgt-preset${active === p ? " on" : ""}" data-p="${p}" aria-pressed="${active === p}">${label}</button>`).join("") +
     `<span class="tgt-preset-count">已启用 <b>${onKeys.length}</b>/${meta.length}</span></div>` +
     groups +
     `<div class="tgt-grp-hint">所有勾选条件同时满足 · ST 已剔除 · 未勾选不参与判定</div>` +
-    (conflict ? `<div class="tgt-conflict">阶段反转是拐点确认信号，价格通常在趋势线另一侧，与趋势橙方向相反；叠加后命中极少。<button type="button" class="tgt-conflict-fix" data-p="${conds["mine"] && !conds["money"] ? "mine" : "money"}">只看信号</button></div>` : "");
+    (conflict ? `<div class="tgt-conflict">阶段拐点是拐点确认信号，价格通常在趋势线另一侧，与趋势橙方向相反；叠加后命中极少。<button type="button" class="tgt-conflict-fix" data-p="${conds["mine"] && !conds["money"] ? "mine" : "money"}">只看信号</button></div>` : "");
   if (conds["trend"]) {
     el.insertAdjacentHTML("beforeend", `<div class="tgt-trend-set">
       <label>趋势柱线 <select id="tgt-trend-mode"><option value="cross" ${trend.mode === "cross" ? "selected" : ""}>负转正</option><option value="above" ${trend.mode === "above" ? "selected" : ""}>零轴上方</option></select></label>

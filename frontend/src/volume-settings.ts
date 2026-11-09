@@ -21,7 +21,7 @@ export function readVolumeSettings(): VolumeSettings {
 export function mountVolumeSettings(chart: Chart, el: HTMLElement) {
   const button = document.createElement('button');
   button.type = 'button';
-  button.className = 'kl-vset';
+  button.className = 'kl-vset kl-vpane';
   button.innerHTML = ic('gear', 13);
   button.title = '成交量参数';
   button.setAttribute('aria-label', button.title);
@@ -189,7 +189,16 @@ export function mountVolumeSettings(chart: Chart, el: HTMLElement) {
     const pane = indicator ? chart.getDom(indicator.paneId) : null;
     button.style.display = pane ? 'grid' : 'none';
     if (!pane) close();
-    if (pane) button.style.top = `${pane.getBoundingClientRect().top - el.getBoundingClientRect().top + 4}px`;
+    if (pane) {
+      /* 横向跟着绘图区右缘走：Y 轴宽度 auto 会变，锚容器右边会飘进 Y 轴，
+         也会和右侧 ✕（同样锚绘图区）挤在一起 */
+      const elRect = el.getBoundingClientRect();
+      const plot = indicator ? chart.getDom(indicator.paneId, 'main') : null;
+      const plotRight = (plot ?? pane).getBoundingClientRect().right - elRect.left;
+      button.style.left = `${Math.round(plotRight - 52)}px`;
+      button.style.top = `${Math.round(pane.getBoundingClientRect().top - elRect.top + 4)}px`;
+      if (plot) observer.observe(plot);
+    }
     reflow();
   };
   const observer = new ResizeObserver(sync);

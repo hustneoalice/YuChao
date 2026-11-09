@@ -118,7 +118,7 @@ const LINE_DEFS = [
   { key: "sr", label: "支撑压力", desc: "按成交量峰与枢轴，绘制近端支撑 / 压力带" },
   { key: "wave", label: "浪型结构", desc: "艾略特波浪：三条铁律校验后标出 0-5 推动浪与 A-B-C 调整浪" },
   { key: "box", label: "箱体区间", desc: "自动框出横盘震荡箱体：下沿缩量企稳、上沿滞涨、放量突破/跌破" },
-  { key: "pat", label: "反转形态", desc: "只认最经典的反转结构：W底/M头/头肩底/头肩顶，放量突破或跌破颈线才算确认" },
+  { key: "pat", label: "转折形态", desc: "只认最经典的转折结构：W底/M头/头肩底/头肩顶，放量突破或跌破颈线才算确认" },
 ] as const;
 type LineKey = (typeof LINE_DEFS)[number]["key"];
 const LINE_BY_KEY = Object.fromEntries(LINE_DEFS.map((d) => [d.key, d])) as
@@ -714,6 +714,15 @@ export function initMarket(): void {
   });
   document.addEventListener("yc:kl-range", onKlRange);
   document.addEventListener("yc:kl-pick", onKlPick);
+  // 副图窗格右上角 ✕：单独关闭该副图，指标面板 chips / 更多面板同步取消选中
+  document.addEventListener("yc:kl-close-sub", (e) => {
+    const key = (e as CustomEvent<{ key?: SubKey }>).detail?.key;
+    if (!key || !mk.subInds.includes(key)) return;
+    mk.subInds = mk.subInds.filter((x) => x !== key);
+    saveKPrefs();
+    syncIndUI();
+    renderKline();
+  });
   // 指数 ticker：初始 + 30s 轮询；点击跳转该指数K线
   void loadTicker();
   window.setInterval(() => void loadTicker(), 30000);
@@ -759,11 +768,18 @@ export function initMarket(): void {
       ipanel.style.left = "auto";
     }
   });
+  /* 面板内的点击会触发重渲染（如切换分类 tab），被点的节点在冒泡到 document 时已脱离 DOM，
+     closest 查不到祖先、面板就被误判为「点了外面」而关闭。捕获阶段先记下落点，冒泡阶段只认这个标记。 */
+  let clickInPanel = false;
   document.addEventListener("click", (e) => {
-    if (!ipanel.hidden && !(e.target as HTMLElement).closest("#kl-ipanel,#kl-ipanel-btn")) ipanel.hidden = true;
+    const t = e.target as HTMLElement;
+    clickInPanel = !!(t.closest?.("#kl-ipanel,#kl-ipanel-btn,#kl-more,#kl-indbar"));
+  }, true);
+  document.addEventListener("click", (e) => {
+    if (!ipanel.hidden && !clickInPanel) ipanel.hidden = true;
     // 「更多」面板：点击面板与「＋更多」按钮之外的区域时关闭
     const more = document.getElementById("kl-more");
-    if (more && !more.hidden && !(e.target as HTMLElement).closest("#kl-more,#kl-indbar")) more.hidden = true;
+    if (more && !more.hidden && !clickInPanel) more.hidden = true;
   });
   // 更多面板搜索：输入即过滤（列表重渲染保住焦点）；Esc 清空
   document.querySelector<HTMLInputElement>("#kl-more input")?.addEventListener("input", () => renderIndMore());
@@ -1175,11 +1191,12 @@ function sanitizeVipInds(): void {
     toast("体验期已结束，特色指标已收起");
   }
 }
-/** 更多面板 tab（全部 + 6 分类 + 绘图），选中持久化 */
+/** 更多面板 tab（全部 / 主图叠加 / 副图 / 6 分类 / 绘图），选中持久化。
+ *  「副图」把全部副图指标归到一处，内部仍按趋势/动量/量能等分组。 */
 const MORE_TAB_LS = "yc_kl_more_tab";
 function moreTab(): string {
   const v = localStorage.getItem(MORE_TAB_LS);
-  const ids = ["all", ...IND_CATS.map((c) => c.cat), "lines"];
+  const ids = ["all", ...IND_CATS.map((c) => c.cat), "sub", "lines"];
   return ids.includes(v || "") ? (v as string) : "all";
 }
 
@@ -1220,8 +1237,9 @@ function renderIndMore(): void {
   const q = (document.querySelector<HTMLInputElement>("#kl-more input")?.value || "").trim().toLowerCase();
   const tab = moreTab();
   if (tabsEl) {
-    const tabs = [{ id: "all", label: "全部" }]
-      .concat(IND_CATS.map((c) => ({ id: c.cat, label: c.label })))
+    // 「副图」紧跟主图，其余按分类；末位是绘图工具
+    const tabs = [{ id: "all", label: "全部" }, { id: "main", label: IND_CATS[0].label }, { id: "sub", label: "副图" }]
+      .concat(IND_CATS.slice(1).map((c) => ({ id: c.cat, label: c.label })))
       .concat([{ id: "lines", label: "绘图" }]);
     tabsEl.innerHTML = `<span class="seg im-tabs-seg">` +
       tabs.map((t) => `<button class="${tab === t.id ? "on" : ""}" data-mtab="${t.id}">${t.label}</button>`).join("") +
@@ -1230,7 +1248,8 @@ function renderIndMore(): void {
   const mset = new Set(mk.mainInds), sset = new Set(mk.subInds);
   const favs = new Set(readIndFavs());
   const lfavs = new Set(readLineFavs());
-  const inTab = (d: (typeof IND_DEFS)[number]): boolean => tab === "all" || d.cat === tab;
+  const inTab = (d: (typeof IND_DEFS)[number]): boolean =>
+    tab === "all" ? true : tab === "sub" ? d.where === "sub" : d.cat === tab;
   const hit = (d: (typeof IND_DEFS)[number]) =>
     inTab(d) && (!q || d.label.toLowerCase().includes(q) || d.desc.toLowerCase().includes(q) || d.key.includes(q) || d.kc.toLowerCase().includes(q));
   const row = (d: (typeof IND_DEFS)[number]) => {
@@ -1253,7 +1272,8 @@ function renderIndMore(): void {
       `<span class="im-desc">${esc(d.desc)}</span>` +
       `<i class="star${lfavs.has(d.key) ? " on" : ""}" data-lfav="${d.key}" title="${lfavs.has(d.key) ? "取消常显" : "常显到工具栏"}">★</i></div>`;
   };
-  const indHtml = IND_CATS.filter(({ cat }) => tab === "all" || cat === tab)
+  // 「副图」要看全部副图指标，分组遍历所有分类；其余 tab 只遍历命中的分类
+  const indHtml = IND_CATS.filter(({ cat }) => tab === "all" || tab === "sub" || cat === tab)
     .map(({ cat, label }) => {
       const defs = IND_DEFS.filter((d) => d.cat === cat && hit(d));
       return defs.length ? `<div class="im-cat">${label}</div>${defs.map(row).join("")}` : "";

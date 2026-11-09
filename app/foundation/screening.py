@@ -66,6 +66,16 @@ CONDITIONS: tuple[dict[str, Any], ...] = (
      "op": "<=", "default": 5, "min": 0, "max": 60, "step": 1, "unit": "日",
      "default_on": False,
      "title": "近 N 个交易日内出现过高点反转（阶段高点确认后拐头向下的信号）；数值为距今天数，越小越新鲜（风险信号）"},
+    # DKX（多空线）交叉：与 K 线 DKX 副图同口径（20 日加权价 + 10 日均线）。
+    # 金叉/死叉分开登记，可单用也可同时启用（叠加时要求两个信号都在窗口内）。
+    {"key": "dkxgold", "label": "DKX金叉", "kind": "value", "field": "dkx_gold_ago",
+     "op": "<=", "default": 5, "min": 0, "max": 30, "step": 1, "unit": "日",
+     "default_on": False,
+     "title": "近 N 个交易日内 DKX 上穿 MADKX（金叉）；数值为距今天数，越小越新鲜"},
+    {"key": "dkxdeath", "label": "DKX死叉", "kind": "value", "field": "dkx_death_ago",
+     "op": "<=", "default": 5, "min": 0, "max": 30, "step": 1, "unit": "日",
+     "default_on": False,
+     "title": "近 N 个交易日内 DKX 下穿 MADKX（死叉）；数值为距今天数，越小越新鲜（风险信号）"},
 )
 
 _KEYS = {c["key"] for c in CONDITIONS}

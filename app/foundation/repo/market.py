@@ -422,7 +422,7 @@ SEG_RANK = {0: 0, 1: 0, 2: 1, 6: 2, 4: 3, 5: 5, 3: 6}
 _TGT_CACHE: dict = {"key": None, "rows": [], "meta": {}}
 _TGT_COLS = ("symbol, name, close, pct_chg, vol_ma40, vol_ratio, vol_hit,"
              " short_orange, mid_orange, limit_up_20d, limit_up_cnt,"
-             " seg, seg_name, pullback, acc_strength")
+             " seg, seg_name, pullback, acc_strength, dkx_gold_ago, dkx_death_ago")
 
 # 全市场目标指标：一次窗口 SQL 算完（条件无关层），按 (最新K线日期, 标的数, 北交开关) 缓存
 _TGT_SQL = (
@@ -616,6 +616,73 @@ def _acc_strength_map(conn, live_date: Optional[str] = None) -> dict[str, float]
     return out
 
 
+# DKX（多空线）：20 日加权收盘（权重 20..1）再取 10 日均线 MADKX；
+# 与 frontend/src/pages/kline.ts 的 dkx 指标同口径。取 60 根即可覆盖「近 30 日」筛选。
+_DKX_BARS = 60
+_DKX_N = 20
+_DKX_M = 10
+
+
+def _dkx_sql(live_date: Optional[str]) -> str:
+    """DKX 取数：每股最近 60 根前复权收盘价（live 时拼接快照当日，与 _acc_sql 同法）。"""
+    if live_date:
+        src = (
+            "(SELECT symbol, date, close FROM v_daily_ohlcv_qfq"
+            f" WHERE date < DATE '{live_date}'"
+            " UNION ALL"
+            " SELECT symbol, trade_date AS date, current AS close"
+            " FROM market_snapshot"
+            f" WHERE kind = 'stock' AND trade_date = DATE '{live_date}'"
+            " AND current IS NOT NULL AND volume > 0)")
+    else:
+        src = "v_daily_ohlcv_qfq"
+    return (
+        "WITH t AS (SELECT symbol, date, close,"
+        " ROW_NUMBER() OVER (PARTITION BY symbol ORDER BY date DESC) AS rn"
+        f" FROM {src} WHERE symbol IN (SELECT symbol FROM stock_universe)),"
+        f" s AS (SELECT symbol, date, close FROM t WHERE rn <= {_DKX_BARS})"
+        " SELECT symbol, close FROM s ORDER BY symbol, date")
+
+
+def dkx_cross_ago(closes: list[float]) -> tuple[Optional[int], Optional[int]]:
+    """最近一次 DKX 金叉/死叉距今天数（0=当日，None=窗口内未出现）。
+
+    DKX = Σ close[i-j]·(20-j) / 210；MADKX = DKX 的 10 日均值。
+    DKX 上穿 MADKX → 金叉，下穿 → 死叉；等号归入穿越（与前端绘制同规则）。"""
+    n, m = _DKX_N, _DKX_M
+    L = len(closes)
+    if L < n + m - 1:
+        return None, None
+    wsum = n * (n + 1) / 2
+    dkx: list[Optional[float]] = [None] * L
+    for i in range(n - 1, L):
+        dkx[i] = sum(closes[i - j] * (n - j) for j in range(n)) / wsum
+    mad: list[Optional[float]] = [None] * L
+    for i in range(n + m - 2, L):
+        mad[i] = sum(dkx[i - j] for j in range(m)) / m
+    gold = death = None
+    for i in range(n + m - 2, L):
+        prev, prev_mad = dkx[i - 1], mad[i - 1]
+        if prev is None or prev_mad is None or mad[i] is None:
+            continue
+        ago = L - 1 - i
+        if prev <= prev_mad and dkx[i] > mad[i]:
+            gold = ago if gold is None else min(gold, ago)
+        elif prev >= prev_mad and dkx[i] < mad[i]:
+            death = ago if death is None else min(death, ago)
+    return gold, death
+
+
+def _dkx_cross_map(conn, live_date: Optional[str] = None) -> dict[str, tuple]:
+    """全市场 DKX 交叉：symbol → (金叉距今天数, 死叉距今天数)。"""
+    series: dict[str, list[float]] = {}
+    for sym, close in conn.execute(_dkx_sql(live_date)).fetchall():
+        if close is None:
+            continue
+        series.setdefault(sym, []).append(float(close))
+    return {sym: dkx_cross_ago(closes) for sym, closes in series.items()}
+
+
 def _scan_computed_at(conn) -> str:
     """target_scan 最近一次预计算完成时间（update_log 成功账，YYYY-MM-DD HH:MM）。"""
     try:
@@ -710,6 +777,7 @@ def compute_target_scan(conn, live: Optional[dict] = None) -> tuple[list[dict], 
 
     names = dict(conn.execute("SELECT symbol, name FROM stock_universe").fetchall())
     acc_map = _acc_strength_map(conn, live["date"] if live else None)
+    dkx_map = _dkx_cross_map(conn, live["date"] if live else None)
     out: list[dict] = []
     for r in conn.execute(_tgt_sql(live["date"] if live else None)).fetchall():
         sym, name = r[0], names.get(r[0])
@@ -723,6 +791,7 @@ def compute_target_scan(conn, live: Optional[dict] = None) -> tuple[list[dict], 
         vol, vol_ma40 = r[3], r[7]
         seg = six_segment(close, ma7, ma10, r[8])        # 趋势线六位置 → 1..6
         cnt = int(r[9] or 0)
+        gold_ago, death_ago = dkx_map.get(sym, (None, None))
         out.append({
             "symbol": sym, "name": name, "close": close, "pct_chg": r[2],
             "vol_ma40": vol_ma40,
@@ -734,6 +803,7 @@ def compute_target_scan(conn, live: Optional[dict] = None) -> tuple[list[dict], 
             "seg": seg, "seg_name": _TGT_SEGNAME[seg],
             "pullback": bool(ma7 and close < ma7),
             "acc_strength": acc_map.get(sym),
+            "dkx_gold_ago": gold_ago, "dkx_death_ago": death_ago,
         })
     db_as_of = str(fp[0])
     as_of = live["as_of"] if live else db_as_of

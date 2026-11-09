@@ -25,8 +25,11 @@ interface Result {
 const el=(id:string)=>document.getElementById(`chase-${id}`)!;
 const input=(id:string)=>el(id) as HTMLInputElement;
 const select=(id:string)=>el(id) as HTMLSelectElement;
-const pct=(v:number|null|undefined)=>v==null?"—":`${v>0?"+":""}${fmt(v)}%`;
+/* 涨跌幅统一红涨绿跌（跟随 data-dir 偏好），与目标页/看盘页同口径 */
+const pct=(v:number|null|undefined)=>v==null?"—":`<span class="${v>0?"up":v<0?"down":""}">${v>0?"+":""}${fmt(v)}%</span>`;
 const rate=(v:number|null|undefined)=>v==null?"—":`${fmt(v)}%`;
+/* 主力净额与涨跌同色：净流入红、净流出绿 */
+const netCell=(v:number|null|undefined)=>v==null?"—":`<span class="${v>0?"up":v<0?"down":""}">${fmtYiS(v)}</span>`;
 let initialized=false,view:View="stocks",data:Result|null=null;
 let requestedDate="",request:AbortController|null=null;
 let stockTable:DataTable<Stock>,blockTable:DataTable<Block>,pager:Pager;
@@ -39,7 +42,7 @@ function stockColumns():DataTableCol<Stock>[] {return [
   {label:"连板高度",sort:"streak",render:r=>height(r)},
   {label:"收盘价",num:true,sort:"close",render:r=>fmt(r.close)},
   {label:"当日涨幅",num:true,sort:"change_rate",render:r=>pct(r.change_rate)},
-  {label:"主力净额",num:true,sort:"net",render:r=>fmtYiS(r.net)},
+  {label:"主力净额",num:true,sort:"net",render:r=>netCell(r.net)},
   {label:"所属板块（当前）",render:r=>r.blocks.map(esc).join(" / ")||"—"},
   {label:"快照封单量",num:true,sort:"seal_shares",render:r=>r.seal_shares==null?"—":`${fmtVol(r.seal_shares)}股`},
   {label:"快照封单额",num:true,sort:"seal_amount",render:r=>fmtYiS(r.seal_amount)},

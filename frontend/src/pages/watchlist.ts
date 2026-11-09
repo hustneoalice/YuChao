@@ -1,5 +1,5 @@
 /* 自选页（localStorage 客户端实现，F04 后端就绪后切换） */
-import { marketApi, type Quote } from "../api";
+import { marketApi } from "../api";
 import { esc, fmt, fmtChg, fmtYi } from "../fmt";
 import { ic } from "../icons";
 import { getState, setWlGroups, toggleWlGroup, inWlFilter, removeWatch, addWatch, isWatched, addWatchGroup, allWatchGroups,
@@ -27,9 +27,11 @@ const WL_COLS: DataTableCol<WatchItem>[] = [
   { label: "代码", mono: true, sort: "symbol", render: (w) => w.symbol },
   { label: "名称", sort: "name", render: (w) => `<span style="font-weight:600">${esc(w.name)}</span>` },
   { label: "现价", num: true, sort: (w) => priceCache.get(w.symbol) ?? null,
-    render: (w) => fmt(priceCache.get(w.symbol) ?? 0) },
+    render: (w) => fmt(priceCache.get(w.symbol) ?? null) },
   { label: "涨跌幅", num: true, sort: (w) => chgCache.get(w.symbol) ?? null, render: (w) => {
-      const ch = chgCache.get(w.symbol) ?? 0;
+      const ch = chgCache.get(w.symbol);
+      // 行情未到达先占「—」：不要先摆 0.00 / +0.00% 再跳变
+      if (ch == null) return `<span style="color:var(--faint)">—</span>`;
       return `<span class="${ch >= 0 ? "up" : "down"}">${fmtChg(ch)}%</span>`; } },
   { label: "走势", num: true, render: (w) => sparkSvg(w.symbol, 72, 22) },
   { label: "成交额", num: true, sort: (w) => amtCache.get(w.symbol) ?? null,
@@ -145,15 +147,28 @@ function renderRows(reset = false): void {
 }
 
 async function loadPrices(symbols: string[]): Promise<void> {
-  const got: Quote[] = [];
-  await Promise.allSettled(symbols.map(async (sym) => {
-    const q = await marketApi.quote(sym);
-    got.push(q);
-    priceCache.set(sym, q.close ?? 0);
-    chgCache.set(sym, q.pct_chg ?? 0);
-    amtCache.set(sym, q.amount ?? 0);
-  }));
-  primeQuotes(got);                                            // 点表格切票时顶部价格秒上屏
+  // 已有缓存的票不重复拉；首屏只请求缺行情的那部分
+  const todo = symbols.filter((s) => !priceCache.has(s));
+  if (!todo.length) return;
+  let changed = false;
+  // 行情接口统一回 6 位代码，自选池可能存带后缀的写法：按代码前缀映射回原 key
+  const keyOf = new Map<string, string>();
+  for (const s of todo) keyOf.set(s.split(".")[0], s);
+  try {
+    // 一次批量拿回（后端单次 ≤50 只，超出分批串行），避免逐票请求串行排队
+    for (let i = 0; i < todo.length; i += 50) {
+      const r = await marketApi.quotes(todo.slice(i, i + 50));
+      for (const q of r.items) {
+        const key = keyOf.get(q.symbol) ?? q.symbol;
+        priceCache.set(key, q.close ?? 0);
+        chgCache.set(key, q.pct_chg ?? 0);
+        amtCache.set(key, q.amount ?? 0);
+        changed = true;
+      }
+      primeQuotes(r.items);                                    // 点表格切票时顶部价格秒上屏
+    }
+  } catch { /* 拉取失败：保持「—」占位，下次进入再试 */ }
+  if (changed) renderRows();                                   // 批量到达后一次重绘，不逐票闪
 }
 
 export function renderWatchlist(): void {

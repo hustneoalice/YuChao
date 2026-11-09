@@ -169,14 +169,30 @@ function boot(): void {
   initWatchPanel();           // 加自选/分组管理面板（modal-watch）：行情页 star 与核心标明细共用
   initSync();                 // F04：本地变更→云推送；带 token 启动→静默拉取合并
 
-  // 主题按钮
+  // 主题按钮 + 强调色四选（顶栏直接点选，与设置页外观同一套状态）
   const btn = document.getElementById("btn-theme")!;
-  const drawTheme = () => { btn.innerHTML = ic(getState().theme === "dark" ? "moon" : "sun", 16); };
+  const accentsEl = document.getElementById("btn-accents")!;
+  const ACCENTS: [string, string, string][] = [
+    ["amber", "#FF9F43", "琥珀"], ["teal", "#2FD3C5", "青"],
+    ["indigo", "#8A94FF", "蓝紫"], ["rose", "#F07C93", "玫红"],
+  ];
+  accentsEl.innerHTML = ACCENTS.map(([key, hex, name]) =>
+    `<button type="button" class="sw" data-ac="${key}" title="强调色 · ${name}" aria-label="强调色 · ${name}"
+      style="background:color-mix(in srgb,${hex} 18%,transparent)"><i style="background:${hex}"></i></button>`).join("");
+  const drawTheme = () => {
+    btn.innerHTML = ic(getState().theme === "dark" ? "moon" : "sun", 16);
+    accentsEl.querySelectorAll<HTMLElement>(".sw").forEach((el) =>
+      el.classList.toggle("on", el.dataset.ac === getState().accent));
+  };
   drawTheme();
   btn.addEventListener("click", () => {
     const next = getState().theme === "dark" ? "light" : "dark";
     localStorage.setItem("yc_theme", JSON.stringify(next));
     document.dispatchEvent(new CustomEvent("yc:patch-theme", { detail: next }));
+  });
+  accentsEl.addEventListener("click", (e) => {
+    const b = (e.target as HTMLElement).closest<HTMLElement>(".sw[data-ac]");
+    if (b) patch("accent", b.dataset.ac as "amber" | "teal" | "indigo" | "rose");
   });
   subscribe(drawTheme);
 

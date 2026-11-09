@@ -46,6 +46,8 @@ class Settings(BaseSettings):
 
     # K 线采集并发度：线程只做 HTTP，写库仍在主线程串行（1=回退纯串行）
     kline_workers: int = 8
+    # 资金流采集并发度：同上（新浪单只 p50≈90ms，串行全市场要 15 分钟以上）
+    capital_flow_workers: int = 8
 
     model_config = {"env_prefix": "YUCHAO_", "env_file": ".env", "extra": "ignore"}
 

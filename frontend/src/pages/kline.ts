@@ -8,6 +8,7 @@
 import { init, dispose, registerIndicator, registerYAxis, type Chart, type CandleType } from "klinecharts";
 import type { Bar } from "../api";
 import { cssv, esc, fmt, fmtYi, fmtVol } from "../fmt";
+import { ic } from "../icons";
 import { ema, sixSegmentSeries } from "../indicators";
 import { accumulationSeries } from "../accumulation";
 import { mainCostSeries } from "../main-cost";
@@ -16,10 +17,12 @@ import { volumeActivitySeries } from "../volume-activity";
 import { trendHistogramSeries } from "../trend-histogram";
 import { strongPullbackSeries } from "../strong-pullback";
 import { drawReversalMark, qyjjSeries, type QyjjRow } from "../qyjj";
+import { mountAccumulationStyle, mountIndicatorStyles, readAccumulationStyle, readQyjjStyle } from "../indicator-styles";
 import { volumeAverageSeries } from "../volume-average";
 import { mountVolumeSettings, readVolumeSettings } from "../volume-settings";
 import { mountMainCostSettings } from "../main-cost-settings";
 import { applyMA, mountMASettings, visibleMARows } from "../ma-settings";
+import { biasLines, mountBiasSettings } from "../bias-settings";
 
 /* ── 策影配色（tradingColors） ── */
 const UP = "#EF5350";
@@ -63,6 +66,32 @@ export function chartDown(): string {
   return document.documentElement.dataset.dir === "intl" ? UP : DOWN;
 }
 
+/** 主力吸筹水位配色：直接跟随主题强调色 --accent（青/蓝紫/玫红/琥珀四选），
+ *  填色取同色低透明。按「明暗 + 强调色」缓存，避免每帧 getComputedStyle。 */
+let toneKey = "";
+let toneCache: { line: string; fill: string } | null = null;
+
+function accumulationTone(): { line: string; fill: string } {
+  const root = document.documentElement;
+  const key = `${root.dataset.theme}|${root.dataset.accent}`;
+  if (toneCache && key === toneKey) return toneCache;
+  const line = cssv("--accent") || "#FF9F43";
+  const m = line.trim().match(/^#?([0-9a-f]{6})$/i);
+  let fill = "rgba(255, 159, 67, .18)";
+  if (m) {
+    const n = parseInt(m[1], 16);
+    const a = root.dataset.theme === "dark" ? 0.2 : 0.16;
+    fill = `rgba(${(n >> 16) & 255}, ${(n >> 8) & 255}, ${n & 255}, ${a})`;
+  }
+  toneKey = key;
+  toneCache = { line, fill };
+  return toneCache;
+}
+
+/** 趋势柱线副图的悬停索引：十字光标写入后只重绘该窗格主画布。
+ *  不用 overrideIndicator——它每次都走 layout(measureWidth)，
+ *  鼠标一动整图就重新测宽布局，靠近 Y 轴时表现为图表位移抖动。 */
+const trendHoverIndex = new WeakMap<Chart, number>();
 
 /** 涨停判定：按代码所在板块的涨幅上限（主板 10 / 创业科创 20 / 北交 30）。
  *  创业板 2020-08-24 起才改 20%；阈值留 0.1 余量，避开 9.87% 这类非涨停收盘。 */
@@ -662,7 +691,7 @@ function drawSmartLines(a: SmartDrawArgs): void {
       ctx.fill();
     });
     const lvl = f.pos < 0.236 ? "弱反弹" : f.pos < 0.382 ? "反弹初期" : f.pos < 0.5 ? "修复反弹"
-      : f.pos < 0.618 ? "强势反弹" : f.pos < 0.786 ? "接近反转" : "反转确认";
+      : f.pos < 0.618 ? "强势反弹" : f.pos < 0.786 ? "接近转折" : "转折确认";
     const text = `${f.rebound ? "反弹" : "回撤"} ${Math.round(f.pos * 100)}% · ${lvl}`;
     ctx.font = "600 10px ui-monospace,SFMono-Regular,Menlo,monospace";
     ctx.textAlign = "left";
@@ -1152,10 +1181,79 @@ function ensureRegistered(): void {
     precision: 2,
     minValue: 0,
     calc: (list) => accumulationSeries(list).map(value => ({ accumulation: value })),
+    // 图例保留一条同名线（tooltip 用），实际绘制全部交给 draw：强调色水位面积，避免与众赢品红柱同形
     figures: [{
-      key: "accumulation", title: "吸筹", type: "bar", baseValue: 0,
-      styles: () => ({ color: "#F000FF", borderColor: "#F000FF", borderSize: 1, style: "stroke" }),
+      key: "accumulation", title: "吸筹", type: "line",
+      styles: () => ({ color: accumulationTone().line, size: 1.3 }),
     }],
+    draw: ({ ctx, chart, indicator, xAxis, yAxis, bounding }) => {
+      const data = indicator.result as { accumulation: number | null }[];
+      if (!ctx) return false;
+      const range = chart.getVisibleRange();
+      const tone = accumulationTone();
+      const zeroY = yAxis.convertToPixel(0);
+      const from = Math.max(0, Math.floor(range.from));
+      const to = Math.min(data.length - 1, Math.ceil(range.to));
+      ctx.save();
+      ctx.beginPath();
+      ctx.rect(0, 0, bounding.width, bounding.height);
+      ctx.clip();
+      // 空心柱（原紫色珠子的替代样式）：强调色描边，零轴到水位一根一根画
+      if (readAccumulationStyle() === "bar") {
+        const barW = Math.max(1.2, (chart.getBarSpace?.()?.bar ?? 6) * 0.62);
+        ctx.strokeStyle = tone.line;
+        ctx.lineWidth = 1;
+        for (let i = from; i <= to; i++) {
+          const v = data[i]?.accumulation;
+          if (v == null || v <= 0) continue;
+          const x = xAxis.convertToPixel(i);
+          const y = yAxis.convertToPixel(v);
+          ctx.strokeRect(x - barW / 2, y, barW, zeroY - y);
+        }
+        ctx.restore();
+        return true;
+      }
+      // 水位：从零轴向上填充，连续有效点成段，空值处断开不与前后连线
+      let seg: { x: number; y: number }[] = [];
+      const flush = (): void => {
+        if (seg.length < 2) { seg = []; return; }
+        ctx.beginPath();
+        ctx.moveTo(seg[0].x, zeroY);
+        for (const p of seg) ctx.lineTo(p.x, p.y);
+        ctx.lineTo(seg[seg.length - 1].x, zeroY);
+        ctx.closePath();
+        ctx.fillStyle = tone.fill;
+        ctx.fill();
+        ctx.beginPath();
+        seg.forEach((p, i) => (i ? ctx.lineTo(p.x, p.y) : ctx.moveTo(p.x, p.y)));
+        ctx.strokeStyle = tone.line;
+        ctx.lineWidth = 1.3;
+        ctx.lineJoin = "round";
+        ctx.stroke();
+        seg = [];
+      };
+      for (let i = from; i <= to; i++) {
+        const v = data[i]?.accumulation;
+        if (v == null) { flush(); continue; }
+        seg.push({ x: xAxis.convertToPixel(i), y: yAxis.convertToPixel(v) });
+      }
+      flush();
+      // 峰值点：局部高点补一颗圆点，脉冲节奏在密段里也能看出
+      ctx.fillStyle = tone.line;
+      for (let i = Math.max(1, from); i <= Math.min(to, data.length - 2); i++) {
+        const v = data[i]?.accumulation;
+        const prev = data[i - 1]?.accumulation;
+        const next = data[i + 1]?.accumulation;
+        if (v == null || prev == null || next == null || v <= 0) continue;
+        if (v >= prev && v >= next) {
+          ctx.beginPath();
+          ctx.arc(xAxis.convertToPixel(i), yAxis.convertToPixel(v), 2.4, 0, Math.PI * 2);
+          ctx.fill();
+        }
+      }
+      ctx.restore();
+      return true;
+    },
   });
   registerIndicator({
     name: "ZY_MAIN_COST",
@@ -1330,7 +1428,9 @@ function ensureRegistered(): void {
         column(x, 0, v.base, v.base >= 0);
         column(x, v.base, v.short, v.short > v.base);
       }
-      const selected = data[(indicator.extendData as number | undefined) ?? data.length - 1];
+      const hover = trendHoverIndex.get(chart);
+      // 换标的/数据长度变化后旧索引可能越界，取末根兜底
+      const selected = data[Math.min(hover ?? data.length - 1, data.length - 1)];
       // 标题「趋势柱线」由 indicator tooltip 画在左上（10.5px），数值接在其右侧，避免压字
       ctx.font = "10.5px sans-serif";
       const titleW = ctx.measureText("趋势柱线").width;
@@ -1389,10 +1489,10 @@ function ensureRegistered(): void {
       ctx.restore();return true;
     },
   });
-  // 阶段反转·近似：低点反转=阶段低点确认后拐头向上（画在最低价下方），
-  // 高点反转=阶段高点确认后拐头向下（画在最高价上方）
+  // 阶段拐点·近似：低点拐头=阶段低点确认后向上拐头（画在最低价下方），
+  // 高点拐头=阶段高点确认后向下拐头（画在最高价上方）
   registerIndicator({
-    name: "ZY_QYJJ", shortName: "阶段反转", precision: 2, shouldFormatBigNumber: false,
+    name: "ZY_QYJJ", shortName: "阶段拐点", precision: 2, shouldFormatBigNumber: false,
     calc: list => qyjjSeries(list).map(v => ({ ...v, px: v.close })),
     figures: [{ key: "px", title: "", type: "line", styles: () => ({ color: "transparent" }) }],
     draw: ({ ctx, chart, indicator, xAxis, yAxis, bounding }) => {
@@ -1402,14 +1502,14 @@ function ensureRegistered(): void {
       ctx.beginPath();
       ctx.rect(0, 0, bounding.width, bounding.height);
       ctx.clip();
+      // 同一帧内记录已占位区域，标记挨得近时自动向外错行，避免叠字
+      const placed: { x1: number; x2: number; y1: number; y2: number }[] = [];
       for (let i = Math.max(0, Math.floor(range.from)); i < Math.min(data.length, Math.ceil(range.to) + 1); i++) {
         const row = data[i];
         if (!row?.signal || row.anchor == null) continue;
         const x = xAxis.convertToPixel(i);
         const y = yAxis.convertToPixel(row.anchor);
-        // 标记贴 K 线外侧；靠边时夹到绘图区内，避免被裁剪
-        if (row.signal === "money") drawReversalMark(ctx, "money", x, Math.min(bounding.height - 11, y + 15));
-        else drawReversalMark(ctx, "mine", x, Math.max(11, y - 15));
+        drawReversalMark(ctx, row.signal, x, y, bounding.width, bounding.height, placed, readQyjjStyle());
       }
       ctx.restore();
       return false;
@@ -1443,8 +1543,16 @@ function ensureRegistered(): void {
       shortName: "DKX",
       precision: 2,
       calc: (kLineDataList) => {
-        const list = kLineDataList as unknown as { close: number }[];
+        const list = kLineDataList as unknown as { close: number; date?: string }[];
         const n = 20, wsum = n * (n + 1) / 2;
+        /** 交叉标注用的日期：只留 MM/DD（年线级信息对短线无意义），分钟线补 HH:MM，控制宽度不压住 K 线 */
+        const fmt = (i: number): string => {
+          const raw = list[i].date || "";
+          if (!raw) return "";
+          const [day, time] = raw.split(" ");
+          const short = day.slice(5).replace(/-/g, "/");
+          return time ? `${short} ${time.slice(0, 5)}` : short;
+        };
         const dkx: (number | null)[] = list.map((_, i) => {
           if (i < n - 1) return null;
           let acc = 0;
@@ -1457,12 +1565,122 @@ function ensureRegistered(): void {
           for (let j = 0; j < 10; j++) acc += dkx[i - j]!;
           return acc / 10;
         });
-        return list.map((_, i) => ({ dkx: dkx[i], madkx: madkx[i] }));
+        const rows = list.map((_, i) => {
+          const cur = dkx[i], curM = madkx[i];
+          const prev = dkx[i - 1], prevM = madkx[i - 1];
+          const ready = cur != null && curM != null && prev != null && prevM != null;
+          const g = ready && prev <= prevM && cur > curM;      // 上穿=金叉
+          const dth = ready && prev >= prevM && cur < curM;    // 下穿=死叉
+          return { dkx: cur, madkx: curM, date: fmt(i), gold: g ? cur : null, death: dth ? cur : null };
+        });
+        return rows as never;
       },
+      // 只保留两条线的图例（tooltip 用）；实际绘制全部交给 draw（返回 true 覆盖默认 figure）
       figures: [
-        { key: "dkx", title: "DKX", type: "line", styles: () => ({ color: trendPalette().fast, lineWidth: 1.2 }) },
-        { key: "madkx", title: "MADKX", type: "line", styles: () => ({ color: trendPalette().slow, lineWidth: 1.2 }) },
+        { key: "dkx", title: "DKX", type: "line", styles: () => ({ color: trendPalette().fast }) },
+        { key: "madkx", title: "MADKX", type: "line", styles: () => ({ color: trendPalette().slow }) },
       ],
+      /* 金叉/死叉标注：不依赖小字号文字找点，而是「实心圆点 + 虚线引线 + 端点日期」。
+       *  · 圆点：任何比例尺下都画，位置即交叉点
+       *  · 标签：金叉贴副图底沿、死叉贴顶沿，成两排互不打架；同向标签按像素间距挑拣，
+       *    最近一次交叉必标（常显），其余在缩放放大后自然变多；间距不足只留圆点
+       *  · 位于本 draw 内统一绘制，故线和点/文字的层次可控，且可裁剪出界 */
+      draw: ({ ctx, chart, indicator, xAxis, yAxis, bounding }) => {
+        type X = { x: number; y: number; date: string };
+        const data = indicator.result as unknown as ({ dkx: number | null; madkx: number | null; date: string; gold: number | null; death: number | null } | null)[];
+        if (!data.length) return true;
+        const range = chart.getVisibleRange();
+        const from = Math.max(0, Math.floor(range.from));
+        const to = Math.min(data.length - 1, Math.ceil(range.to));
+        const pal = trendPalette();
+        ctx.save();
+        ctx.beginPath();
+        ctx.rect(0, 0, bounding.width, bounding.height);
+        ctx.clip();
+        // 1) 两条线（原 figure 绘制由本次接管）
+        ctx.lineWidth = 1.2;
+        ctx.lineJoin = "round";
+        ([["dkx", pal.fast], ["madkx", pal.slow]] as const).forEach(([key, color]) => {
+          ctx.beginPath();
+          let started = false;
+          for (let i = from; i <= to; i++) {
+            const v = data[i]?.[key];
+            if (typeof v !== "number" || !Number.isFinite(v)) { started = false; continue; }
+            const x = xAxis.convertToPixel(i), y = yAxis.convertToPixel(v);
+            if (started) ctx.lineTo(x, y);
+            else { ctx.moveTo(x, y); started = true; }
+          }
+          ctx.strokeStyle = color;
+          ctx.stroke();
+        });
+        // 2) 收集可见区的交叉点
+        const golds: X[] = [], deaths: X[] = [];
+        for (let i = from; i <= to; i++) {
+          const r = data[i];
+          if (!r) continue;
+          const x = xAxis.convertToPixel(i);
+          if (typeof r.gold === "number") golds.push({ x, y: yAxis.convertToPixel(r.gold), date: r.date });
+          if (typeof r.death === "number") deaths.push({ x, y: yAxis.convertToPixel(r.death), date: r.date });
+        }
+        const dot = (x: number, y: number, color: string): void => {
+          ctx.beginPath();
+          ctx.arc(x, y, 2.9, 0, Math.PI * 2);
+          ctx.fillStyle = color;
+          ctx.fill();
+          ctx.lineWidth = 1;
+          ctx.strokeStyle = "rgba(0,0,0,.55)";
+          ctx.stroke();
+        };
+        // 3) 点全画；标签从右往左挑，最近一次必标，间距 ≥68px 才标字
+        const MARK_GAP = 68;
+        const label = (arr: X[], color: string, atTop: boolean): void => {
+          arr.forEach((p) => dot(p.x, p.y, color));
+          const picked: X[] = [];
+          let lastX = Number.NEGATIVE_INFINITY;
+          for (let k = arr.length - 1; k >= 0; k--) {
+            if (k === arr.length - 1 || lastX - arr[k].x >= MARK_GAP) { picked.push(arr[k]); lastX = arr[k].x; }
+          }
+          const rowY = atTop ? 13 : bounding.height - 13;
+          picked.forEach((p) => {
+            const text = `${atTop ? "死叉" : "金叉"} ${p.date}`.trim();
+            ctx.font = "600 9px -apple-system,BlinkMacSystemFont,\"PingFang SC\",sans-serif";
+            const tw = ctx.measureText(text).width;
+            const half = tw / 2 + 4;
+            const tx = Math.min(Math.max(p.x, half), Math.max(half, bounding.width - half));
+            // 引线：从圆点边缘拉到标签所在行（交叉点已贴边时不画）
+            const y0 = atTop ? p.y - 5 : p.y + 5;
+            if (atTop ? y0 > rowY : y0 < rowY) {
+              ctx.save();
+              ctx.globalAlpha = 0.8;
+              ctx.setLineDash([3, 3]);
+              ctx.lineWidth = 1;
+              ctx.strokeStyle = color;
+              ctx.beginPath();
+              ctx.moveTo(p.x, y0);
+              ctx.lineTo(p.x, rowY);
+              ctx.stroke();
+              ctx.restore();
+            }
+            ctx.save();
+            ctx.textAlign = "center";
+            ctx.textBaseline = atTop ? "top" : "bottom";
+            // 用图表底色描一圈实边代替模糊阴影：浅色主题下不再出现灰黑光晕，深色下同样干净
+            const ty = atTop ? 2 : bounding.height - 2;
+            ctx.lineJoin = "round";
+            ctx.lineWidth = 3;
+            ctx.strokeStyle = cssv("--page");
+            ctx.strokeText(text, tx, ty);
+            ctx.fillStyle = color;
+            ctx.fillText(text, tx, ty);
+            ctx.restore();
+          });
+        };
+        // 标签色取主题变量（浅色主题自动换成更深的红/绿，白底上对比更足；intl 方向同样跟随）
+        label(golds, cssv("--up"), false);
+        label(deaths, cssv("--down"), true);
+        ctx.restore();
+        return true;
+      },
     });
   } catch { /* 重复注册忽略 */ }
   // VOLX 自研成交量：量柱涨红跌绿，两条均量线周期可调。
@@ -1703,7 +1921,7 @@ function ensureRegistered(): void {
   try {
     registerIndicator({
       name: "ZY_PAT",
-      shortName: "反转形态",
+      shortName: "转折形态",
       precision: 2,
       calc: (kLineDataList) => (kLineDataList as unknown as LineBar[]).map((b) => ({ guide: b.close })),
       figures: [{ key: "guide", title: "", type: "line", styles: () => ({ color: "transparent", size: 0.1 }) }],
@@ -1730,7 +1948,7 @@ export const IND_CATS: { cat: IndCat; label: string }[] = [
 ];
 export const IND_DEFS: IndDef[] = [
   // 主图叠加
-  { key: "qyjj", kc: "ZY_QYJJ", label: "阶段反转", cat: "main", where: "main", desc: "拐点确认信号：低点反转=阶段低点后拐头向上，高点反转=阶段高点后拐头向下，信号落在拐点后一根" },
+  { key: "qyjj", kc: "ZY_QYJJ", label: "阶段拐点", cat: "main", where: "main", desc: "拐点确认信号：低点拐头=阶段低点后拐头向上，高点拐头=阶段高点后拐头向下，信号落在拐点后一根" },
   { key: "strongpullback", kc: "ZY_STRONG_PULLBACK", label: "强势调整", cat: "main", where: "main", desc: "起点后限定周期内连线，随后结束；量能配合、收盘站上中线趋势；破保护位或缩量结束；同组眼睛连线" },
   { key: "ma", kc: "MA", label: "均线", cat: "main", where: "main", desc: "移动平均线（周期可设置）" },
   { key: "td", kc: "ZY_TD_SEQ", label: "九转序列", cat: "main", where: "main", desc: "TD Sequential：只在成立的计数节点处标数字（需完美检验）" },
@@ -1750,7 +1968,7 @@ export const IND_DEFS: IndDef[] = [
   { key: "trix", kc: "TRIX", label: "TRIX", cat: "trend", where: "sub", desc: "三重指数平滑平均线" },
   { key: "emv", kc: "EMV", label: "EMV", cat: "trend", where: "sub", desc: "简易波动指标（量价趋势）" },
   { key: "dma", kc: "DMA", label: "DMA", cat: "trend", where: "sub", desc: "平均线差（快慢均线差值）" },
-  { key: "dkx", kc: "ZY_DKX", label: "DKX", cat: "trend", where: "sub", desc: "多空线：近 20 日收盘价加权（20…1）平滑，再取 10 日均线；DKX 上穿 MADKX 偏多、下穿偏空" },
+  { key: "dkx", kc: "ZY_DKX", label: "DKX", cat: "trend", where: "sub", desc: "多空线：近 20 日收盘价加权（20…1）平滑，再取 10 日均线；DKX 上穿 MADKX 标金叉、下穿标死叉" },
   // 动量类
   { key: "stockoperate", kc: "ZY_STOCK_OPERATE", label: "个股操盘", cat: "mom", where: "sub", desc: "收盘在近期高低区间的位置平滑；红柱=站上慢线、绿柱=跌破慢线；三根水平参考线；波段/反弹/超跌进场时信号线上移" },
   { key: "kdj", kc: "KDJX", label: "KDJ", cat: "mom", where: "sub", desc: "随机指标（超买/超卖参考线）" },
@@ -1766,7 +1984,7 @@ export const IND_DEFS: IndDef[] = [
   { key: "udl", kc: "UDL", label: "UDL", cat: "mom", where: "sub", desc: "引力线（多周期动量合成）" },
   // 量能类
   { key: "volumeactivity", kc: "ZY_VOLUME_ACTIVITY", label: "量能活跃", cat: "vol", where: "sub", desc: "短线量能红绿填充、趋势量能蓝线；太阳=极度活跃、闪电=十分活跃、月亮=极度萎缩；指数或缺少数据不计算" },
-  { key: "accumulation", kc: "ZY_ACCUMULATION", label: "主力吸筹", cat: "vol", where: "sub", desc: "紫色柱为价格推导指标，非实际主力资金" },
+  { key: "accumulation", kc: "ZY_ACCUMULATION", label: "主力吸筹", cat: "vol", where: "sub", desc: "跟随主题色的水位面积：创 38 日新低时形成脉冲并逐日衰减；价格推导指标，非实际主力资金" },
   { key: "vol", kc: "VOLX", label: "VOL", cat: "vol", where: "sub", desc: "成交量（两条均量线，周期可设置）" },
   { key: "volfs", kc: "VOLFS", label: "VOLFS", cat: "vol", where: "sub", desc: "分时逐分钟量柱（分钟价涨红/跌绿，通达信分时同款）" },
   { key: "obv", kc: "OBV", label: "OBV", cat: "vol", where: "sub", desc: "能量潮（量能累积方向）" },
@@ -2118,19 +2336,7 @@ export function mountKline(el: HTMLElement): KlineChartHandle {
     legend.style.display = parts.length ? "flex" : "none";
   };
 
-  let trendCrosshairValueVisible = false;
   const onCross = (...args: unknown[]) => {
-    const crosshair = args[0] as { paneId?: string } | null;
-    const showTrendValue = !!crosshair?.paneId && chart.getIndicators({ paneId: crosshair.paneId })
-      .some(indicator => indicator.name === "ZY_TREND_HISTOGRAM");
-    if (showTrendValue !== trendCrosshairValueVisible) {
-      trendCrosshairValueVisible = showTrendValue;
-      chart.setStyles({ crosshair: { horizontal: { text: {
-        show: showTrendValue, color: cssv("--text") || "#F5F5F7", size: 12,
-        backgroundColor: cssv("--panel-3") || "#2D2D31", borderSize: 1,
-        borderColor: cssv("--text-muted") || "#888", borderRadius: 4,
-      } } } });
-    }
     // 框选模式下已有区间卡：不再叠一张十字光标卡（两张同风格浮卡会互相打架）
     if (rangeMode && lastSel) { tip.style.display = "none"; hideYlab(); return; }
     // 连线测量模式：十字光标卡让位给测量卡，只保留十字线
@@ -2141,7 +2347,17 @@ export function mountKline(el: HTMLElement): KlineChartHandle {
     // v10 crosshair 事件只带坐标，经 convertFromPixel 反查数据索引（策影同款）
     const hit = chart.convertFromPixel([{ x: ch.x }]) as unknown;
     const di = (Array.isArray(hit) ? hit[0] : hit)?.dataIndex as number | undefined;
-    chart.overrideIndicator({ name: "ZY_TREND_HISTOGRAM", extendData: di ?? list.length - 1 });
+    // 趋势柱线左上角数值跟随十字光标：写索引后只重绘该窗格主画布，
+    // 不走 overrideIndicator（每次 mousemove 都触发整图 layout，图表会位移抖动）
+    if (di != null && di !== trendHoverIndex.get(chart)) {
+      trendHoverIndex.set(chart, di);
+      const paneId = chart.getIndicators().find((i) => i.name === "ZY_TREND_HISTOGRAM")?.paneId;
+      if (paneId) {
+        try {
+          (chart as unknown as { updatePane: (level: number, paneId: string) => void }).updatePane(0, paneId);
+        } catch { /* 忽略：旧版本没有 updatePane */ }
+      }
+    }
     const bar = di != null ? list[di] : undefined;
     if (!bar) { tip.style.display = "none"; hideYlab(); return; }
     const prev = di! > 0 ? list[di! - 1] : undefined;
@@ -2594,21 +2810,30 @@ export function mountKline(el: HTMLElement): KlineChartHandle {
     return d > 0 ? `${d}天` : `${n} 根`;
   };
 
-  /** 日期标尺：按轨道宽度均分 3~8 个刻度；同日分钟线标 HH:MM，其余标 YYYY/MM */
+  /** 日期标尺：按轨道宽度均分刻度，刻度密度按像素间距自适应（不用逐日）；
+   *  同日分钟线标 HH:MM，日/周/季线标完整日期 YYYY/MM/DD，月/年线标 YYYY/MM。
+   *  中间刻度必须铺满：避免只剩首尾两个日期、中段一大片空白。 */
   const navRulerDraw = (list: { date?: string }[]) => {
     navRuler.innerHTML = "";
     const w = navTrack.clientWidth;
     if (!w || list.length < 2) return;
     const s0 = list[0]?.date || "", s1 = list[list.length - 1]?.date || "";
     const intraday = s0.includes(" ") && s0.slice(0, 10) === s1.slice(0, 10);
-    const n = Math.max(3, Math.min(8, Math.floor(w / 120)));
+    let pType = "day";
+    try { const pd = chart.getPeriod(); if (pd) pType = pd.type; } catch { /* 忽略 */ }
+    const coarse = pType === "month" || pType === "year" || pType === "quarter";
+    // 间距下限：分钟 78px（HH:MM 约 28px），日线 92px（完整日期约 54px），月/年 80px
+    const step = intraday ? 78 : coarse ? 80 : 92;
+    const n = Math.max(intraday ? 4 : 5, Math.min(14, Math.floor(w / step)));
     for (let k = 0; k < n; k++) {
       const raw = list[Math.round((k / (n - 1)) * (list.length - 1))]?.date || "";
       if (raw.length < 7) continue;
       const s = document.createElement("span");
       s.textContent = intraday && raw.includes(" ")
         ? raw.slice(11, 16)
-        : `${raw.slice(0, 4)}/${raw.slice(5, 7)}`;
+        : coarse || raw.length < 10
+          ? `${raw.slice(0, 4)}/${raw.slice(5, 7)}`
+          : `${raw.slice(0, 4)}/${raw.slice(5, 7)}/${raw.slice(8, 10)}`;
       if (k === 0) { s.style.left = "0"; s.style.transform = "none"; }
       else if (k === n - 1) { s.style.left = "auto"; s.style.right = "0"; s.style.transform = "none"; }
       else s.style.left = `${(k / (n - 1)) * 100}%`;
@@ -2838,6 +3063,53 @@ export function mountKline(el: HTMLElement): KlineChartHandle {
   const volumeSettings = mountVolumeSettings(chart, el);
   const mainCostSettings = mountMainCostSettings(chart, el);
   const maSettings = mountMASettings(chart, el, () => drawLegend(legendInds));
+  const biasSettings = mountBiasSettings(chart, el);
+  // 指标样式（吸筹形态 / 拐点标记）：只影响绘制，切完让整图重绘一次即可
+  const redrawOnce = () => { try { chart.resize(); } catch { /* 忽略 */ } };
+  const styleSettings = mountIndicatorStyles(chart, el, redrawOnce);
+  // 主力吸筹样式挂在它自己的副图右上角（与成交量齿轮同款位置）
+  const accStyleSettings = mountAccumulationStyle(chart, el, redrawOnce);
+
+  /* 副图 ✕：每个副图窗格右上角一键关闭（状态回写行情页，指标 chips 同步） */
+  const SUB_KEY_BY_KC = new Map<string, SubKey>(
+    IND_DEFS.filter((d) => d.where === "sub").map((d) => [d.kc, d.key as SubKey]),
+  );
+  const closeBtns = new Map<string, HTMLButtonElement>();
+  const syncSubClose = (): void => {
+    const elRect = el.getBoundingClientRect();
+    const alive = new Set<string>();
+    chart.getIndicators().forEach((ind) => {
+      const key = ind.paneId === "candle_pane" ? undefined : SUB_KEY_BY_KC.get(ind.name);
+      const pane = key ? chart.getDom(ind.paneId) : null;
+      if (!key || !pane) return;
+      alive.add(ind.paneId);
+      let btn = closeBtns.get(ind.paneId);
+      if (!btn) {
+        btn = document.createElement("button");
+        btn.type = "button";
+        btn.className = "kl-vclose";
+        btn.innerHTML = ic("x", 11);
+        btn.title = "关闭此副图";
+        btn.setAttribute("aria-label", btn.title);
+        btn.addEventListener("click", () =>
+          document.dispatchEvent(new CustomEvent("yc:kl-close-sub", { detail: { key } })));
+        el.appendChild(btn);
+        closeBtns.set(ind.paneId, btn);
+      }
+      // 横向锚在绘图区右缘（不是容器右缘）：Y 轴宽度 auto 会随刻度/十字数值变，
+      // 锚容器右边会让 ✕ 飘进 Y 轴；同时观察绘图区尺寸，轴一变就重新贴边
+      const plot = chart.getDom(ind.paneId, "main");
+      const plotRight = (plot ?? pane).getBoundingClientRect().right - elRect.left;
+      btn.style.left = `${Math.round(plotRight - 26)}px`;
+      btn.style.top = `${Math.round(pane.getBoundingClientRect().top - elRect.top + 6)}px`;
+      if (plot) closeObserver.observe(plot);
+    });
+    closeBtns.forEach((btn, paneId) => {
+      if (!alive.has(paneId)) { btn.remove(); closeBtns.delete(paneId); }
+    });
+  };
+  const closeObserver = new ResizeObserver(syncSubClose);
+  closeObserver.observe(el);
 
   let dataLen = 0;                     // 上一次灌入的 bar 数（判断「增量刷新」还是「换数据源」）
 
@@ -2990,6 +3262,15 @@ export function mountKline(el: HTMLElement): KlineChartHandle {
         } else if (d.key === "sixseg") {
           // 六分段趋势（K线下方叠加）：趋势线六位置 1..6 台阶线
           chart.createIndicator({ name: "SIXSEG", precision: 0, createTooltipDataSource: subTip(d.label) } as never, false);
+        } else if (d.key === "bias") {
+          // 内置 BIAS：三条线周期/显隐读设置，隐藏的线不参与计算
+          const lines = biasLines();
+          chart.createIndicator({
+            name: "BIAS",
+            calcParams: lines.map((line) => line.period),
+            styles: { lines: lines.map((line) => ({ color: line.color })) },
+            createTooltipDataSource: subTip(d.label),
+          } as never, false);
         } else if (d.key === "trendhistogram") {
           const id = chart.createIndicator({ name: d.kc, createTooltipDataSource: subTip(d.label) } as never, false);
           const indicator = chart.getIndicators({ id: id! })[0];
@@ -3014,7 +3295,7 @@ export function mountKline(el: HTMLElement): KlineChartHandle {
       }
       // 窗格高度交给智能高度统一分配（含 candle_pane）
       applyHeights();
-      requestAnimationFrame(() => { volumeSettings.sync(); mainCostSettings.sync(); });
+      requestAnimationFrame(() => { volumeSettings.sync(); mainCostSettings.sync(); biasSettings.sync(); styleSettings.sync(); accStyleSettings.sync(); syncSubClose(); });
     },
     setPeriod(p: TipPeriod) {
       period = p;
@@ -3085,7 +3366,7 @@ export function mountKline(el: HTMLElement): KlineChartHandle {
     },
     resize() {
       chart.resize();
-      requestAnimationFrame(() => { applyHeights(); volumeSettings.sync(); mainCostSettings.sync(); maSettings.sync(); navDraw(); drawPick(); drawMeasure(); });
+      requestAnimationFrame(() => { applyHeights(); volumeSettings.sync(); mainCostSettings.sync(); maSettings.sync(); biasSettings.sync(); styleSettings.sync(); accStyleSettings.sync(); syncSubClose(); navDraw(); drawPick(); drawMeasure(); });
     },
     destroy() {
       try { chart.unsubscribeAction("onCrosshairChange", onCross as never); } catch { /* 忽略 */ }
@@ -3106,6 +3387,12 @@ export function mountKline(el: HTMLElement): KlineChartHandle {
       volumeSettings.destroy();
       mainCostSettings.destroy();
       maSettings.destroy();
+      biasSettings.destroy();
+      styleSettings.destroy();
+      accStyleSettings.destroy();
+      closeObserver.disconnect();
+      closeBtns.forEach((b) => b.remove());
+      closeBtns.clear();
       tip.remove();
       ylab.remove();
       legend.remove();

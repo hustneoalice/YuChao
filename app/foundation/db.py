@@ -156,6 +156,8 @@ NEW_TABLES_DDL = """
         limit_up_20d  BOOLEAN, limit_up_cnt INTEGER,
         seg           INTEGER, seg_name VARCHAR, pullback BOOLEAN,
         acc_strength  DOUBLE,              -- 主力吸筹强度（个股内 250 日百分位 0-100）
+        dkx_gold_ago  INTEGER,             -- DKX 金叉距今天数（null=近 30 日未金叉）
+        dkx_death_ago INTEGER,             -- DKX 死叉距今天数（null=近 30 日未死叉）
         as_of         VARCHAR
     );
 
@@ -202,6 +204,8 @@ MIGRATIONS = (
     "ALTER TABLE target_trend ADD COLUMN IF NOT EXISTS mine_ago INTEGER",
     "ALTER TABLE target_trend ADD COLUMN IF NOT EXISTS mine_cnt INTEGER",
     "ALTER TABLE target_scan ADD COLUMN IF NOT EXISTS acc_strength DOUBLE",
+    "ALTER TABLE target_scan ADD COLUMN IF NOT EXISTS dkx_gold_ago INTEGER",
+    "ALTER TABLE target_scan ADD COLUMN IF NOT EXISTS dkx_death_ago INTEGER",
 )
 
 _ADJUST_VIEW = {"qfq": "v_daily_ohlcv_qfq", "hfq": "v_daily_ohlcv_hfq", "raw": "daily_ohlcv"}

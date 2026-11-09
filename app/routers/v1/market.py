@@ -722,6 +722,13 @@ def _target_scan(conn, conds: str, values: Optional[str],
         items.sort(key=lambda t: (
             t.get('neg_abs') if t.get('neg_abs') is not None else 1e9,
             -(t.get('neg_run') or 0), -seg_rank(t)))
+    elif "dkxgold" in want or "dkxdeath" in want:
+        # DKX 交叉榜：越新鲜的交叉越靠前（同时启用金/死叉取更近的一次）
+        def dkx_ago(t: dict) -> int:
+            cand = [v for v in (t.get('dkx_gold_ago'), t.get('dkx_death_ago'))
+                    if v is not None]
+            return min(cand) if cand else 100000
+        items.sort(key=lambda t: (dkx_ago(t), -seg_rank(t)))
     else:
         items.sort(key=lambda t: (-seg_rank(t), -(t.get('vol_ratio') or 0)))
     return items, meta, vals, provisional

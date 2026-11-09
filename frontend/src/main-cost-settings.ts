@@ -1,5 +1,6 @@
 import type { Chart } from 'klinecharts';
 import { ic } from './icons';
+import { gearHost } from './chart-gears';
 
 /** 主力成本四条线的显隐设置（顺序：超短期 / 短期 / 中期 / 长期） */
 const KEY = 'yc_maincost_settings';
@@ -18,18 +19,16 @@ export function readMainCostSettings(): boolean[] {
   return defaults();
 }
 
-/** 齿轮随主图窗格定位；弹层只作用于当前图表的 ZY_MAIN_COST。
- *  主图已有图例（right:68px），齿轮右缩到 34px 避免压住图例。 */
+/** 齿轮收在图表右上角（gearHost 统一排布）；弹层只作用于当前图表的 ZY_MAIN_COST。 */
 export function mountMainCostSettings(chart: Chart, el: HTMLElement) {
   const button = document.createElement('button');
   button.type = 'button';
   button.className = 'kl-vset';
-  button.style.right = '34px';
   button.innerHTML = ic('gear', 13);
   button.title = '主力成本参数';
   button.setAttribute('aria-label', button.title);
   button.setAttribute('aria-haspopup', 'dialog');
-  el.appendChild(button);
+  gearHost(el).appendChild(button);
 
   const pop = document.createElement('div');
   pop.className = 'vpop';
@@ -148,12 +147,9 @@ export function mountMainCostSettings(chart: Chart, el: HTMLElement) {
     const pane = indicator ? chart.getDom(indicator.paneId) : null;
     button.style.display = pane ? 'grid' : 'none';
     if (!pane) { close(); applied = false; }
-    if (pane) {
-      button.style.top = `${pane.getBoundingClientRect().top - el.getBoundingClientRect().top + 4}px`;
-      if (!applied) {
-        applied = true;
-        chart.overrideIndicator({ name: 'ZY_MAIN_COST', extendData: readMainCostSettings() });
-      }
+    if (pane && !applied) {
+      applied = true;
+      chart.overrideIndicator({ name: 'ZY_MAIN_COST', extendData: readMainCostSettings() });
     }
     reflow();
   };

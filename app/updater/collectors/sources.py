@@ -597,11 +597,15 @@ _SINA_FF_URL = ("https://vip.stock.finance.sina.com.cn/quotes_service/api/"
                 "json_v2.php/MoneyFlow.ssl_qsfx_lscjfb")
 
 
-def fetch_fund_flow_sina(symbol: str, days: int = 5) -> Optional[List[Dict]]:
+def fetch_fund_flow_sina(symbol: str, days: int = 5,
+                         strict: bool = False) -> Optional[List[Dict]]:
     """新浪逐只资金流 → [{date, main_net, super_net, large_net, mid_net, small_net}]。
 
     字段映射（1.0 定案）：netamount=主力净流入（超大+大单合计），
     r0/r1/r2/r3=超大/大/中/小单。指数无此数据（接口只覆盖个股）。
+
+    strict=True：异常上抛给调用方计失败。默认吞异常返回 None，调用方
+    分不清「限流/断连」和「该标的没有数据」，失败数会永远是 0。
     """
     daima = sina_symbol(symbol)
     if not daima:
@@ -628,6 +632,8 @@ def fetch_fund_flow_sina(symbol: str, days: int = 5) -> Optional[List[Dict]]:
                 continue
         return result or None
     except Exception:
+        if strict:
+            raise
         return None
 
 

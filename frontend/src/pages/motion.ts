@@ -21,6 +21,10 @@ let selectedDate = "";
 const el = (id: string) => document.getElementById(`motion-${id}`)!;
 const dateInput = () => el("date") as HTMLInputElement;
 const pct = (v: number | null) => v == null ? "—" : `${v>0?"+":""}${fmt(v)}%`;
+/* 涨跌幅红涨绿跌（跟随 data-dir 偏好）；占比等比例值保持中性，不套涨跌色 */
+const chgPct = (v: number | null) => v == null ? "—" : `<span class="${v>0?"up":v<0?"down":""}">${v>0?"+":""}${fmt(v)}%</span>`;
+/* 主力净额与涨跌同色：净流入为红、净流出为绿 */
+const netCell = (v: number | null) => v == null ? "—" : `<span class="${v>0?"up":v<0?"down":""}">${fmtYiS(v)}</span>`;
 const paint = () => table.render(table.sort(rows));
 
 export async function loadMotion(): Promise<void> {
@@ -62,11 +66,11 @@ function initMotion(): void {
     {label:"力度排名",num:true,sort:"rank",render:r=>String(r.rank)},
     {label:"股票",render:r=>`<b>${esc(r.name)}</b><br><span class="muted">${esc(r.symbol)}</span>`},
     {label:"近似力度",num:true,sort:"score_raw",render:r=>`<b>${r.score}</b>`},
-    {label:"主力净额",num:true,sort:"net",render:r=>fmtYiS(r.net)},
+    {label:"主力净额",num:true,sort:"net",render:r=>netCell(r.net)},
     {label:"当日占比",num:true,sort:"ratio",render:r=>pct(r.ratio)},
     {label:"相对20日放量",num:true,sort:"volume_rel20",title:"当日成交量 / 此前20个交易日平均成交量（不含当日）",render:r=>`${fmt(r.volume_rel20)}倍`},
     {label:"收盘价",num:true,sort:"close",render:r=>fmt(r.close)},
-    {label:"当日涨幅",num:true,sort:"change_rate",render:r=>pct(r.change_rate)},
+    {label:"当日涨幅",num:true,sort:"change_rate",render:r=>chgPct(r.change_rate)},
     {label:"评分依据",render:r=>`<details><summary>查看贡献</summary><div>基准 ${fmt(r.contributions.intercept)}<br>资金项 ${fmt(r.contributions.log_net)}<br>占比项 ${fmt(r.contributions.ratio)}<br>放量项 ${fmt(r.contributions.volume_rel20)}</div></details>`},
     {label:"操作",render:()=>'<button class="hbtn">日K</button>'},
   ],{defaultSort:{label:"近似力度",dir:-1},onChange:paint,rowKey:r=>r.symbol,
