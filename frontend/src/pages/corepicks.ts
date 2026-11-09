@@ -68,7 +68,7 @@ export function initCorepicks(): void {
     { label:"主力占比", num:true, render:r => pct(r.main.ratio) },
     { label:"入选依据", render:r => r.sources.map(s => `${esc(s.category)}·${esc(s.name)}（板块涨幅第${s.change_rank}）`).join(" / ") },
     { label:"操作", render:() => '<button class="hbtn" data-k>日K</button> <button class="hbtn" data-watch>自选</button>' },
-  ], {rowKey:r => `${r.sources[0]?.code}:${r.symbol}`, onRow:(r,e) => {
+  ], {tblKey:"corepicks-main",rowKey:r => `${r.sources[0]?.code}:${r.symbol}`, onRow:(r,e) => {
     if ((e.target as HTMLElement).closest('[data-watch]')) { openWatchPanel(r.symbol,r.name); return; }
     document.dispatchEvent(new CustomEvent('yc:open-stock',{detail:{symbol:r.symbol,name:r.name,from:{page:'corepicks',label:'核心标'}}}));
   }});
@@ -76,7 +76,7 @@ export function initCorepicks(): void {
     {label:"涨幅排名",render:r => String(r.change_rank)}, {label:"板块",render:r => esc(r.name)},
     {label:"涨幅",num:true,render:r => pct(r.change_rate)}, {label:"主力净额",num:true,render:r => money(r.main.net)},
     {label:"筛选结果",render:r => esc(r.reason)},
-  ],{rowKey:r => r.key});
+  ],{tblKey:"corepicks-cands",rowKey:r => r.key});
   el("kinds").addEventListener('click',e => { const b=(e.target as HTMLElement).closest<HTMLElement>('[data-kind]'); if(!b) return; kind=b.dataset.kind!; el("kinds").querySelectorAll('button').forEach(x=>x.classList.toggle('on',x===b)); renderCandidates(); });
   history().addEventListener('change',() => { dateInput().value=history().value; void renderCorepicks(); });
   dateInput().addEventListener('change',() => void renderCorepicks());

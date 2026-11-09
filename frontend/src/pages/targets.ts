@@ -14,9 +14,8 @@ import { chartDown, chartUp, trendPalette } from "./kline";
 const FALLBACK_CONDS: TargetCond[] = [
   { key: "trend", label: "趋势柱线", kind: "trend", default_on: false,
     title: "趋势柱线由负转正或持续在零轴上方，可独立筛选或与其他条件同时满足" },
-  { key: "vol", label: "均量", kind: "value", op: ">=", default: 1.0,
-    min: 0.0, max: 10.0, step: 0.1, unit: "x", default_on: true,
-    title: "当日成交量 / 均量 不小于阈值" },
+  { key: "vol", label: "均量", kind: "flag", default_on: true,
+    title: "当日成交量 ≥ 40 日均量（固定口径，不设倍数）" },
   { key: "short", label: "短线趋势橙", kind: "flag", default_on: true,
     title: "收盘站上短线趋势线（K 线通道填橙同判定）" },
   { key: "mid", label: "中线趋势橙", kind: "flag", default_on: true,
@@ -465,6 +464,7 @@ function drawPage(): void {
     !["趋势柱线", "最近转正", "距今交易日", "连续上方", "负柱收敛", "距零轴"].includes(column.label)))
     .filter(column => column.label !== "近况" || sparkOn);
   if (!tbl) tbl = createDataTable(document.getElementById("tgt-wrap")!, columns, {
+    tblKey: "targets",
     rowKey: (t) => t.symbol,
     onRow: (t) => document.dispatchEvent(new CustomEvent("yc:open-stock", {
       detail: { symbol: t.symbol, name: t.name || t.symbol,

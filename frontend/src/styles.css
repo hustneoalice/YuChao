@@ -896,6 +896,37 @@ body.mobile .vpop{width:min(246px,calc(100vw - 16px))}
   border-color:color-mix(in srgb,var(--accent) 45%,transparent);background:var(--accent-soft)}
 body.mobile .vpop.spop{width:min(300px,calc(100vw - 16px))}
 
+/* ── 通用表格列设置：表头最右齿轮 + 列设置浮层（隐藏/顺序持久化，面板内拖拽换序）── */
+/* 齿轮列双向 sticky：纵向钉在表头、横向钉在右缘 —— 宽表（全景 22 列等）横向滚动时
+   齿轮始终可见，不会被滚出视野（曾用户反馈「全景列表没有设置按钮」实为齿轮被滚动藏住）。 */
+th.cgear{width:34px;min-width:34px;text-align:right;vertical-align:middle;
+  position:sticky;top:0;right:0;z-index:3;background:var(--panel-2)}
+th.cgear .cg-btn{display:grid;place-items:center;width:22px;height:22px;min-height:22px;padding:0;
+  border-radius:6px;color:var(--faint);line-height:1;border:1px solid transparent;
+  transition:color .12s,background .12s,border-color .12s}
+th.cgear .cg-btn:hover{color:var(--text);background:var(--panel-3);border-color:var(--border)}
+th.cgear .cg-btn.on{color:var(--accent);background:var(--accent-soft);
+  border-color:color-mix(in srgb,var(--accent) 40%,transparent)}
+th.cgear .cg-btn svg{width:13px;height:13px}
+.vpop.colgear-pop{width:272px}
+.colgear-pop .cg-list{list-style:none;margin:0;padding:2px 0}
+.colgear-pop li{display:flex;align-items:center;gap:8px;height:34px;padding:0 6px 0 8px;
+  border-radius:8px;border-top:1px solid var(--border-soft)}
+.colgear-pop li:first-child{border-top:0}
+.colgear-pop li.drag{opacity:.45;background:var(--panel-2)}
+.colgear-pop li:hover{background:var(--panel-2)}
+.colgear-pop .cg-hand{flex:none;width:14px;display:grid;place-items:center;color:var(--faint);
+  cursor:grab;user-select:none}
+.colgear-pop .cg-hand svg{width:12px;height:12px}
+.colgear-pop li.drag .cg-hand{cursor:grabbing}
+.colgear-pop input[type=checkbox]{flex:none;width:15px;height:15px;margin:0;accent-color:var(--accent);
+  cursor:pointer}
+.colgear-pop .cg-lb{flex:1;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;
+  font-size:12px;color:var(--text)}
+.colgear-pop .cg-clear{font-size:11px;color:var(--faint);padding:0;min-height:24px}
+.colgear-pop .cg-clear:hover{color:var(--accent)}
+body.mobile .vpop.colgear-pop{width:min(272px,calc(100vw - 16px))}
+
 /* ── 指标管理面板（预设 / 主图 / 副图 分组显影）──
    fixed + JS 动态定位：打开时精确贴在「指标」按钮正下方（右对齐），
    不依赖宿主容器有无 position（曾因 .panel 无定位飞到页面右上角） */

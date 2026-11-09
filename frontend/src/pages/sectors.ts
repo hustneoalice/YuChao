@@ -214,7 +214,7 @@ function renderRank(): void {
   if (!rankPager) rankPager = createPager(el("sec-rank-pager"), "sec_rank", () => renderRank());
   if (!rankTbl) {
     rankTbl = createDataTable<ZyBlockRow>(wrap, RANK_COLS, {
-      defaultSort: { label: "均涨%", dir: -1 },
+      tblKey: "sectors-rank", defaultSort: { label: "均涨%", dir: -1 },
       onChange: () => { rankPager!.reset(); renderRank(); },
       onRow: (r) => setSelected(r),
       rowKey: (r) => r.block_code,
@@ -336,7 +336,7 @@ async function loadMembers(): Promise<void> {
   if (!memPager) memPager = createPager(el("mem-pager"), "sec_members", () => void loadMembers());
   if (!memTbl) {
     memTbl = createDataTable<BoardRow>(wrap, MEM_COLS, {
-      defaultSort: { label: "涨跌幅", dir: -1 },
+      tblKey: "sectors-mem", defaultSort: { label: "涨跌幅", dir: -1 },
       onChange: () => { memPager!.reset(); void loadMembers(); },
       onRow: (r) => document.dispatchEvent(new CustomEvent("yc:open-stock", {
         detail: { symbol: r.symbol, name: r.name || r.symbol, from: { page: "sectors", label: "板块" } },

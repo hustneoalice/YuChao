@@ -2050,7 +2050,7 @@ export interface KlineChartHandle {
   /** 智能画线：黄金分割 / 支撑压力 / 浪型结构（主图叠加，独立开关） */
   setLines: (fib: boolean, sr: boolean, wave: boolean, box: boolean, pat: boolean) => void;
   /** 当前周期（d/w/m/q）：决定十字光标卡片的标题形态 */
-  setPeriod: (p: "t" | "60" | "d" | "w" | "m" | "q") => void;
+  setPeriod: (p: "t" | "60" | "120" | "d" | "w" | "m" | "q") => void;
   /** 智能高度：按容器高重分主/副图（3.6:1，策影同款；开关关时副图固定 100px） */
   applyHeights: () => void;
   /** 缩放：factor>1 放大（K 线变宽），等价策影工具条 ±（barSpace ×1.25 / ×0.8） */
@@ -2221,7 +2221,7 @@ function periodStyles(p: TipPeriod): ReturnType<typeof styles> {
 }
 
 /* ── 十字光标浮动信息卡（周期区分标题） ── */
-type TipPeriod = "t" | "60" | "d" | "w" | "m" | "q";
+type TipPeriod = "t" | "60" | "120" | "d" | "w" | "m" | "q";
 
 /** 量/额：万以下原值，万 → 亿（策影 formatVolumeValue 口径 + 手单位） */
 function fmtWanYi(v: number, unit = ""): string {
@@ -2234,6 +2234,7 @@ function fmtWanYi(v: number, unit = ""): string {
 function tipTitle(date: string, p: TipPeriod): string {
   if (p === "t") return `${date} · 分时`;
   if (p === "60") return `${date} · 60分钟`;
+  if (p === "120") return `${date} · 120分钟`;
   if (p === "m") return `${date.slice(0, 7)} · 月线`;
   if (p === "w") return `${date} 当周 · 周线`;
   if (p === "q") {

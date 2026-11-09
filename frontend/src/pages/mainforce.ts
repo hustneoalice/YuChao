@@ -117,7 +117,7 @@ function createTable(): void {
     ? view === "blocks" ? "成分均涨%" : "涨幅%" : previous?.label;
   tableView = view;
   table = createDataTable(el("wrap"), columns(), {
-    defaultSort: { label: label || "主力净额", dir: previous?.dir ?? -1 }, onChange: reset, rowKey: (r) => r.key,
+    tblKey: `mf-${view}`, defaultSort: { label: label || "主力净额", dir: previous?.dir ?? -1 }, onChange: reset, rowKey: (r) => r.key,
     onRow: (r, event) => {
       const target = event.target as HTMLElement;
       if (target.closest("[data-top]") && r.top_stock_symbol) { openStock(r.top_stock_symbol, r.top_stock_name || r.top_stock_symbol); return; }

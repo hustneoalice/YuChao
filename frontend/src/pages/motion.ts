@@ -73,7 +73,7 @@ function initMotion(): void {
     {label:"当日涨幅",num:true,sort:"change_rate",render:r=>chgPct(r.change_rate)},
     {label:"评分依据",render:r=>`<details><summary>查看贡献</summary><div>基准 ${fmt(r.contributions.intercept)}<br>资金项 ${fmt(r.contributions.log_net)}<br>占比项 ${fmt(r.contributions.ratio)}<br>放量项 ${fmt(r.contributions.volume_rel20)}</div></details>`},
     {label:"操作",render:()=>'<button class="hbtn">日K</button>'},
-  ],{defaultSort:{label:"近似力度",dir:-1},onChange:paint,rowKey:r=>r.symbol,
+  ],{tblKey:"motion",defaultSort:{label:"近似力度",dir:-1},onChange:paint,rowKey:r=>r.symbol,
     empty:"该日暂无可评分股票；请检查同日资金、成交额及此前20日成交量。",
     onRow:(r,event)=>{
       if((event.target as HTMLElement).closest('details')) return;

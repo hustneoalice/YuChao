@@ -41,7 +41,7 @@ const WL_COLS: DataTableCol<WatchItem>[] = [
     render: (w) => noteChipHtml(w.symbol) },
   { label: "分组", sort: (w) => w.groups.join("、"),
     render: (w) => `<span style="font-size:11.5px;color:var(--dim)">${esc(w.groups.join("、"))}</span>` },
-  { label: "", width: 52, render: (w) =>
+  { label: "", key: "移除", width: 52, render: (w) =>
       `<button class="icbtn" data-del="${w.symbol}" title="移除" style="width:26px;height:26px">${ic("trash", 13)}</button>` },
 ];
 
@@ -118,6 +118,7 @@ function renderRows(reset = false): void {
   document.getElementById("wl-count")!.textContent = `共 ${rows.length} 只`;
   if (!wlPager) wlPager = createPager(document.getElementById("wl-pager")!, "watchlist", renderRows);
   if (!wlTbl) wlTbl = createDataTable(document.getElementById("wl-wrap")!, WL_COLS, {
+    tblKey: "watchlist",
     rowKey: (w) => w.symbol,
     onRow: (w, ev) => {
       const note = (ev.target as HTMLElement).closest("[data-note]") as HTMLElement | null;

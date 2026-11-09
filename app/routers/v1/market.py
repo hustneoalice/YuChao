@@ -22,7 +22,9 @@ from pydantic import TypeAdapter
 router = APIRouter(tags=["market"])
 
 _TX_REFERER = "https://gu.qq.com/"
-_MINUTE_FREQS = {"60": ("m60", 320)}          # 对标策影周期集：分时 + 60 分先行
+_MINUTE_FREQS = {"60": ("m60", 320), "120": ("m60", 800)}
+# 120 分钟由 60 分钟合成（腾讯 mkline 无 m120；800 根 m60 → 400 根 120 分钟 ≈ 5 个月，
+# 远超东财 klt=120 直拉仅有的 64 根窗口）。合成规则见 _combine_minutes。
 _m_cache: dict = {}                           # key -> (ts, payload) 简单 TTL 缓存
 
 
@@ -327,7 +329,27 @@ def _merge_live_bar(bars: list, symbol: str, adjust: Adjust) -> list:
     return bars
 
 
-@router.get("/market/kline", response_model=Kline, summary="K 线（复权在查询层派生；freq=60 为 60 分钟K）")
+def _combine_minutes(bars: list, every: int) -> list:
+    """把 every 根 60 分钟合成 1 根高周期分钟线（120 = 2 根）。
+
+    open=首根 open，close=末根 close，high/low 取并集，volume 求和；
+    时间取末根 —— A股 60 分钟线天然成对（10:30+11:30 / 14:00+15:00），
+    合成后标签自然落在 11:30 与 15:00，与东财 klt=120 的时间刻度一致。
+    尾部不足 every 根的未完成段丢弃（最新交易时段尚未收完）。
+    """
+    out = []
+    for i in range(0, len(bars) - every + 1, every):
+        seg = bars[i:i + every]
+        a, b = seg[0], seg[-1]
+        out.append({
+            "date": b["date"], "open": a["open"], "close": b["close"],
+            "high": max(x["high"] for x in seg), "low": min(x["low"] for x in seg),
+            "volume": sum(x.get("volume") or 0 for x in seg), "live": False,
+        })
+    return out
+
+
+@router.get("/market/kline", response_model=Kline, summary="K 线（复权在查询层派生；freq=60/120 为分钟K，不落库）")
 def kline(
     symbol: str = Query(description="6 位代码，兼容 sh.600519 / 600519.SH 形态"),
     adjust: Adjust = Query(default=Adjust.qfq, description="qfq 看盘 / hfq 收益 / raw 原始价"),
@@ -363,6 +385,9 @@ def kline(
                 bars.append({"date": dt, "open": float(r[1]), "close": float(r[2]),
                              "high": float(r[3]), "low": float(r[4]),
                              "volume": float(r[5]), "live": False})
+            # 120 分钟：2 根 60 分钟合成 1 根（数据源只有 m60，合成口径见 _combine_minutes）
+            if freq == "120":
+                bars = _combine_minutes(bars, 2)
             return bars
 
         bars = _cached(f"k{freq}|{symbol}", 120, fetch)

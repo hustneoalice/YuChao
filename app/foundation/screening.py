@@ -14,7 +14,7 @@
 条件类型：
   flag   布尔型：字段为真即命中（短线趋势橙 / 20日涨停）
   value  数值型：字段 ≥（或 ≤）阈值，阈值由前端传、缺省用 default
-         （40日均量倍数；后续主力吸筹强度走同一套）
+         （后续主力吸筹强度走同一套）
   trend  复合型：趋势柱线需要模式 / 窗口等参数，由端点额外参数驱动
 """
 from __future__ import annotations
@@ -26,9 +26,8 @@ CONDITIONS: tuple[dict[str, Any], ...] = (
     {"key": "trend", "label": "趋势柱线", "kind": "trend", "field": None,
      "default_on": False,
      "title": "STICKV 负转正或持续在零轴上方，可独立筛选或与其他条件同时满足"},
-    {"key": "vol", "label": "均量", "kind": "value", "field": "vol_ratio",
-     "op": ">=", "default": 1.0, "min": 0.0, "max": 10.0, "step": 0.1, "unit": "x",
-     "default_on": True, "title": "当日成交量 / 均量 不小于阈值"},
+    {"key": "vol", "label": "均量", "kind": "flag", "field": "vol_hit",
+     "default_on": True, "title": "当日成交量 ≥ 40 日均量（固定口径，不设倍数）"},
     {"key": "short", "label": "短线趋势橙", "kind": "flag", "field": "short_orange",
      "default_on": True, "title": "收盘站上短线趋势线（K 线通道填橙同判定）"},
     {"key": "mid", "label": "中线趋势橙", "kind": "flag", "field": "mid_orange",

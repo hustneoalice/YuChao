@@ -266,7 +266,7 @@ function ensureTable(): void {
   tblKind = want;
   if (want === "index") {
     tbl = createDataTable<IndexBarItem>(wrap, INDEX_COLS, {
-      defaultSort: { label: "涨跌幅", dir: -1 },
+      tblKey: "pan-index", defaultSort: { label: "涨跌幅", dir: -1 },
       onChange: () => {
         const t = tbl as unknown as DataTable<IndexBarItem>;
         t.render(t.sort(indexItems), 0);
@@ -279,7 +279,7 @@ function ensureTable(): void {
     });
   } else if (want === "blocks") {
     tbl = createDataTable<ZyBlockRow>(wrap, BLOCK_COLS, {
-      defaultSort: { label: "均涨%", dir: -1 },
+      tblKey: "pan-blocks", defaultSort: { label: "均涨%", dir: -1 },
       onChange: () => { blkPager!.reset(); void loadBlocks(); },
       onRow: (r, ev, tr) => {
         if ((ev.target as HTMLElement).closest("[data-children]")) {
@@ -293,7 +293,7 @@ function ensureTable(): void {
     ensureMemberTable();
   } else {
     tbl = createDataTable<BoardRow>(wrap, BOARD_COLS, {
-      defaultSort: { label: "涨跌幅", dir: -1 },
+      tblKey: "pan-board", defaultSort: { label: "涨跌幅", dir: -1 },
       onChange: () => { pager!.reset(); void load(); },
       onRow: (r, _ev, tr) => { selIdx = rowIndexOf(tr); paintSelection(); void setLink(r.symbol, r.name || r.symbol, r); },
       rowKey: (r) => r.symbol,
@@ -307,7 +307,7 @@ function ensureMemberTable(): void {
   memPager = createPager(document.getElementById("pan-mem-pager")!, "panorama_mem",
                          () => void loadMembers());
   memTbl = createDataTable<BoardRow>(document.getElementById("pan-mem")!, BOARD_COLS, {
-    defaultSort: { label: "涨跌幅", dir: -1 },
+    tblKey: "pan-mem", defaultSort: { label: "涨跌幅", dir: -1 },
     onChange: () => { memPager!.reset(); void loadMembers(); },
     onRow: (r) => void setLink(r.symbol, r.name || r.symbol, r),
     rowKey: (r) => r.symbol,

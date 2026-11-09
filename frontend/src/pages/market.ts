@@ -23,9 +23,9 @@ export const SEG6 = ["超跌", "反弹", "突破", "超涨", "回踩", "跌破"]
 export interface CurStock { symbol: string; name: string; trendFocus?: { date?: string } }
 /** 多周期布局：single 单屏 / h 左右双列 / v 上下两层 / quad 四格（策影同款） */
 export type KLayout = "single" | "h" | "v" | "quad";
-type PKey = "t" | "60" | "d" | "w" | "m" | "q";
+type PKey = "t" | "60" | "120" | "d" | "w" | "m" | "q";
 
-const P_LABEL: Record<PKey, string> = { t: "分时", "60": "60分", d: "日", w: "周", m: "月", q: "季" };
+const P_LABEL: Record<PKey, string> = { t: "分时", "60": "60分", "120": "120分", d: "日", w: "周", m: "月", q: "季" };
 /** 各布局的面板周期槽位（默认：左右/上下=日+周，四格=日周月季） */
 const LAYOUT_PANELS: Record<KLayout, PKey[]> = {
   single: ["d"], h: ["d", "w"], v: ["d", "w"], quad: ["d", "w", "m", "q"],
@@ -51,6 +51,7 @@ export const mk = {
   linePat: localStorage.getItem("yc_kpat") === "1",   // 反转形态（W底/M头/头肩，主图叠加）
   minuteData: null as { date: string; prevClose: number | null; bars: Bar[] } | null,
   m60: null as Bar[] | null, // 60 分钟K（腾讯实时拉取，不落库）
+  m120: null as Bar[] | null, // 120 分钟K（后端由 60 分钟合成，不落库）
   from: null as { page: string; label: string } | null,
   /* 框选区间（K 线拖拽 → 右列资金卡同步）：null = 未框选，卡片走当日口径 */
   range: null as (RangeStats & { fund: RangeFund | null; loading: boolean; note: string | null }) | null,
@@ -274,6 +275,7 @@ export async function openStock(s: CurStock, from?: { page: string; label: strin
     mk.minuteData = null;
     minuteAt = 0;
     mk.m60 = null;
+    mk.m120 = null;
     barsReady = true;
     renderKline();
     renderRight();
@@ -298,9 +300,10 @@ export async function openStock(s: CurStock, from?: { page: string; label: strin
     if (mk.cur?.symbol !== s.symbol) return;                   // 用户已切到别的标的，丢弃过期回包
     mk.bars = k.bars;
     barsSym = s.symbol;
-    mk.minuteData = null;                      // 换标的：分时/60分缓存作废，切到时重拉
+    mk.minuteData = null;                      // 换标的：分时/60分/120分缓存作废，切到时重拉
     minuteAt = 0;
     mk.m60 = null;
+    mk.m120 = null;
     barsReady = true;
     renderKline();
     renderRight();
@@ -352,8 +355,8 @@ async function pollTick(): Promise<void> {
     // 今日尚无真实成交（盘前腾讯 qdate 已切到今天，但 open 仍为 0）：
     // 只刷新右列，绝不动 K 线 —— 否则会补出 open/high/low=0 的假今日 bar
     if (!q.rt_live) return;
-    // 分时/60分面板：今日浮根只属于日线序列，分钟周期不合并（右列刷新即可）
-    if (mk.panels[mk.active] === "t" || mk.panels[mk.active] === "60") return;
+    // 分时/60分/120分面板：今日浮根只属于日线序列，分钟周期不合并（右列刷新即可）
+    if (mk.panels[mk.active] === "t" || mk.panels[mk.active] === "60" || mk.panels[mk.active] === "120") return;
     // 行情归属日优先用 rt_date（腾讯 p[30]）：盘前/周末仍是上一交易日，
     // 用 rt_time（本次抓取时刻）会把昨收当成今天，补出一根假今日 K 线
     const rtDate = (q.rt_date || q.rt_time || q.date || "").slice(0, 10);
@@ -1330,10 +1333,11 @@ export function aggDaily(daily: Bar[], k: AggBucket): Bar[] {
 export function barsFor(p: PKey): Bar[] {
   if (p === "t") return mk.minuteData?.bars ?? [];
   if (p === "60") return mk.m60 ?? [];
+  if (p === "120") return mk.m120 ?? [];
   return p === "d" ? mk.bars : aggDaily(mk.bars, p);
 }
 
-/** 分时/60分数据按需拉取（后端 TTL 缓存 30s/120s，重复切回不打接口） */
+/** 分时/60分/120分数据按需拉取（后端 TTL 缓存 30s/120s，重复切回不打接口） */
 export async function ensurePeriodData(p: PKey): Promise<void> {
   const s = mk.cur;
   if (!s) return;
@@ -1348,6 +1352,10 @@ export async function ensurePeriodData(p: PKey): Promise<void> {
       const k = await marketApi.kline({ symbol: s.symbol, freq: "60" });
       if (mk.cur?.symbol !== s.symbol) return;
       mk.m60 = k.bars;
+    } else if (p === "120" && !mk.m120) {
+      const k = await marketApi.kline({ symbol: s.symbol, freq: "120" });
+      if (mk.cur?.symbol !== s.symbol) return;
+      mk.m120 = k.bars;
     }
   } catch (e) {
     toast((e as Error).message || "分钟数据加载失败");
@@ -1634,9 +1642,9 @@ export function renderKline(): void {
   if (pickCb?.checked) setKlPickMode(true);
   if (document.getElementById("kl-measure")?.classList.contains("on")) setKlMeasureMode(true);
   renderKlpBar();
-  // 分时/60分面板：换标的后缓存已清，按需补拉（策略图面：先空后满）
+  // 分时/60分/120分面板：换标的后缓存已清，按需补拉（策略图面：先空后满）
   const need = mk.panels.find((p) =>
-    (p === "t" && (!mk.minuteData || !mk.minuteData.bars.length)) || (p === "60" && !mk.m60));
+    (p === "t" && (!mk.minuteData || !mk.minuteData.bars.length)) || (p === "60" && !mk.m60) || (p === "120" && !mk.m120));
   if (need) void ensurePeriodData(need).then(() => {
     mk.panels.forEach((p, i) => { if (p === need) applyPanel(i); });
   });

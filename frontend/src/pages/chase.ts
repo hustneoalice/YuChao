@@ -56,19 +56,19 @@ function ensureTable(mode:string):void {
   if(mode===tableMode)return;
   tableMode=mode;
   if(mode==='blocks')blockTable=createDataTable(el('wrap'),[
-    {label:"板块",render:r=>`<b>${esc(r.name)}</b><br><span class="muted">${esc(r.category)}</span>`},
-    {label:"成分均涨",num:true,sort:"change_rate",render:r=>pct(r.change_rate)},
-    {label:`${select('period').value}日成分均涨`,num:true,sort:"period_change",render:r=>pct(r.period_change)},
+    {label:"板块",key:"block",render:r=>`<b>${esc(r.name)}</b><br><span class="muted">${esc(r.category)}</span>`},
+    {label:"成分均涨",key:"change_rate",num:true,sort:"change_rate",render:r=>pct(r.change_rate)},
+    {label:`${select('period').value}日成分均涨`,key:"period_change",num:true,sort:"period_change",render:r=>pct(r.period_change)},
     {label:"涨停 / 成分",num:true,sort:"up_count",render:r=>`<button class="hbtn" data-members>${r.unknown_limits?"≥":""}${r.up_count} / ${r.members}</button>`},
     {label:"涨停占比",num:true,sort:"up_ratio",render:r=>`${r.unknown_limits?"≥":""}${rate(r.up_ratio)}`},
     {label:"一字家数",num:true,sort:"one_count",render:r=>String(r.one_count)},
     {label:"已确认连板",num:true,sort:"consecutive_count",title:"至少连续两个交易日快照封板",render:r=>String(r.consecutive_count)},
     {label:"区间数据覆盖",num:true,render:r=>`${r.period_coverage}/${r.members}`},
     {label:"涨停价未知",num:true,render:r=>String(r.unknown_limits)},
-  ],{defaultSort:{label:"成分均涨",dir:-1},onChange:()=>{pager.reset();paint();},rowKey:r=>r.code,
+  ],{tblKey:"chase-blocks",defaultSort:{label:"成分均涨",dir:-1},onChange:()=>{pager.reset();paint();},rowKey:r=>r.code,
       empty:"没有含已确认涨停股的板块。",onRow:r=>{drill=r;pager.reset();paint();}});
   else stockTable=createDataTable(el('wrap'),stockColumns(),{
-    defaultSort:{label:view==='ladder'?"连板高度":"主力净额",dir:-1},rowKey:r=>r.symbol,
+    tblKey:"chase-stocks",defaultSort:{label:view==='ladder'?"连板高度":"主力净额",dir:-1},rowKey:r=>r.symbol,
     empty:"当前条件下暂无股票；缺少快照或精确涨停价的股票不作已确认信号。",
     onChange:()=>{pager.reset();paint();},onRow:r=>document.dispatchEvent(new CustomEvent('yc:open-stock',{
       detail:{symbol:r.symbol,name:r.name,from:{page:'chase',label:'涨停追击'}}})),

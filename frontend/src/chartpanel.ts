@@ -6,7 +6,7 @@ import { esc, fmt } from "./fmt";
 import { ic } from "./icons";
 import { IND_BY_KEY, mountKline, type KlineChartHandle, type MainKey, type SubKey } from "./pages/kline";
 
-export type ChartPeriod = "t" | "60" | "d" | "w" | "m" | "q";
+export type ChartPeriod = "t" | "60" | "120" | "d" | "w" | "m" | "q";
 
 /** 头部信息（行情页全量 / 全景紧凑只用 name/code/price/pct） */
 export interface ChartInfo {
