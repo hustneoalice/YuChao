@@ -434,6 +434,27 @@ th.n{color:var(--dim)}
 .segmap-load{display:grid;place-items:center;min-height:250px;font-size:12px;color:var(--faint)}
 .segmap-load.retry{color:var(--warn)}
 .segmap-note{padding:6px 12px 8px;font-size:10.5px;color:var(--faint);text-align:right}
+/* 六分段「示意图」小按钮 + 弹层：目标页六分段列、行情页趋势卡片、K线六段副图共用 */
+.seg-info{display:inline-grid;place-items:center;width:18px;height:18px;min-height:18px;padding:0;
+  margin-left:4px;border-radius:5px;vertical-align:middle;color:var(--faint);
+  border:1px solid transparent;transition:color .12s,background .12s,border-color .12s}
+.seg-info:hover{color:var(--accent);background:var(--accent-soft);
+  border-color:color-mix(in srgb,var(--accent) 40%,transparent)}
+.seg-info svg{width:12px;height:12px}
+.seg-pop{position:fixed;z-index:80;display:none;width:min(760px,calc(100vw - 24px));
+  padding:10px 12px 2px;border-radius:12px;border:1px solid var(--border);
+  background:var(--panel);box-shadow:0 20px 50px -20px rgba(0,0,0,.7)}
+.seg-pop-h{display:flex;align-items:center;gap:8px;padding-bottom:6px}
+.seg-pop-h b{font-size:12.5px;font-weight:600}
+.seg-pop-tip{font-size:11px;color:var(--faint)}
+.seg-pop-x{margin-left:auto;display:grid;place-items:center;width:20px;height:20px;min-height:20px;
+  border-radius:6px;color:var(--dim);font-size:11px}
+.seg-pop-x:hover{background:var(--panel-3);color:var(--text)}
+.seg-pop-body svg{display:block;width:100%;height:auto}
+.seg-pop-body .segmap-load{min-height:180px}
+/* K线六段副图标题旁的示意图入口：绝对定位，与 MACD 放大镜同款位置 */
+.kl-seginfo{position:absolute;z-index:9;margin:0;
+  background:color-mix(in srgb,var(--panel) 62%,transparent)}
 /* 趋势柱线条件设置行：原生 select / number / checkbox 统一走主题色底，暗色下不再白底浅字看不清 */
 .tgt-trend-set{display:flex;align-items:center;gap:10px;flex-wrap:wrap;padding:10px 0;width:100%}
 .tgt-trend-set label{display:inline-flex;align-items:center;gap:6px;font-size:12px;color:var(--text)}
@@ -528,6 +549,11 @@ td .lnk:hover{text-decoration:underline}
 .backbtn:hover{color:var(--text);border-color:var(--accent);background:var(--panel-3)}
 .backbtn[hidden]{display:none}
 .cmpl{font-size:10.5px;color:var(--faint);line-height:1.55;padding:2px 2px 0}
+/* 站点信息（名称 + 备案）：落在右侧卡片区底部 */
+.sitefoot{margin-top:2px;padding:6px 2px 8px;border-top:1px solid var(--border-soft);
+  font-size:10.5px;line-height:1.6;color:var(--faint);flex:none}
+.sitefoot a{color:var(--dim);text-decoration:none;transition:color .14s}
+.sitefoot a:hover{color:var(--accent)}
 /* 卡头控制钮（模式/折叠/拖拽）：默认淡出，悬停卡片浮现 —— 降低视觉噪音（触屏常显） */
 .cbar{display:flex;align-items:center;gap:2px;opacity:0;transition:opacity .14s}
 .rcard:hover .cbar,.rcard:focus-within .cbar{opacity:1}
@@ -817,6 +843,26 @@ body.mobile .rcard .cbar{opacity:1}
   transition:color .12s,background .12s,border-color .12s}
 .kl-vclose:hover{color:var(--text);background:var(--panel-3);border-color:var(--border)}
 .kl-vclose svg{width:11px;height:11px}
+/* MACD 放大镜：入口按钮贴在副图标题 “MACD” 右侧，取景小窗跟随鼠标移动 */
+.kl-maglens{position:absolute;z-index:9;display:grid;place-items:center;
+  width:20px;height:20px;min-height:20px;padding:0;border-radius:6px;line-height:1;
+  color:var(--faint);border:1px solid transparent;
+  background:color-mix(in srgb,var(--panel) 62%,transparent);
+  transition:color .12s,background .12s,border-color .12s}
+.kl-maglens:hover{color:var(--text);background:var(--panel-3);border-color:var(--border)}
+.kl-maglens svg{width:11px;height:11px}
+.kl-maglens.on{color:var(--accent-ink);border-color:color-mix(in srgb,var(--accent) 60%,transparent);
+  background:var(--accent)}
+.kl-lens{position:absolute;z-index:30;width:232px;pointer-events:none;
+  border-radius:10px;overflow:hidden;border:1px solid var(--border);
+  background:var(--panel);box-shadow:0 14px 36px -12px rgba(0,0,0,.65)}
+.kl-lens canvas{display:block;width:232px;height:146px}
+.kl-lens-read{position:absolute;left:0;right:0;bottom:0;display:flex;align-items:baseline;gap:8px;
+  padding:3px 8px;font-family:var(--mono);font-size:10.5px;color:var(--dim);white-space:nowrap;
+  background:color-mix(in srgb,var(--panel) 90%,transparent);border-top:1px solid var(--border-soft)}
+.kl-lens-read b{color:var(--text);font-weight:600}
+.kl-lens-src{position:absolute;z-index:8;pointer-events:none;border:1px dashed var(--accent);
+  border-radius:2px;background:color-mix(in srgb,var(--accent) 6%,transparent)}
 
 .vpop{position:fixed;z-index:250;width:246px;
   display:flex;flex-direction:column;max-height:calc(100vh - 16px);
@@ -1211,6 +1257,34 @@ body.mobile .vpop.colgear-pop{width:min(272px,calc(100vw - 16px))}
 .kl-tip .grp b{font-weight:500;color:var(--text);font-size:11px}
 .kl-tip .grp b.up{color:var(--up)} .kl-tip .grp b.down{color:var(--down)}
 
+/* ── 涨跌统计卡：10% 有效波段统计 + 首 / 上 / 下 / 尾段联动主图 ── */
+.udw{display:flex;flex-direction:column;gap:9px;padding:2px 0 1px}
+.ud-grid{display:grid;grid-template-columns:repeat(3,1fr);gap:8px}
+.ud-grid>div{min-width:0;display:flex;flex-direction:column;gap:2px}
+.ud-grid span{font-size:10.5px;color:var(--faint);white-space:nowrap}
+.ud-grid b{font-size:15px;font-weight:600;line-height:1.15;font-family:var(--mono);
+  font-variant-numeric:tabular-nums;white-space:nowrap}
+.ud-grid b.up{color:var(--up)} .ud-grid b.down{color:var(--down)}
+.ud-grid i{font-style:normal;font-size:10px;color:var(--dim);white-space:nowrap;
+  overflow:hidden;text-overflow:ellipsis}
+.ud-nav{display:flex;align-items:center;gap:5px}
+.ud-nav button{flex:1;height:24px;padding:0 2px;border:1px solid var(--border);border-radius:5px;
+  background:var(--panel-2);color:var(--dim);font-size:11px;cursor:pointer}
+.ud-nav button:hover{color:var(--text);border-color:color-mix(in srgb,var(--accent) 55%,transparent);
+  background:color-mix(in srgb,var(--accent) 10%,var(--panel-2))}
+.ud-nav .ud-idx{flex:none;min-width:42px;text-align:center;font-size:10.5px;color:var(--faint)}
+.ud-cur{display:flex;align-items:center;gap:7px;padding:6px 8px;border-radius:5px;
+  background:var(--panel-2);min-width:0}
+.ud-cur b{font-size:11.5px;font-weight:600;flex:none}
+.ud-cur b:last-child{margin-left:auto;font-family:var(--mono);font-variant-numeric:tabular-nums}
+.ud-cur.up b{color:var(--up)} .ud-cur.down b{color:var(--down)}
+.ud-cur span{flex:1;min-width:0;font-size:10.5px;color:var(--dim);white-space:nowrap;
+  overflow:hidden;text-overflow:ellipsis}
+.ud-cur.none{justify-content:center}
+.ud-cur.none span{color:var(--faint);text-align:center}
+.ud-empty{padding:14px 0;text-align:center;font-size:11.5px;color:var(--dim);line-height:1.7}
+.ud-empty span{font-size:10.5px;color:var(--faint)}
+
 /* ── K线下方资讯/研报面板 ──
    高度由底部手柄拖拽控制（改的是这一块，图表 flex:1 自动吃掉剩余空间），
    默认 clamp 值即「没手动调过」时的观感；内容超出由 .brief-body 内部滚动。 */
@@ -1344,6 +1418,9 @@ body.mobile .vpop.colgear-pop{width:min(272px,calc(100vw - 16px))}
 .sw:hover{transform:scale(1.1)}
 .sw.on{border-color:var(--text)}
 .sw i{position:absolute;inset:5px;border-radius:50%}
+/* 自定义强调色：彩虹环提示可点开取色盘，内圈显示已选色 */
+.sw-custom{background:conic-gradient(from 210deg,#FF9F43,#2FD3C5,#8A94FF,#F07C93,#FF9F43);overflow:hidden}
+.sw-custom input[type="color"]{position:absolute;inset:0;width:100%;height:100%;opacity:0;border:0;padding:0;cursor:pointer}
 .progress{height:6px;border-radius:3px;background:var(--panel-3);overflow:hidden;width:100%}
 .progress i{display:block;height:100%;background:var(--accent);border-radius:3px;width:0%;transition:width .2s}
 .logdot{width:7px;height:7px;border-radius:50%;flex:none}
@@ -1366,7 +1443,7 @@ body.mobile .vpop.colgear-pop{width:min(272px,calc(100vw - 16px))}
 .fresh.warn{background:var(--warn-soft);color:var(--warn)}
 .fresh.bad{background:var(--up-soft);color:var(--up)}
 .upcard{display:flex;flex-direction:column;gap:8px;font-size:12px;min-height:30px}
-.uprow{display:flex;align-items:center;gap:8px;min-width:0}
+.uprow{display:flex;align-items:center;gap:8px;min-width:0;line-height:1.45}
 .upbar{height:7px;border-radius:4px;background:var(--panel-3);overflow:hidden;width:100%}
 .upbar i{display:block;height:100%;background:var(--p1);border-radius:4px;transition:width .4s}
 /* 状态胶囊（数据更新卡头部 / 顶栏 chip） */
@@ -1405,11 +1482,13 @@ body.mobile .vpop.colgear-pop{width:min(272px,calc(100vw - 16px))}
 .up-live{display:flex;flex-direction:column;gap:2px;max-height:118px;overflow:hidden;
   background:var(--panel-2);border:1px solid var(--border-soft);border-radius:8px;padding:5px 9px;
   font-family:var(--mono);font-size:10.5px;color:var(--faint)}
-.up-live-row{display:flex;align-items:baseline;gap:8px;min-width:0;white-space:nowrap;
+/* flex 子项默认会被压缩：不设 flex:none 时，行数超出 max-height 会把每行挤扁，
+   文字互相压叠；保持自然行高，由容器 overflow:hidden 裁掉旧行 */
+.up-live-row{display:flex;align-items:baseline;gap:8px;min-width:0;flex:none;white-space:nowrap;
   overflow:hidden;text-overflow:ellipsis;transition:opacity .3s}
 .up-live-row .t{flex:none;color:var(--faint)}
 .up-live-row:first-child .t{color:var(--p1)}
-.up-live-row .m{overflow:hidden;text-overflow:ellipsis}
+.up-live-row .m{flex:1;min-width:0;overflow:hidden;text-overflow:ellipsis}
 .up-live-row:first-child .m{color:var(--text)}
 /* 更新记录紧凑表：时间等宽 / 行高压缩 / 备注截断 */
 .up-tbl{border-collapse:collapse;width:100%;font-size:11.5px}
@@ -1525,6 +1604,7 @@ body.mobile.fold .rightcol .rtabs{grid-column:1/-1}
 body.mobile.fold .rightcol .rcard[data-cid="chips"]{grid-column:1/-1}
 body.mobile.fold .rightcol .rcard[data-cid="orderbook"],
 body.mobile.fold .rightcol .rcard[data-cid="trades"]{grid-column:1/-1}
+body.mobile.fold .rightcol .sitefoot{grid-column:1/-1}
 body.mobile.fold .heat{grid-template-columns:repeat(4,1fr)}
 body.mobile.fold .cardgrid{grid-template-columns:repeat(4,1fr)}
 body.mobile.fold .dsgrid{grid-template-columns:repeat(4,1fr)}

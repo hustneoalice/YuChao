@@ -16,23 +16,24 @@ export const RIGHT_TABS = [
 
 export const CARD_DEFS = [
   { id: "watch", name: "自选股", icon: "star", tab: "market", desc: "与左侧自选列表同步的实时看板：现价 / 涨跌幅 / 换手 / 成交额一屏速览，点击直达个股。" },
-  { id: "signals", name: "信号面板", icon: "lightning", tab: "market", desc: "六分段位置判定与操作提示，VIP 因子明细（趋势/位置）由系统计算。" },
   { id: "trend", name: "趋势", icon: "chart-line", tab: "market", desc: "60分 / 日 / 周 三周期短线趋势：多头红、空头绿，右侧为近 12/24 根趋势柱，附六段位。" },
+  { id: "updown", name: "涨跌统计", icon: "chart-line", tab: "market", desc: "10% 有效波段统计：有效上涨 / 下跌次数、平均幅度与上涨占比；首段 / 上一段 / 下一段 / 尾段联动主图 K 线定位并高亮对应线段。" },
   { id: "moneyflow", name: "资金流", icon: "trend-up", tab: "market", desc: "超大 / 大 / 中 / 小单当日净流入结构，以及主力净额近五日迷你走势。" },
-  { id: "indicators", name: "技术指标", icon: "chart-line-up", tab: "market", desc: "均线 / BOLL / RSI / KDJ 关键读数与背离状态。" },
-  { id: "valuation", name: "估值", icon: "database", tab: "market", desc: "市盈率（TTM）/ 市净率 / 市销率，以及总市值、流通市值。" },
-  { id: "corepick", name: "核心标档案", icon: "target", tab: "market", desc: "该标的在追涨 / 低吸池中的档案与资金分（名单公开）。" },
   { id: "shareholders", name: "十大流通股东", icon: "user", tab: "holder", desc: "季度持股披露 / 持股数量变化 / 社保基金新进；进入仅表示新进入十大名单。" },
   { id: "chips", name: "筹码分布", icon: "list", tab: "chips", desc: "按日线换手衰减估算价格筹码：获利比例 / 平均成本 / 90% 成本区间 / 集中度，指数不适用。" },
   { id: "orderbook", name: "盘口", icon: "cell-signal-high", tab: "depth", desc: "盘口：名称概念 + 最高/开盘/昨收/振幅/涨跌停/量比/换手/市盈率/市净率/成交额/市值/内外盘 + 买卖五档 + 委比委差，一屏集中。" },
   { id: "trades", name: "成交明细", icon: "list", tab: "depth", desc: "成交明细：逐笔成交时间 / 价格 / 手数 / B·S 方向，主买红、主卖绿，最新在前。" },
 ] as const;
 
+export type AccentKey = "amber" | "teal" | "indigo" | "rose" | "custom";
+
 export interface AppState {
   user: UserPublic | null;
   theme: "dark" | "light";
   dir: "cn" | "intl";
-  accent: "amber" | "teal" | "indigo" | "rose";
+  accent: AccentKey;
+  /** 自定义强调色（accent === "custom" 时生效），#RRGGBB */
+  accentCustom: string;
   cards: CardPrefs;
   watchlist: WatchEntry[];
   /** 自选分组注册表（含尚未放股票的空分组），保证「新建分组」不丢 */
@@ -96,6 +97,7 @@ function loadWatchlist(): WatchEntry[] {
 
 const LS = {
   user: "yc_user", theme: "yc_theme", dir: "yc_dir", accent: "yc_accent",
+  accentCustom: "yc_accent_custom",
   cards: "yc_cards", watchlist: "yc_watchlist", watchGroups: "yc_watch_groups",
 };
 
@@ -104,6 +106,20 @@ function load<T>(key: string, fallback: T): T {
     const raw = localStorage.getItem(key);
     return raw == null ? fallback : JSON.parse(raw) as T;
   } catch { return fallback; }
+}
+
+const ACCENT_KEYS: AccentKey[] = ["amber", "teal", "indigo", "rose", "custom"];
+export const DEFAULT_ACCENT_CUSTOM = "#5B8DEF";
+
+/** #RGB / #RRGGBB → #RRGGBB（大写），非法返回 null */
+export function normalizeHex(v?: string | null): string | null {
+  const m = (v || "").trim().match(/^#?([0-9a-f]{6})$/i);
+  return m ? `#${m[1].toUpperCase()}` : null;
+}
+
+function loadAccent(): AccentKey {
+  const v = load<string>(LS.accent, "amber");
+  return ACCENT_KEYS.includes(v as AccentKey) ? v as AccentKey : "amber";
 }
 
 function loadCards(): CardPrefs {
@@ -120,7 +136,8 @@ const state: AppState = {
   user: load<UserPublic | null>(LS.user, null),
   theme: load<"dark" | "light">(LS.theme, "dark"),
   dir: load<"cn" | "intl">(LS.dir, "cn"),
-  accent: load<AppState["accent"]>(LS.accent, "amber"),
+  accent: loadAccent(),
+  accentCustom: normalizeHex(load<string>(LS.accentCustom, DEFAULT_ACCENT_CUSTOM)) ?? DEFAULT_ACCENT_CUSTOM,
   cards: loadCards(),
   watchlist: loadWatchlist(),
   watchGroups: load<string[]>(LS.watchGroups, []),
@@ -160,9 +177,21 @@ export function setUser(u: UserPublic | null): void {
   emit();
 }
 
-export function patch<K extends "theme" | "dir" | "accent">(k: K, v: AppState[K]): void {
+export function patch<K extends "theme" | "dir" | "accent" | "accentCustom">(k: K, v: AppState[K]): void {
   state[k] = v as never;
   localStorage.setItem(LS[k], JSON.stringify(v));
+  notifyLocal("prefs");
+  emit();
+}
+
+/** 自定义强调色：写入色值并切到 custom（取色盘拖动时连续调用） */
+export function setCustomAccent(hex: string): void {
+  const v = normalizeHex(hex);
+  if (!v) return;
+  state.accentCustom = v;
+  state.accent = "custom";
+  localStorage.setItem(LS.accentCustom, JSON.stringify(v));
+  localStorage.setItem(LS.accent, JSON.stringify("custom"));
   notifyLocal("prefs");
   emit();
 }
@@ -181,10 +210,15 @@ export function resetCards(): void {
 }
 
 /* 云端数据回放（sync.ts 拉取后整批装载；applying 抑制回推） */
-export function loadAppearance(v: { theme?: "dark" | "light"; dir?: "cn" | "intl"; accent?: AppState["accent"] }): void {
+export function loadAppearance(v: {
+  theme?: "dark" | "light"; dir?: "cn" | "intl";
+  accent?: AppState["accent"]; accentCustom?: string;
+}): void {
   if (v.theme) { state.theme = v.theme; localStorage.setItem(LS.theme, JSON.stringify(v.theme)); }
   if (v.dir) { state.dir = v.dir; localStorage.setItem(LS.dir, JSON.stringify(v.dir)); }
   if (v.accent) { state.accent = v.accent; localStorage.setItem(LS.accent, JSON.stringify(v.accent)); }
+  const hex = normalizeHex(v.accentCustom);
+  if (hex) { state.accentCustom = hex; localStorage.setItem(LS.accentCustom, JSON.stringify(hex)); }
   applyAppearance();
   emit();
 }
@@ -380,11 +414,29 @@ export function inWlFilter(w: WatchEntry): boolean {
 }
 
 /* ── 外观应用 ── */
+/** 自定义强调色 → 派生 --accent / --accent-ink / --accent-soft / --glow（与四套预设同一组变量） */
+const ACCENT_VARS = ["--accent", "--accent-ink", "--accent-soft", "--glow"];
+
 export function applyAppearance(): void {
   const h = document.documentElement;
   h.dataset.theme = state.theme;
   h.dataset.dir = state.dir;
   h.dataset.accent = state.accent;
+  h.dataset.accentCustom = state.accentCustom;
+  const st = h.style;
+  if (state.accent !== "custom") {
+    ACCENT_VARS.forEach((k) => st.removeProperty(k));
+    return;
+  }
+  const n = parseInt(state.accentCustom.slice(1), 16);
+  const r = (n >> 16) & 255, g = (n >> 8) & 255, b = n & 255;
+  /* 相对亮度（sRGB 简化式）→ 决定压在强调色上的文字用深墨还是白字 */
+  const lum = (0.2126 * r + 0.7152 * g + 0.0722 * b) / 255;
+  const dark = state.theme === "dark";
+  st.setProperty("--accent", state.accentCustom);
+  st.setProperty("--accent-ink", lum > 0.55 ? "#1A1A1C" : "#FFFFFF");
+  st.setProperty("--accent-soft", `rgba(${r}, ${g}, ${b}, ${dark ? 0.15 : 0.10})`);
+  st.setProperty("--glow", `rgba(${r}, ${g}, ${b}, ${dark ? 0.34 : 0.30})`);
 }
 
 /** isVIP：以 /auth/me 实时 tier 为准 */

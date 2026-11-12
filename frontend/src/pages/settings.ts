@@ -3,7 +3,7 @@ import { adminApi, authApi, dataApi, meApi, type AdminUser, type DataStatus, typ
          type UpdateLogItem, type UpdateSnapshot, type LlmCfg, type FeishuCfg } from "../api";
 import { esc, fmt } from "../fmt";
 import { ic } from "../icons";
-import { getState, patch, setUser, isVip, subscribe } from "../store";
+import { getState, patch, setCustomAccent, setUser, isVip, subscribe } from "../store";
 import { toast, openModal } from "../ui";
 import { logout } from "../auth";
 
@@ -209,12 +209,12 @@ async function refreshUpState(): Promise<void> {
         `<div class="uprecent-list">${recent.slice(0, 5).map((t) => {
           const st = UP_STATUS[t.status] ?? UP_STATUS.skipped;
           const tm = (t.finished_at || t.started_at || "").slice(11, 19) || "--:--:--";
-          return `<div class="uprow" style="font-size:11px">` +
+          return `<div class="uprow" style="font-size:11.5px">` +
             `<i class="logdot ${st.dot}" style="width:6px;height:6px"></i>` +
-            `<span class="num" style="color:var(--faint);flex:none">${esc(tm)}</span>` +
+            `<span class="num" style="color:var(--dim);flex:none">${esc(tm)}</span>` +
             `<span style="color:var(--text);flex:none">${esc(t.label)}</span>` +
             `<span style="color:var(--dim);flex:none">${esc(st.label)}</span>` +
-            `<span style="color:var(--faint);overflow:hidden;text-overflow:ellipsis;white-space:nowrap">` +
+            `<span style="color:var(--dim);flex:1;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">` +
             `${t.rows ? fmtW(t.rows) + " 条 · " : ""}${esc(String(t.message || ""))}</span></div>`;
         }).join("")}</div></details>`);
     }
@@ -448,14 +448,20 @@ async function renderData(body: HTMLElement): Promise<void> {
 /* ── 外观 ── */
 function renderLook(body: HTMLElement): void {
   const s = getState();
-  const swc: [string, string][] = [["amber", "#FF9F43"], ["teal", "#2FD3C5"], ["indigo", "#8A94FF"], ["rose", "#F07C93"]];
+  const swc: [string, string, string][] = [
+    ["amber", "#FF9F43", "琥珀"], ["teal", "#2FD3C5", "青"],
+    ["indigo", "#8A94FF", "蓝紫"], ["rose", "#F07C93", "玫红"],
+  ];
   body.innerHTML =
     `<div class="setsec"><div class="sh">${ic("circle-half", 15)}<h3>外观与主题</h3></div>` +
     `<div class="setrow"><span class="lab">主题</span><div class="ctl"><span class="seg" id="set-theme">` +
     `<button class="${s.theme === "dark" ? "on" : ""}" data-t="dark">深色 · 看盘默认</button>` +
     `<button class="${s.theme === "light" ? "on" : ""}" data-t="light">浅色 · 文档</button></span></div></div>` +
     `<div class="setrow"><span class="lab">强调色</span><div class="ctl"><span class="swatches">` +
-    swc.map((c) => `<span class="sw${s.accent === c[0] ? " on" : ""}" data-ac="${c[0]}" style="background:color-mix(in srgb,${c[1]} 18%,transparent)"><i style="background:${c[1]}"></i></span>`).join("") +
+    swc.map((c) => `<span class="sw${s.accent === c[0] ? " on" : ""}" data-ac="${c[0]}" title="强调色 · ${c[2]}" style="background:color-mix(in srgb,${c[1]} 18%,transparent)"><i style="background:${c[1]}"></i></span>`).join("") +
+    `<label class="sw sw-custom${s.accent === "custom" ? " on" : ""}" data-ac="custom" title="自定义强调色">
+       <input type="color" value="${s.accentCustom}" aria-label="自定义强调色">
+       <i style="background:${s.accentCustom}"></i></label>` +
     `</span><span style="font-size:11px;color:var(--faint)">色度纪律：大面积底色 ≤0.04 · 强调 0.08–0.15 · 点睛 ≤0.22</span></div></div>` +
     `<div class="setrow"><span class="lab">涨跌方向</span><div class="ctl"><span class="seg" id="set-dir">` +
     `<button class="${s.dir === "cn" ? "on" : ""}" data-d="cn">红涨绿跌 · A股</button>` +
@@ -468,8 +474,19 @@ function renderLook(body: HTMLElement): void {
     const b = (e.target as HTMLElement).closest("button") as HTMLElement | null;
     if (b) { patch("dir", b.dataset.d as "cn" | "intl"); void render(); toast("涨跌方向已切换"); }
   });
-  body.querySelectorAll<HTMLElement>(".sw[data-ac]").forEach((el) =>
-    el.addEventListener("click", () => { patch("accent", el.dataset.ac as never); void render(); }));
+  body.querySelectorAll<HTMLElement>(".sw[data-ac]").forEach((el) => {
+    if (el.dataset.ac === "custom") return;   // 自定义交给内嵌取色盘
+    el.addEventListener("click", () => { patch("accent", el.dataset.ac as never); void render(); });
+  });
+  const cin = body.querySelector<HTMLInputElement>(".sw-custom input");
+  cin?.addEventListener("input", () => {
+    setCustomAccent(cin.value);
+    // 不整页重绘（取色盘还开着）：只同步选中态与内圈色
+    const dot = cin.parentElement?.querySelector<HTMLElement>("i");
+    if (dot) dot.style.background = cin.value;
+    body.querySelectorAll<HTMLElement>(".sw").forEach((el) =>
+      el.classList.toggle("on", el.dataset.ac === "custom"));
+  });
 }
 
 /* ── VIP ── */

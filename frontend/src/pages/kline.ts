@@ -16,6 +16,7 @@ import { stockOperateSeries } from "../stock-operate";
 import { volumeActivitySeries } from "../volume-activity";
 import { trendHistogramSeries } from "../trend-histogram";
 import { strongPullbackSeries } from "../strong-pullback";
+import { upDownStats, type UdSegment, type UdStats } from "../updown-stats";
 import { drawReversalMark, qyjjSeries, type QyjjRow } from "../qyjj";
 import { mountAccumulationStyle, mountIndicatorStyles, readAccumulationStyle, readQyjjStyle } from "../indicator-styles";
 import { volumeAverageSeries } from "../volume-average";
@@ -30,6 +31,8 @@ const DOWN = "#519C2C";
 const NEUTRAL = "#757575";
 /* 分时主图蓝系（通达信分时同款）：均价线/昨收虚线基准 */
 const MIN_AVG_COLOR = "#2E6BD6";
+/* 涨跌统计卡联动：当前高亮段在 segs 中的下标；每个图表实例独立 */
+const udFocusMap = new WeakMap<Chart, number>();
 /* 趋势通道配色 · 四方案用户可选（本地 yc_trendpal，云同步键 trend_palette）：
    与 K 线红绿、MA 琥珀/蓝、BOLL 灰区隔，避免与主流机构撞色 */
 export const TRENDS: Record<string, { label: string; fast: string; slow: string; fr: number[]; sr: number[] }> = {
@@ -73,7 +76,7 @@ let toneCache: { line: string; fill: string } | null = null;
 
 function accumulationTone(): { line: string; fill: string } {
   const root = document.documentElement;
-  const key = `${root.dataset.theme}|${root.dataset.accent}`;
+  const key = `${root.dataset.theme}|${root.dataset.accent}|${root.dataset.accentCustom || ""}`;
   if (toneCache && key === toneKey) return toneCache;
   const line = cssv("--accent") || "#FF9F43";
   const m = line.trim().match(/^#?([0-9a-f]{6})$/i);
@@ -1515,6 +1518,63 @@ function ensureRegistered(): void {
       return false;
     },
   });
+  // 涨跌统计（主图）：10% 有效波段红涨绿跌，8%~10% 无效回撤灰线；
+  // 统计信息放在右侧「涨跌统计」卡片，图上只负责画线与高亮当前联动段
+  registerIndicator({
+    name: "ZY_UD_STATS", shortName: "涨跌统计", precision: 2, shouldFormatBigNumber: false,
+    calc: (list) => {
+      const stats = upDownStats(list);
+      return list.map(() => ({ ud: null as number | null, stats }));
+    },
+    figures: [{ key: "ud", title: "", type: "line", styles: () => ({ color: "transparent" }) }],
+    draw: ({ ctx, chart, indicator, xAxis, yAxis, bounding }) => {
+      if (!ctx) return false;
+      const stats = (indicator.result as { stats?: UdStats }[] | undefined)?.[0]?.stats;
+      if (!stats || stats.segs.length === 0) return false;
+      const up = chartUp(), dn = chartDown();
+      const grey = cssv("--faint") || "#8A8A8F";
+      const focus = udFocusMap.get(chart) ?? -1;
+      ctx.save();
+      ctx.beginPath();
+      ctx.rect(0, 0, bounding.width, bounding.height);
+      ctx.clip();
+      ctx.lineJoin = "round";
+      ctx.lineCap = "round";
+      const drawOne = (s: UdSegment, focused: boolean): void => {
+        if (Math.abs(s.pct) <= 8) return;            // 不足 8% 的噪声不画
+        const color = s.valid ? (s.dir === 1 ? up : dn) : grey;
+        const x1 = xAxis.convertToPixel(s.from), y1 = yAxis.convertToPixel(s.fromPrice);
+        const x2 = xAxis.convertToPixel(s.to), y2 = yAxis.convertToPixel(s.toPrice);
+        ctx.strokeStyle = color;
+        ctx.beginPath();
+        ctx.moveTo(x1, y1);
+        ctx.lineTo(x2, y2);
+        if (focused) {
+          ctx.globalAlpha = 0.2;
+          ctx.lineWidth = 7;
+          ctx.stroke();                              // 高亮段外发光
+          ctx.globalAlpha = 1;
+          ctx.lineWidth = 2.6;
+          ctx.stroke();
+          ctx.fillStyle = color;
+          for (const [x, y] of [[x1, y1], [x2, y2]] as [number, number][]) {
+            ctx.beginPath();
+            ctx.arc(x, y, 2.6, 0, Math.PI * 2);
+            ctx.fill();
+          }
+        } else {
+          ctx.globalAlpha = s.valid ? 0.92 : 0.62;
+          ctx.lineWidth = 1.2;
+          ctx.stroke();
+        }
+      };
+      // 先画普通段，最后叠当前联动段，保证高亮不被覆盖
+      stats.segs.forEach((s, i) => { if (i !== focus) drawOne(s, false); });
+      if (focus >= 0 && focus < stats.segs.length) drawOne(stats.segs[focus], true);
+      ctx.restore();
+      return false;
+    },
+  });
   // ATR 自研（klinecharts v10 未内置）：14 日真实波幅均值
   try {
     registerIndicator({
@@ -1928,6 +1988,43 @@ function ensureRegistered(): void {
       draw: (p) => { drawSmartLines(p as unknown as SmartDrawArgs); return true; },
     });
   } catch { /* 重复注册忽略 */ }
+  /* 十字星补实体：开收几乎相等时实体不足 1px，空心阳线只剩一条淡化到几乎看不见的细线。
+   * 这里给这类窄实体补一条 ≥2px 的实心条，指数（沪深300 等）的小十字星也能看清。 */
+  try {
+    registerIndicator({
+      name: "ZY_MIN_BODY",
+      shortName: "小实体",
+      precision: 2,
+      calc: (kLineDataList) => (kLineDataList as unknown as LineBar[]).map((b) => ({ guide: b.close, o: b.open, c: b.close })),
+      figures: [{ key: "guide", title: "", type: "line", styles: () => ({ color: "transparent", size: 0.1 }) }],
+      draw: ({ ctx, chart, indicator, xAxis, yAxis, bounding }) => {
+        if (!ctx) return false;
+        // 分时是 area 形态，没有实体概念，跳过
+        if ((chart.getStyles().candle as { type?: string }).type === "area") return false;
+        const rows = indicator.result as { o: number | null; c: number | null }[];
+        const range = chart.getVisibleRange();
+        const gap = Math.max(1, Math.round(chart.getBarSpace().gapBar));
+        const up = chartUp(), dn = chartDown();
+        const from = Math.max(0, Math.floor(range.from));
+        const to = Math.min(rows.length - 1, Math.ceil(range.to));
+        ctx.save();
+        ctx.beginPath();
+        ctx.rect(0, 0, bounding.width, bounding.height);
+        ctx.clip();
+        for (let i = from; i <= to; i++) {
+          const r = rows[i];
+          if (!r || r.o == null || r.c == null) continue;
+          const y1 = yAxis.convertToPixel(r.o);
+          const y2 = yAxis.convertToPixel(r.c);
+          if (Math.abs(y1 - y2) >= 2) continue;   // 实体够高，原生K线已可见
+          ctx.fillStyle = r.c > r.o ? up : r.c < r.o ? dn : NEUTRAL;
+          ctx.fillRect(Math.round(xAxis.convertToPixel(i) - gap / 2), Math.round((y1 + y2) / 2) - 1, gap, 2);
+        }
+        ctx.restore();
+        return true;
+      },
+    });
+  } catch { /* 重复注册忽略 */ }
 }
 
 /* ── 时间转换（策影 format.ts 逐字 + 分钟级 datetime 支持） ── */
@@ -1949,6 +2046,7 @@ export const IND_CATS: { cat: IndCat; label: string }[] = [
 export const IND_DEFS: IndDef[] = [
   // 主图叠加
   { key: "qyjj", kc: "ZY_QYJJ", label: "阶段拐点", cat: "main", where: "main", desc: "拐点确认信号：低点拐头=阶段低点后拐头向上，高点拐头=阶段高点后拐头向下，信号落在拐点后一根" },
+  { key: "updown", kc: "ZY_UD_STATS", label: "涨跌统计", cat: "main", where: "main", desc: "收盘价 10% 有效波段：涨幅>10% 红色连线、跌幅>10% 绿色连线；回撤/反弹不足 10% 不改变原趋势，8%~10% 的无效线段灰色连线；统计与首/上/下/尾段联动在右侧「涨跌统计」卡" },
   { key: "strongpullback", kc: "ZY_STRONG_PULLBACK", label: "强势调整", cat: "main", where: "main", desc: "起点后限定周期内连线，随后结束；量能配合、收盘站上中线趋势；破保护位或缩量结束；同组眼睛连线" },
   { key: "ma", kc: "MA", label: "均线", cat: "main", where: "main", desc: "移动平均线（周期可设置）" },
   { key: "td", kc: "ZY_TD_SEQ", label: "九转序列", cat: "main", where: "main", desc: "TD Sequential：只在成立的计数节点处标数字（需完美检验）" },
@@ -2038,9 +2136,23 @@ export interface RangeFund {
   net_small: number | null;
 }
 
+/** 涨跌统计卡快照：统计结果 + 有效段下标 + 当前联动段 + 每根 bar 日期 */
+export interface UdSnap {
+  stats: UdStats;
+  /** 有效段（>10%）在 stats.segs 中的下标，首段 … 尾段 */
+  valid: number[];
+  /** 当前高亮联动段在 stats.segs 中的下标，-1 = 未选中 */
+  focus: number;
+  dates: string[];
+}
+
 export interface KlineChartHandle {
   chart: Chart;
   setData: (bars: Bar[], keepView?: boolean, floatShares?: number | null, focusDate?: string, symbol?: string) => void;
+  /** 涨跌统计快照（当前图表全部数据，供右侧卡片展示） */
+  udSnap: () => UdSnap | null;
+  /** 涨跌统计联动：首段 / 上一段 / 下一段 / 尾段（只走有效段），滚动并高亮对应线段 */
+  udGo: (kind: "first" | "prev" | "next" | "last") => void;
   /** 主图多选叠加：增量增删，不动已叠加的同名指标 */
   setMain: (inds: MainKey[]) => void;
   /** 图内右上角指标图例（MA/BOLL/操盘趋势，色块+名称；多面板时每实例一份） */
@@ -3028,9 +3140,10 @@ export function mountKline(el: HTMLElement): KlineChartHandle {
     }));
   };
 
-  /* ESC 分层取消：连线测量 → 单根选中 → 进行中的框选拖拽 → 已成立的区间统计（策影同款手感） */
+  /* ESC 分层取消：放大镜取景 → 连线测量 → 单根选中 → 进行中的框选拖拽 → 已成立的区间统计（策影同款手感） */
   document.addEventListener("keydown", (e) => {
     if (e.key !== "Escape") return;
+    if (lensOn) { setLens(false); return; }
     if (measureMode && (mFrom || mTo)) { clearMeasureFn(); return; }
     if (pickDate) { clearPickFn(true); return; }
     if (selX0 != null) { selX0 = null; sel.style.display = "none"; return; }
@@ -3076,6 +3189,128 @@ export function mountKline(el: HTMLElement): KlineChartHandle {
     IND_DEFS.filter((d) => d.where === "sub").map((d) => [d.kc, d.key as SubKey]),
   );
   const closeBtns = new Map<string, HTMLButtonElement>();
+
+  /* ── MACD 放大镜：只给 MACD 副图一个入口，点开后鼠标移动处浮出取景小窗 ──
+   *  小窗用 drawImage 直接拷 MACD 画布像素（2.4×、关平滑保持锐利），
+   *  不改窗格高度、不动图表布局；再点按钮 / Esc / 关掉 MACD 退出取景。 */
+  const LENS_W = 232, LENS_H = 146, LENS_ZOOM = 2.4;
+  const lens = document.createElement("div");
+  lens.className = "kl-lens";
+  lens.style.display = "none";
+  lens.innerHTML = `<canvas></canvas><div class="kl-lens-read"></div>`;
+  el.appendChild(lens);
+  const lensCanvas = lens.querySelector("canvas") as HTMLCanvasElement;
+  const lensRead = lens.querySelector(".kl-lens-read") as HTMLDivElement;
+  const lensCtx = lensCanvas.getContext("2d");
+  const lensSrc = document.createElement("div");      // 主图上的源区域虚线框
+  lensSrc.className = "kl-lens-src";
+  lensSrc.style.display = "none";
+  el.appendChild(lensSrc);
+  let lensOn = false;
+  let lensPane: string | null = null;
+  let lensBtn: HTMLButtonElement | null = null;
+  let segPane: string | null = null;
+  let segBtn: HTMLButtonElement | null = null;
+
+  const hideLens = (): void => {
+    lens.style.display = "none";
+    lensSrc.style.display = "none";
+  };
+  const setLens = (on: boolean): void => {
+    lensOn = on && !!lensPane;
+    lensBtn?.classList.toggle("on", lensOn);
+    lensBtn?.setAttribute("aria-pressed", lensOn ? "true" : "false");
+    if (!lensOn) hideLens();
+  };
+
+  /** 光标在 MACD 副图内 → 拷贝源区域像素 + 主图标注对应价位，移出即隐藏 */
+  const drawLens = (e: MouseEvent): void => {
+    if (!lensPane) return;
+    // getDom(paneId,'main') 给的是窗格主图层容器（div 包着 canvas），不是 canvas 本身
+    const paneDom = chart.getDom(lensPane, "main");
+    const paneRect = paneDom?.getBoundingClientRect();
+    if (!paneDom || !paneRect || !lensCtx) { hideLens(); return; }
+    if (e.clientX < paneRect.left || e.clientX > paneRect.right
+      || e.clientY < paneRect.top || e.clientY > paneRect.bottom) { hideLens(); return; }
+    const layers = (paneDom.tagName === "CANVAS"
+      ? [paneDom]
+      : Array.from(paneDom.querySelectorAll("canvas"))) as HTMLCanvasElement[];
+    if (layers.length === 0) { hideLens(); return; }
+    const hit = chart.convertFromPixel(
+      [{ x: e.clientX - paneRect.left, y: e.clientY - paneRect.top }],
+      { paneId: lensPane },
+    ) as unknown;
+    const point = (Array.isArray(hit) ? hit[0] : hit) as { dataIndex?: number } | undefined;
+    const idx = Math.round(point?.dataIndex ?? NaN);
+    const ind = chart.getIndicators({ paneId: lensPane }).find((i) => i.name === "MACDX");
+    const listed = chart.getDataList() as { timestamp?: number; close?: number }[];
+    if (ind == null || !Number.isFinite(idx) || idx < 0 || idx >= listed.length) { hideLens(); return; }
+    const row = (ind.result?.[idx] ?? null) as { dif?: number | null; dea?: number | null; macd?: number | null } | null;
+    const num = (v: number | null | undefined) => (v == null || !Number.isFinite(v) ? "—" : v.toFixed(2));
+    lensRead.innerHTML = `<span>${ymd(listed[idx].timestamp ?? 0)}</span>`
+      + `<span>DIF <b>${num(row?.dif)}</b></span>`
+      + `<span>DEA <b>${num(row?.dea)}</b></span>`
+      + `<span>柱 <b>${num(row?.macd)}</b></span>`;
+
+    // 2.4× 拷贝：源区域 = 以光标为中心、小窗尺寸 ÷ 放大倍数；
+    // 副图往往比取景框矮（MACD 常规约 55px），源区域要贴边夹住，否则上下大片空白
+    const srcW = Math.min(LENS_W / LENS_ZOOM, paneRect.width);
+    const srcH = Math.min(LENS_H / LENS_ZOOM, paneRect.height);
+    const pxCss = e.clientX - paneRect.left, pyCss = e.clientY - paneRect.top;
+    const sxCss = Math.max(0, Math.min(pxCss - srcW / 2, paneRect.width - srcW));
+    const syCss = Math.max(0, Math.min(pyCss - srcH / 2, paneRect.height - srcH));
+    const dpr = Math.min(2, window.devicePixelRatio || 1);
+    const bw = Math.round(LENS_W * dpr), bh = Math.round(LENS_H * dpr);
+    if (lensCanvas.width !== bw || lensCanvas.height !== bh) {
+      lensCanvas.width = bw;
+      lensCanvas.height = bh;
+    }
+    const srcScale = layers[0].width / paneRect.width;    // 画布像素 / CSS 像素
+    const sw = srcW * srcScale, sh = srcH * srcScale;
+    const sx = sxCss * srcScale, sy = syCss * srcScale;
+    lensCtx.setTransform(1, 0, 0, 1, 0, 0);
+    lensCtx.clearRect(0, 0, bw, bh);
+    lensCtx.imageSmoothingEnabled = false;
+    layers.forEach((layer) => lensCtx.drawImage(layer, sx, sy, sw, sh, 0, 0, bw, bh));
+
+    // 小窗定位：默认光标右上方，贴边翻转，始终留在容器内
+    const elRect = el.getBoundingClientRect();
+    const elW = el.clientWidth, elH = el.clientHeight;
+    let lx = e.clientX - elRect.left + 18;
+    let ly = e.clientY - elRect.top - LENS_H - 18;
+    if (lx + LENS_W > elW - 8) lx = e.clientX - elRect.left - LENS_W - 18;
+    if (ly < 8) ly = e.clientY - elRect.top + 18;
+    lx = Math.max(8, Math.min(lx, elW - LENS_W - 8));
+    ly = Math.max(8, Math.min(ly, elH - LENS_H - 8));
+    lens.style.left = `${Math.round(lx)}px`;
+    lens.style.top = `${Math.round(ly)}px`;
+    lens.style.display = "block";
+
+    // 主图源区：同一根 K 线、同一价位，用品牌色虚线框标出正在放大的那一段
+    const mainEl = chart.getDom(mainPaneId, "main");
+    const mainRect = mainEl?.getBoundingClientRect();
+    const closeVal = listed[idx].close;
+    if (mainRect && typeof closeVal === "number") {
+      const px = chart.convertToPixel({ dataIndex: idx }, { paneId: mainPaneId }) as { x?: number };
+      const py = chart.convertToPixel({ dataIndex: idx, value: closeVal }, { paneId: mainPaneId }) as { y?: number };
+      if (px.x != null && py.y != null) {
+        const mLeft = mainRect.left - elRect.left, mTop = mainRect.top - elRect.top;
+        const left = Math.round(px.x + mainRect.left - elRect.left - srcW / 2);
+        const top = Math.round(py.y + mainRect.top - elRect.top - srcH / 2);
+        lensSrc.style.left = `${Math.max(mLeft, Math.min(left, mLeft + mainRect.width - srcW))}px`;
+        lensSrc.style.top = `${Math.max(mTop, Math.min(top, mTop + mainRect.height - srcH))}px`;
+        lensSrc.style.width = `${Math.round(srcW)}px`;
+        lensSrc.style.height = `${Math.round(srcH)}px`;
+        lensSrc.style.display = "block";
+      }
+    } else {
+      lensSrc.style.display = "none";
+    }
+  };
+
+  el.addEventListener("mousemove", (e) => { if (lensOn) drawLens(e); });
+  el.addEventListener("mouseleave", () => { if (lensOn) hideLens(); });
+
   const syncSubClose = (): void => {
     const elRect = el.getBoundingClientRect();
     const alive = new Set<string>();
@@ -3097,22 +3332,96 @@ export function mountKline(el: HTMLElement): KlineChartHandle {
         el.appendChild(btn);
         closeBtns.set(ind.paneId, btn);
       }
+      // MACD 放大镜入口：挂在窗格标题 “MACD” 右侧，不占用 ✕ / 齿轮的位置
+      if (ind.name === "MACDX") {
+        lensPane = ind.paneId;
+        if (!lensBtn) {
+          const b = document.createElement("button");
+          b.type = "button";
+          b.className = "kl-maglens";
+          b.innerHTML = ic("magnifying-glass", 11);
+          b.title = "放大镜（点开后移动鼠标查看细节，Esc 退出）";
+          b.setAttribute("aria-label", b.title);
+          b.setAttribute("aria-pressed", "false");
+          b.addEventListener("click", (ev) => {
+            ev.stopPropagation();
+            setLens(!lensOn);
+          });
+          el.appendChild(b);
+          lensBtn = b;
+        }
+        lensBtn.classList.toggle("on", lensOn);
+      }
+      // 六分段副图：标题「六段」右侧挂示意图入口（悬停/点击弹层，由 segmap 全局委托）
+      if (ind.name === "SIXSEG") {
+        segPane = ind.paneId;
+        if (!segBtn) {
+          const b = document.createElement("button");
+          b.type = "button";
+          b.className = "kl-seginfo seg-info";
+          b.innerHTML = ic("chart-line", 11);
+          b.title = "六分段理论示意图（悬停查看，点击固定）";
+          b.setAttribute("aria-label", "六分段理论示意图");
+          el.appendChild(b);
+          segBtn = b;
+        }
+      }
       // 横向锚在绘图区右缘（不是容器右缘）：Y 轴宽度 auto 会随刻度/十字数值变，
       // 锚容器右边会让 ✕ 飘进 Y 轴；同时观察绘图区尺寸，轴一变就重新贴边
       const plot = chart.getDom(ind.paneId, "main");
-      const plotRight = (plot ?? pane).getBoundingClientRect().right - elRect.left;
+      const plotRect = (plot ?? pane).getBoundingClientRect();
+      const plotRight = plotRect.right - elRect.left;
+      const top = Math.round(pane.getBoundingClientRect().top - elRect.top + 6);
       btn.style.left = `${Math.round(plotRight - 26)}px`;
-      btn.style.top = `${Math.round(pane.getBoundingClientRect().top - elRect.top + 6)}px`;
+      btn.style.top = `${top}px`;
+      if (lensBtn && ind.name === "MACDX") {
+        lensBtn.style.left = `${Math.round(plotRect.left - elRect.left + 46)}px`;
+        lensBtn.style.top = `${top}px`;
+      }
+      if (segBtn && ind.name === "SIXSEG") {
+        segBtn.style.left = `${Math.round(plotRect.left - elRect.left + 46)}px`;
+        segBtn.style.top = `${top}px`;
+      }
       if (plot) closeObserver.observe(plot);
     });
     closeBtns.forEach((btn, paneId) => {
       if (!alive.has(paneId)) { btn.remove(); closeBtns.delete(paneId); }
     });
+    // MACD 关掉 / 换窗格：入口按钮与小窗一并收起，避免留下无效入口
+    if (!lensPane || !alive.has(lensPane)) {
+      lensBtn?.remove();
+      lensBtn = null;
+      lensPane = null;
+      setLens(false);
+    }
+    // 六段副图关掉：示意图入口一并收起
+    if (!segPane || !alive.has(segPane)) {
+      segBtn?.remove();
+      segBtn = null;
+      segPane = null;
+    }
   };
   const closeObserver = new ResizeObserver(syncSubClose);
   closeObserver.observe(el);
 
   let dataLen = 0;                     // 上一次灌入的 bar 数（判断「增量刷新」还是「换数据源」）
+  let udSym = "";                      // 涨跌统计联动：上次标的，换标的重置高亮段
+
+  /** 涨跌统计快照（与主图指标同口径，右侧卡片使用） */
+  const udSnap = (): UdSnap | null => {
+    const list = chart.getDataList() as { close: number; date?: string }[];
+    if (!list.length) return null;
+    const stats = upDownStats(list);
+    const valid: number[] = [];
+    stats.segs.forEach((s, i) => { if (s.valid) valid.push(i); });
+    const raw = udFocusMap.get(chart) ?? -1;
+    return {
+      stats,
+      valid,
+      focus: raw >= 0 && raw < stats.segs.length ? raw : -1,
+      dates: list.map((b) => b.date || ""),
+    };
+  };
 
   /** 默认视图锚点：末根完整落在价格轴左侧，中间留一道窄缝。
    *  先写死 offset 再 scrollToRealTime —— scrollToRealTime 的目标位移就是
@@ -3126,6 +3435,7 @@ export function mountKline(el: HTMLElement): KlineChartHandle {
   const handle: KlineChartHandle = {
     chart,
     setData: (bars: Bar[], keepView = false, floatShares: number | null = null, focusDate?: string, symbol?: string) => {
+      if (symbol && symbol !== udSym) { udSym = symbol; udFocusMap.delete(chart); }
       const list = bars.map((b) => ({
         timestamp: toTs(b.date), open: b.open, high: b.high, low: b.low,
         close: b.close, volume: b.volume ?? 0, amount: b.amount ?? 0,
@@ -3211,6 +3521,10 @@ export function mountKline(el: HTMLElement): KlineChartHandle {
         } else {
           chart.createIndicator({ name: d.kc, paneId: "candle_pane", isStack: true, createTooltipDataSource: NO_TIP } as never, true);
         }
+      }
+      // 十字星补实体：常驻主图，不占图例（补的是原生 K 线实体，不是独立指标）
+      if (!have.has("ZY_MIN_BODY")) {
+        chart.createIndicator({ name: "ZY_MIN_BODY", paneId: "candle_pane", isStack: true, createTooltipDataSource: NO_TIP } as never, true);
       }
       requestAnimationFrame(mainCostSettings.sync);
     },
@@ -3299,9 +3613,39 @@ export function mountKline(el: HTMLElement): KlineChartHandle {
       requestAnimationFrame(() => { volumeSettings.sync(); mainCostSettings.sync(); biasSettings.sync(); styleSettings.sync(); accStyleSettings.sync(); syncSubClose(); });
     },
     setPeriod(p: TipPeriod) {
-      period = p;
+      // 只有真正切周期才清联动高亮：applyPanel 每次重灌都会调 setPeriod，
+      // 无条件清除会把「点上一段/下一段」刚设置的焦点冲掉（表现为卡片段号一直显示 —）
+      if (p !== period) {
+        period = p;
+        udFocusMap.delete(chart);
+      }
       // 分时主图换形态：价格曲线（area）替代蜡烛（蜡烛对每分钟假 K 无意义）
       chart.setStyles(periodStyles(p));
+    },
+    udSnap,
+    udGo(kind) {
+      const snap = udSnap();
+      if (!snap || !snap.valid.length) return;
+      let vi = snap.focus >= 0 ? snap.valid.indexOf(snap.focus) : -1;
+      if (kind === "first") vi = 0;
+      else if (kind === "last") vi = snap.valid.length - 1;
+      else if (vi < 0) vi = kind === "prev" ? snap.valid.length - 1 : 0;
+      else vi = kind === "next" ? Math.min(snap.valid.length - 1, vi + 1) : Math.max(0, vi - 1);
+      const si = snap.valid[vi];
+      const seg = snap.stats.segs[si];
+      udFocusMap.set(chart, si);
+      const n = snap.dates.length;
+      const len = seg.to - seg.from + 1;
+      const range = chart.getVisibleRange?.() as { from: number; to: number } | undefined;
+      const vis = range ? Math.max(1, Math.round(range.to - range.from)) : 0;
+      try {
+        // 段比视口长：先缩到能完整看到这段（前后各留一根）；否则保持当前缩放
+        if (vis && len + 6 > vis && el.clientWidth) {
+          chart.setBarSpace(Math.min(50, Math.max(1, el.clientWidth / (len + 6))));
+        }
+        // 段尾右侧留 4 根，scrollToDataIndex 会顺带重绘指标层（高亮立即生效）
+        chart.scrollToDataIndex(Math.min(n - 1, seg.to + 4), 0);
+      } catch { /* 忽略 */ }
     },
     applyHeights,
     zoom(factor: number) {

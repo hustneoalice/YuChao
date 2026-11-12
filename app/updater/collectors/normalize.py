@@ -78,7 +78,7 @@ def _selfcheck_volume(row: Dict[str, Any]) -> None:
     落在双重换算区间 ÷100 拉回。腾讯/新浪车道 amount=None，无自证材料
     （第 1 道先验仍生效）——这也是主车道优先用东财补 amount 的原因。
     """
-    amt, v, c = row.get("amount"), row.get("v"), row.get("c")
+    amt, v, c = row.get("amount"), row.get("v"), _f(row.get("c"))
     if not (amt and v and c):
         return
     ratio = amt / v / c

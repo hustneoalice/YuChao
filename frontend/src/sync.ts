@@ -23,7 +23,7 @@ function localPrefs(): Prefs {
     try { const v = localStorage.getItem(k); return v == null ? fb : JSON.parse(v) as T; } catch { return fb; }
   };
   return {
-    theme: s.theme, dir: s.dir, accent: s.accent,
+    theme: s.theme, dir: s.dir, accent: s.accent, accent_custom: s.accentCustom,
     k_layout: localStorage.getItem("yc_klayout") || "single",
     k_autoh: localStorage.getItem("yc_autoh") ?? "1",
     // 研报面板高度（0 = 默认）：行情页图表/研报分隔条，登录后跨端记住
@@ -43,9 +43,10 @@ function applyPrefs(p: Prefs): void {
   try {
     const theme = p.theme === "light" ? "light" : p.theme === "dark" ? "dark" : undefined;
     const dir = p.dir === "intl" ? "intl" : p.dir === "cn" ? "cn" : undefined;
-    const accent = ["amber", "teal", "indigo", "rose"].includes(p.accent as string)
-      ? p.accent as "amber" | "teal" | "indigo" | "rose" : undefined;
-    loadAppearance({ theme, dir, accent });
+    const accent = ["amber", "teal", "indigo", "rose", "custom"].includes(p.accent as string)
+      ? p.accent as "amber" | "teal" | "indigo" | "rose" | "custom" : undefined;
+    const accentCustom = typeof p.accent_custom === "string" ? p.accent_custom : undefined;
+    loadAppearance({ theme, dir, accent, accentCustom });
     if (typeof p.k_layout === "string") localStorage.setItem("yc_klayout", p.k_layout);
     if (p.k_autoh === "0" || p.k_autoh === "1") localStorage.setItem("yc_autoh", p.k_autoh);
     if (typeof p.k_brief_h === "string") localStorage.setItem("yc_briefh", p.k_brief_h);

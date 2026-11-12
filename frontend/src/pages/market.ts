@@ -2,8 +2,9 @@ import { estimateFloatShares } from "../volume-activity";
 /* 行情页：个股头 + klinecharts K线 + 右列功能卡 */
 import { marketApi, type Bar, type Kline, type FundFlowRange, type IndexQuote, type Quote } from "../api";
 import { cssv, esc, fmt, fmtChg, fmtVol, fmtYi, fmtYiS } from "../fmt";
-import { sma, bollSeries, kdjSeries, atrSeries, sixSegment, SEGNAME, SEGACTION, SEGFULL } from "../indicators";
+import { sixSegment, SEGNAME, SEGACTION, SEGFULL } from "../indicators";
 export { SEGNAME };
+import { segInfoBtn } from "../segmap";
 import { ic } from "../icons";
 import { CARD_DEFS, RIGHT_TABS, addWatch, addWatchGroup, allWatchGroups, getState, inWlFilter, isVip, isWatched, notifyLocal, removeWatch, setCardPref, subscribe, toggleWatchGroup, toggleWlGroup, type RightTabId } from "../store";
 import { openModal, multiPick, toast } from "../ui";
@@ -101,7 +102,7 @@ function readCustomPresets(): Record<string, Preset> {
   return {};
 }
 /** ★ 常显指标（工具栏两行只渲染这个集合）：localStorage 持久化，坏键/缺失回退默认项 */
-const IND_FAV_DEF = ["ma", "boll", "vol", "macd", "kdj", "rsi", "qyjj"];
+const IND_FAV_DEF = ["ma", "boll", "vol", "macd", "kdj", "rsi", "qyjj", "updown"];
 function readIndFavs(): string[] {
   try {
     const v = JSON.parse(localStorage.getItem("yc_indfav") || "") as unknown;
@@ -324,9 +325,24 @@ let pollTimer: ReturnType<typeof setInterval> | null = null;
 let pollBusy = false;
 /** 上次分时数据刷新时刻（与全景 30s 重载对齐；后端 minute 有 30s TTL） */
 let minuteAt = 0;
+/** 120 分钟面板上次重拉时刻：与后端 TTL 缓存（120s）对齐，盘中每 2 分钟拉一次最新合成 */
+let m120At = 0;
 
 function stopPoll(): void {
   if (pollTimer) { clearInterval(pollTimer); pollTimer = null; }
+}
+
+/** 120 分钟盘中重拉：更新所有 120 分钟面板并重算指标（失败保留上一帧） */
+async function refreshM120(): Promise<void> {
+  const s = mk.cur;
+  if (!s) return;
+  m120At = Date.now();
+  try {
+    const k = await marketApi.kline({ symbol: s.symbol, freq: "120" });
+    if (mk.cur?.symbol !== s.symbol) return;
+    mk.m120 = k.bars;
+    mk.panels.forEach((p, i) => { if (p === "120") applyPanel(i); });
+  } catch { /* 保留上一帧 */ }
 }
 
 async function pollTick(): Promise<void> {
@@ -355,8 +371,14 @@ async function pollTick(): Promise<void> {
     // 今日尚无真实成交（盘前腾讯 qdate 已切到今天，但 open 仍为 0）：
     // 只刷新右列，绝不动 K 线 —— 否则会补出 open/high/low=0 的假今日 bar
     if (!q.rt_live) return;
-    // 分时/60分/120分面板：今日浮根只属于日线序列，分钟周期不合并（右列刷新即可）
-    if (mk.panels[mk.active] === "t" || mk.panels[mk.active] === "60" || mk.panels[mk.active] === "120") return;
+    // 分时/60分面板：今日浮根只属于日线序列，分钟周期不合并（右列刷新即可）
+    if (mk.panels[mk.active] === "t" || mk.panels[mk.active] === "60") return;
+    // 120 分钟盘中实时：每 2 分钟重拉一次最新合成（后端 TTL 缓存 120s），
+    // 最新未收完的 2 小时段后端会丢弃，指标随已完成时段滚动重算
+    if (mk.panels[mk.active] === "120") {
+      if (Date.now() - m120At >= 120_000) void refreshM120();
+      return;
+    }
     // 行情归属日优先用 rt_date（腾讯 p[30]）：盘前/周末仍是上一交易日，
     // 用 rt_time（本次抓取时刻）会把昨收当成今天，补出一根假今日 K 线
     const rtDate = (q.rt_date || q.rt_time || q.date || "").slice(0, 10);
@@ -691,6 +713,7 @@ export function initMarket(): void {
       document.querySelectorAll("#kl-panels .klp").forEach((x) =>
         x.classList.toggle("active", x === klp));
       syncPeriodSeg(mk.panels[i]);
+      refreshUdCard();                    // 涨跌统计卡切到焦点面板口径
       // 框选/单选/连线模式跟着焦点面板走（同一时刻只有一个面板可操作）
       if (document.getElementById("kl-range")?.classList.contains("on")) setKlRangeMode(true);
       if (document.getElementById("kl-pick-mode")?.classList.contains("on")) setKlPickMode(true);
@@ -1356,6 +1379,7 @@ export async function ensurePeriodData(p: PKey): Promise<void> {
       const k = await marketApi.kline({ symbol: s.symbol, freq: "120" });
       if (mk.cur?.symbol !== s.symbol) return;
       mk.m120 = k.bars;
+      m120At = Date.now();                       // 首拉即计时，盘中轮询按此节流
     }
   } catch (e) {
     toast((e as Error).message || "分钟数据加载失败");
@@ -1646,8 +1670,11 @@ export function renderKline(): void {
   const need = mk.panels.find((p) =>
     (p === "t" && (!mk.minuteData || !mk.minuteData.bars.length)) || (p === "60" && !mk.m60) || (p === "120" && !mk.m120));
   if (need) void ensurePeriodData(need).then(() => {
-    mk.panels.forEach((p, i) => { if (p === need) applyPanel(i); });
+    mk.panels.forEach((p, i) => { if (p === need) applyPanel(i); refreshUdCard(); });
   });
+  // 涨跌统计卡跟随焦点面板的数据刷新（setDataLoader 回填是异步的，补一次延迟刷新）
+  refreshUdCard();
+  window.setTimeout(refreshUdCard, 240);
 }
 
 /** 焦点面板周期同步到 chartbar 周期段（季线段里没有 → 全灭） */
@@ -1670,9 +1697,9 @@ function setPanelPeriod(i: number, p: PKey): void {
   kls.forEach((k) => k?.clearMeasure());
   applyPanel(i);                               // 先渲染（缓存命中即刻有数据）
   void ensurePeriodData(p).then(() => {
-    if (mk.panels[i] === p) applyPanel(i);     // 数据到达后重渲（未命中缓存时）
+    if (mk.panels[i] === p) { applyPanel(i); if (i === mk.active) refreshUdCard(); }  // 数据到达后重渲（未命中缓存时）
   });
-  if (i === mk.active) syncPeriodSeg(p);
+  if (i === mk.active) { syncPeriodSeg(p); refreshUdCard(); window.setTimeout(refreshUdCard, 240); }
 }
 
 /* ── 右列功能卡 ── */
@@ -2066,7 +2093,7 @@ export function trendBody(symbol: string, mode: string): string {
   return `<div class="tr-matrix">` +
     `${trendRow("60分", m60, mode)}${trendRow("日", daily, mode)}${trendRow("周", weekly, mode)}` +
     `</div>` +
-    `<div class="tr-six"><div class="tr-six-h"><span class="tr-k">六段</span>` +
+    `<div class="tr-six"><div class="tr-six-h"><span class="tr-k">六段</span>${segInfoBtn()}` +
     `<span class="tr-cells">${cells}</span></div>` +
     `<div class="tr-six-txt"><b style="color:${segCol}">${seg}段 · ${SEGFULL[seg] || SEGNAME[seg]}</b>` +
     `<span>${SEGACTION[seg] || ""}</span></div></div>`;
@@ -2098,18 +2125,90 @@ export function bindTrend(card: HTMLElement, symbol: string, mode: string): void
   });
 }
 
+/** 涨跌统计卡：10% 有效波段统计 + 首 / 上 / 下 / 尾段联动主图（只走有效段） */
+function udCardBody(): string {
+  const snap = activeKl()?.udSnap() ?? null;
+  if (!snap || !snap.stats.segs.length) {
+    return `<div class="udw"><div class="ud-empty">当前周期暂无可用波段<br><span>数据太少或尚未走出 10% 波段</span></div></div>`;
+  }
+  const st = snap.stats;
+  const total = snap.valid.length;
+  const vi = snap.focus >= 0 ? snap.valid.indexOf(snap.focus) : -1;
+  const seg = vi >= 0 ? st.segs[snap.valid[vi]] : null;
+  const pct = (v: number, n: number): string => n ? `${v > 0 ? "+" : ""}${v.toFixed(1)}%` : "—";
+  const cur = seg
+    ? `<div class="ud-cur ${seg.dir === 1 ? "up" : "down"}">` +
+      `<b>${seg.dir === 1 ? "上涨段" : "下跌段"}</b>` +
+      `<span class="num">${esc(snap.dates[seg.from] || "")} → ${esc(snap.dates[seg.to] || "")}</span>` +
+      `<b class="num">${seg.pct > 0 ? "+" : ""}${seg.pct.toFixed(1)}%</b></div>`
+    : `<div class="ud-cur none"><span>首段 / 上一段 / 下一段 / 尾段联动 K 线定位</span></div>`;
+  return `<div class="udw">` +
+    `<div class="ud-grid">` +
+      `<div><span>有效上涨</span><b class="up num">${st.upN} 次</b><i class="num">均 ${pct(st.upAvg, st.upN)}</i></div>` +
+      `<div><span>有效下跌</span><b class="down num">${st.downN} 次</b><i class="num">均 ${pct(st.downAvg, st.downN)}</i></div>` +
+      `<div><span>上涨占比</span><b class="num">${total ? `${st.upPct.toFixed(1)}%` : "—"}</b><i class="num">共 ${total} 段</i></div>` +
+    `</div>` +
+    `<div class="ud-nav">` +
+      `<button data-ud="first" title="第一段有效波段">首段</button>` +
+      `<button data-ud="prev" title="上一段有效波段">上一段</button>` +
+      `<span class="ud-idx num">${vi >= 0 ? `${vi + 1} / ${total}` : `— / ${total}`}</span>` +
+      `<button data-ud="next" title="下一段有效波段">下一段</button>` +
+      `<button data-ud="last" title="最后一段有效波段">尾段</button>` +
+    `</div>` + cur + `</div>`;
+}
+
+/** 重绘涨跌统计卡（不重建右列，保留滚动位置；事件挂在 .fbody 上不受 innerHTML 影响） */
+function refreshUdCard(): void {
+  if (rightTab !== "market") return;
+  const card = document.querySelector<HTMLElement>('#rightcol .rcard[data-cid="updown"]');
+  const body = card?.querySelector<HTMLElement>(".fbody");
+  if (body && card?.isConnected && mk.cur) body.innerHTML = udCardBody();
+}
+
+function bindUdCard(card: HTMLElement): void {
+  const body = card.querySelector<HTMLElement>(".fbody");
+  if (!body) return;
+  body.addEventListener("click", (e) => {
+    const btn = (e.target as HTMLElement).closest<HTMLElement>("[data-ud]");
+    if (!btn) return;
+    const kind = btn.dataset.ud as "first" | "prev" | "next" | "last";
+    // 数据 / 指标可能还在异步回填：等快照可用后再定位（最多重试约 2s），
+    // 否则「点了没反应」——快照为空时直接放弃，卡片一直显示「—」
+    const go = (tries = 0): void => {
+      const kl = activeKl();
+      const snap = kl?.udSnap();
+      if (!snap || !snap.valid.length) {
+        if (tries < 16) window.setTimeout(() => go(tries + 1), 120);
+        return;
+      }
+      kl!.udGo(kind);
+      refreshUdCard();
+    };
+    if (!mk.mainInds.includes("updown")) {
+      // 卡片即开关：未开启主图指标时，点导航自动叠加并高亮
+      mk.mainInds = [...mk.mainInds, "updown"];
+      saveKPrefs();
+      syncIndUI();
+      renderKline();
+      toast("已开启主图「涨跌统计」");
+      // renderKline 的数据回填与视图恢复是异步的，等其稳定后再定位
+      window.setTimeout(() => go(), 120);
+      return;
+    }
+    go();
+  });
+}
+
 function cardBody(cid: string, mode: string): string {
   const s = mk.cur;
   if (!s) return "";
+  if (cid === "updown") return udCardBody();
   if (cid === "shareholders") return shareholderBody(s.symbol, mode);
   if (cid === "chips") return chipBody(s.symbol, mode);
   if (cid === "orderbook") return orderbookBody(s.symbol, mode, mk.quote);
   if (cid === "trades") return tradesBody(s.symbol, mode);
   const bars = mk.bars;                    // 卡片统计基准固定日线
   const q = mk.quote;
-  const closes = mk.bars.map((b) => b.close);
-  const shortSeq = closes.slice(-10), midSeq = closes.slice(-30);
-  const chg = q?.pct_chg ?? 0;
   if (cid === "trend") return trendBody(s.symbol, mode);
   if (cid === "watch") {
     const wl = getState().watchlist;
@@ -2142,24 +2241,6 @@ function cardBody(cid: string, mode: string): string {
     return `<div class="wl-list">${grpbar}${rows || (!wl.length ?
       `<div class="bempty" style="padding:14px 14px 8px">暂无自选股<br><span style="color:var(--faint)">点右上 ＋ 搜索添加，或从自选页管理</span></div>` :
       `<div class="bempty" style="padding:14px 14px 8px">「${esc(sel.join(" + "))}」分组暂无股票<br><span style="color:var(--faint)">在上方取消勾选，或用 ♥ 给个股设置分组</span></div>`)}</div>`;
-  }
-  if (cid === "signals") {
-    const segI = sixSegment(mk.bars, mk.bars.length - 1);
-    const segNm = SEGNAME[segI] || "—";
-    const segAct = SEGACTION[segI] || "";
-    const segCol = segI === 3 || segI === 5 ? "var(--up)" : segI === 4 ? "var(--p1)" : "var(--down)";
-    if (mode === "simple") {
-      return `<div class="csimple"><div class="st"><b>${segNm}</b> · 六分段判定<br><span style="font-size:10px;color:var(--faint)">${segAct} · 短线 ${shortSeq[shortSeq.length - 1] > shortSeq[0] ? "上行" : "下行"} · 中线 ${midSeq[midSeq.length - 1] > midSeq[0] ? "上行" : "下行"}</span></div><div class="minifig">${spark(midSeq, 64, 22, "var(--p1)")}</div></div>`;
-    }
-    return `<div style="font-size:11px;color:var(--faint)">六分段 · 趋势线六位置</div>` +
-      `<div class="sixseg" id="rc-six">${Array.from({ length: 6 }, (_, k2) => `<i class="${k2 === segI - 1 ? "on cur" : ""}" style="${k2 === segI - 1 ? `background:${segCol}` : ""}"></i>`).join("")}</div>` +
-      `<div class="sixlab"><span>超跌</span><span>跌破</span></div>` +
-      `<div style="display:flex;align-items:center;gap:6px;margin:2px 0 0"><b style="color:${segCol};font-size:12.5px">${segI}段 · ${segNm}</b>` +
-      `<span style="font-size:10.5px;color:var(--faint)">${segAct}</span></div>` +
-      `<div class="tr2">${spark(shortSeq, 96, 26, "var(--up)")}${spark(midSeq, 96, 26, "var(--p1)")}</div>` +
-      `<div style="display:flex;gap:8px;margin-top:8px">` +
-      `<div style="flex:1;background:var(--panel-2);border-radius:9px;padding:7px 9px"><div style="font-size:10px;color:var(--faint)">短线趋势</div><div style="font-size:13px;font-weight:650;color:${shortSeq[shortSeq.length - 1] > shortSeq[0] ? "var(--up)" : "var(--down)"}">${shortSeq[shortSeq.length - 1] > shortSeq[0] ? "上行" : "下行"}</div></div>` +
-      `<div style="flex:1;background:var(--panel-2);border-radius:9px;padding:7px 9px"><div style="font-size:10px;color:var(--faint)">中线趋势</div><div style="font-size:13px;font-weight:650;color:var(--p1)">${midSeq[midSeq.length - 1] > midSeq[0] ? "上行" : "下行"}</div></div></div>`;
   }
   if (cid === "moneyflow") {
     // 点击某根 K 线 → 单日口径；拖拽框选 → 区间口径；都没有 → 当日（清区即回当日）
@@ -2200,48 +2281,13 @@ function cardBody(cid: string, mode: string): string {
       `<div class="num">${cf.date || ""}</div></div></div>` +
       (flowDetailOk(items, main) ? flowRows(items) : FLOW_DETAIL_MISSING);
   }
-  if (cid === "indicators") {
-    const closesN = bars.map((b) => b.close);
-    const ma20 = sma(bars, 20);
-    const i = bars.length - 1;
-    const bl = bollSeries(bars);
-    const kd = kdjSeries(bars);
-    const atr = atrSeries(bars);
-    const row = (k: string, v: string, cls = "") => `<div class="mbl"><span>${k}</span><div class="mbt"></div><b class="num ${cls}">${v}</b></div>`;
-    const ma20v = ma20[i];
-    const pos = ma20v != null ? (closesN[i] > ma20v ? "上方" : "下方") : "—";
-    const posCls = ma20v != null && closesN[i] > ma20v ? "up" : "down";
-    if (mode === "simple") {
-      return `<div class="csimple"><div class="st"><b>均线 ${pos}</b> · KDJ ${fmt(kd.k[i] ?? 0, 0)}<br><span style="font-size:10px;color:var(--faint)">ATR ${fmt(atr[i] ?? 0)} · BOLL 带宽 ${ma20v != null ? fmt(((bl.up[i]! - bl.low[i]!) / ma20v) * 100, 1) + "%" : "—"}</span></div><div class="minifig">${spark(closesN.slice(-20), 64, 22, "var(--accent)")}</div></div>`;
-    }
-    return row("均线（快）", fmt(sma(bars, 5)[i] ?? 0)) + row("均线（慢）", fmt(ma20v), posCls) +
-      row("KDJ K", fmt(kd.k[i] ?? 0, 1)) + row("KDJ J", fmt(kd.j[i] ?? 0, 1)) +
-      row("BOLL 上", fmt(bl.up[i] ?? 0)) + row("BOLL 下", fmt(bl.low[i] ?? 0)) +
-      row("ATR", fmt(atr[i] ?? 0));
-  }
-  if (cid === "valuation") {
-    const v = q?.valuation;
-    if (!v) return `<div style="font-size:11.5px;color:var(--faint)">暂无估值数据（全市场估值还没采集到）</div>`;
-    const row = (k: string, val: number | null | undefined, digits = 2) =>
-      `<div class="mbl"><span>${k}</span><div class="mbt"></div><b class="num">${fmt(val, digits)}</b></div>`;
-    if (mode === "simple") {
-      return `<div class="csimple"><div class="st"><b>PE ${fmt(v.pe_ttm, 1)}</b> · PB ${fmt(v.pb, 2)}<br><span style="font-size:10px;color:var(--faint)">总市值 ${fmtYi(v.total_mv, 0)} · 流通 ${fmtYi(v.circ_mv, 0)}</span></div><div class="minifig"></div></div>`;
-    }
-    return row("PE-TTM", v.pe_ttm) + row("PB", v.pb) + row("PS-TTM", v.ps_ttm) +
-      row("总市值(亿)", v.total_mv != null ? v.total_mv / 1e8 : null) + row("流通市值(亿)", v.circ_mv != null ? v.circ_mv / 1e8 : null) +
-      `<div style="font-size:10px;color:var(--faint)">数据日期 ${v.date}</div>`;
-  }
-  if (cid === "corepick") {
-    void chg;
-    return `<div style="font-size:11.5px;color:var(--faint)"><span class="tag flat" style="font-size:10px">档案</span> 在「核心标」页查看 ${s.name} 的追涨 / 低吸信号与 VIP 因子明细</div><button class="hbtn" data-ic-go-core style="height:26px;padding:0 10px;font-size:11px;margin-top:6px">前往核心标</button>`;
-  }
   return "";
 }
 
 function cardHead(def: { id: string; name: string; icon: string }, canMode = true): string {
   const p = getState().cards[def.id];
   const wlN = getState().watchlist.filter(inWlFilter).length;
-  const mono = def.id === "moneyflow" ? (mk.cur?.symbol || "") : def.id === "corepick" ? "池档案" : def.id === "watch" ? `${wlN}只` : "";
+  const mono = def.id === "moneyflow" ? (mk.cur?.symbol || "") : def.id === "watch" ? `${wlN}只` : "";
   // 盘口卡：名称/代码收进标题行，正文第二行放「价格 + 涨跌幅」，省掉重复的身份行
   const sub = def.id === "orderbook"
     ? `<span class="rh-sub" data-head-sub>${headSubHtml(mk.cur?.symbol || "", mk.cur?.name || "")}</span>`
@@ -2263,7 +2309,7 @@ function cardHead(def: { id: string; name: string; icon: string }, canMode = tru
 
 /** 简单/详细切换只在内容确实随模式变化时出现（指数无五档/逐笔/筹码，点了没反应） */
 function modeMatters(cid: string): boolean {
-  if (cid === "corepick") return false;                     // 档案卡内容固定，与模式无关
+  if (cid === "updown") return false;
   if (cid === "orderbook" || cid === "trades" || cid === "chips" ||
       cid === "moneyflow" || cid === "shareholders") return !isIndexSymbol(mk.cur?.symbol || "");
   return true;
@@ -2375,12 +2421,13 @@ export function renderRight(): void {
   for (const def of tabDefs) {
     const p = st.cards[def.id];
     html += `<div class="rcard" data-cid="${def.id}">${cardHead(def, modeMatters(def.id))}` +
-      `<div class="fbody${p.mode === "simple" && def.id === "signals" ? "" : ""}${false ? " hide" : ""}">${cardBody(def.id, p.mode)}</div></div>`;
+      `<div class="fbody">${cardBody(def.id, p.mode)}</div></div>`;
   }
   if (!tabDefs.length) {
     html += `<div class="rcard bempty">该栏目暂无启用的卡片，可在「功能卡片」页开启</div>`;
   }
-  html += `<div class="cmpl">仅提供基于公开数据的规则化分析，不构成投资建议 · 指标按公开规则计算，VIP 明细由系统处理后返回</div>`;
+  html += `<div class="cmpl">仅提供基于公开数据的规则化分析，不构成投资建议 · 指标按公开规则计算，VIP 明细由系统处理后返回</div>` +
+    `<div class="sitefoot">复利分享站 · <a href="https://beian.miit.gov.cn/" target="_blank" rel="noopener">鄂ICP备2026046864号-1</a></div>`;
   el.innerHTML = html;
   el.querySelectorAll<HTMLElement>("[data-rtab]").forEach((b) =>
     b.addEventListener("click", () => {
@@ -2406,6 +2453,8 @@ export function renderRight(): void {
   }
   const trendCard = el.querySelector<HTMLElement>('[data-cid="trend"]');
   if (trendCard) bindTrend(trendCard, mk.cur.symbol, st.cards.trend.mode);
+  const udCard = el.querySelector<HTMLElement>('[data-cid="updown"]');
+  if (udCard) bindUdCard(udCard);
   // 盘口 tab：盘口（基本信息+五档）/ 成交明细 各自 5s 轮询，只刷新本卡片
   const curSymbol = mk.cur.symbol;
   for (const cid of ["orderbook", "trades"] as const) {

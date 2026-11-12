@@ -3,8 +3,9 @@ import "./styles.css";
 import "./mainforce.css";
 import { ic, injectIcons } from "./icons";
 import { authApi, getToken } from "./api";
-import { applyAppearance, getState, patch, setUser, subscribe } from "./store";
+import { applyAppearance, getState, patch, setCustomAccent, setUser, subscribe, type AccentKey } from "./store";
 import { bindModalChrome, toast } from "./ui";
+import { bindSegInfo } from "./segmap";
 import { stockSearch } from "./searchbox";
 import { initAuth, refreshVipUI } from "./auth";
 import { initMarket, klResize, openStock, renderKline, renderRight } from "./pages/market";
@@ -151,6 +152,7 @@ function boot(): void {
   applyAppearance();
   injectIcons();
   bindModalChrome();          // 弹窗关闭（X / 遮罩）：之前漏调用，登录框弹出后关不掉
+  bindSegInfo();              // 六分段「示意图」小按钮：全局委托，悬停/点击弹层
   bindNav();
   initDevice();
   initRailResize();
@@ -178,11 +180,20 @@ function boot(): void {
   ];
   accentsEl.innerHTML = ACCENTS.map(([key, hex, name]) =>
     `<button type="button" class="sw" data-ac="${key}" title="强调色 · ${name}" aria-label="强调色 · ${name}"
-      style="background:color-mix(in srgb,${hex} 18%,transparent)"><i style="background:${hex}"></i></button>`).join("");
+      style="background:color-mix(in srgb,${hex} 18%,transparent)"><i style="background:${hex}"></i></button>`).join("")
+    // 自定义强调色：彩虹环=可点开取色盘，内圈显示已选色
+    + `<label class="sw sw-custom" data-ac="custom" title="自定义强调色" aria-label="自定义强调色">
+        <input type="color" value="${getState().accentCustom}" aria-label="自定义强调色">
+        <i style="background:${getState().accentCustom}"></i></label>`;
   const drawTheme = () => {
-    btn.innerHTML = ic(getState().theme === "dark" ? "moon" : "sun", 16);
+    const s = getState();
+    btn.innerHTML = ic(s.theme === "dark" ? "moon" : "sun", 16);
     accentsEl.querySelectorAll<HTMLElement>(".sw").forEach((el) =>
-      el.classList.toggle("on", el.dataset.ac === getState().accent));
+      el.classList.toggle("on", el.dataset.ac === s.accent));
+    const inp = accentsEl.querySelector<HTMLInputElement>(".sw-custom input");
+    const dot = accentsEl.querySelector<HTMLElement>(".sw-custom i");
+    if (inp) inp.value = s.accentCustom;
+    if (dot) dot.style.background = s.accentCustom;
   };
   drawTheme();
   btn.addEventListener("click", () => {
@@ -192,7 +203,12 @@ function boot(): void {
   });
   accentsEl.addEventListener("click", (e) => {
     const b = (e.target as HTMLElement).closest<HTMLElement>(".sw[data-ac]");
-    if (b) patch("accent", b.dataset.ac as "amber" | "teal" | "indigo" | "rose");
+    if (b) patch("accent", b.dataset.ac as AccentKey);
+  });
+  // 取色盘拖动/选中：即时应用自定义色
+  accentsEl.addEventListener("input", (e) => {
+    const t = e.target as HTMLInputElement;
+    if (t.type === "color") setCustomAccent(t.value);
   });
   subscribe(drawTheme);
 

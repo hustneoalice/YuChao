@@ -21,6 +21,8 @@ from .http import get_json, get_json_hosts, get_text, sina_symbol, tx_symbol
 from .normalize import normalize_rows
 
 _CLIST_HOSTS = ("https://push2.eastmoney.com", "https://push2delay.eastmoney.com")
+# K 线宿主：只有 push2his 提供 kline/get，push2 会回空 klines
+_KLINE_HOSTS = ("https://push2his.eastmoney.com",) + _CLIST_HOSTS
 _DATACENTER_HOSTS = ("https://datacenter-web.eastmoney.com", "https://data.eastmoney.com")
 
 # 全市场 A 股（沪深主板/创业板/科创板/北交所）
@@ -418,23 +420,25 @@ def _get_text(url: str) -> str:
 # 东财：日 K 线（17:00 增量主车道，不复权）· 腾讯 fqkline 备用
 # ---------------------------------------------------------------------------
 
-def fetch_kline_em(code: str, count: int = 3000) -> List[Dict[str, Any]]:
+def fetch_kline_em(code: str, count: int = 3000, fqt: int = 0) -> List[Dict[str, Any]]:
     """东财 push2his 日线（fqt=0 不复权）→ [{t,o,h,l,c,v,amount,pct_chg,turnover}]。
 
     一次请求带回 amount/pct_chg/turnover（腾讯车道只有价量），增量行不留空。
-    v 原始为手，换算在 normalize_rows 单点（em 声明：手，含指数/ETF）。"""
+    v 原始为手，换算在 normalize_rows 单点（em 声明：手，含指数/ETF）。
+    fqt=1 前复权 / fqt=2 后复权：仅场内基金复权因子反推用（见 adjust_factor）。"""
     from .http import market_prefix, pure_of
 
     s = pure_of(code)
     mkt = market_prefix(s)
     secid = f"{'1' if mkt == 'sh' else '0'}.{s}"
     params = {
-        "secid": secid, "klt": 101, "fqt": 0,
+        "secid": secid, "klt": 101, "fqt": fqt,
         "beg": "0", "end": "20500101", "lmt": max(count, 120),
         "fields1": "f1,f2,f3,f4,f5,f6",
         "fields2": "f51,f52,f53,f54,f55,f56,f57,f58,f59,f60,f61",
     }
-    data = get_json_hosts("/api/qt/stock/kline/get", params, _CLIST_HOSTS,
+    # K 线只由 push2his 提供，push2/push2delay（行情列表宿主）会回 data.klines=[]
+    data = get_json_hosts("/api/qt/stock/kline/get", params, _KLINE_HOSTS,
                           "https://quote.eastmoney.com/", timeout=15)
     d = data.get("data") or {}
     klines = d.get("klines") or []

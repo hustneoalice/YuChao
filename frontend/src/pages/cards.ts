@@ -9,10 +9,8 @@ export function renderCards(): void {
   const defs = [...CARD_DEFS].sort((a, b) => st.cards[a.id].order - st.cards[b.id].order);
   grid.innerHTML = defs.map((c) => {
     const p = st.cards[c.id];
-    const vip = c.id === "signals";
     return `<div class="fcard${p.on ? "" : " off"}" data-card="${c.id}">` +
       `<div class="fcard-h"><span class="fi">${ic(c.icon, 14)}</span><b>${c.name}</b>` +
-      (vip ? `<span class="tag vip" style="font-size:9.5px">VIP</span>` : "") +
       `<span class="sp"></span><span class="switch${p.on ? " on" : ""}" data-sw="${c.id}" title="${p.on ? "点击停用" : "点击启用"}"><i></i></span></div>` +
       `<p>${c.desc}</p>` +
       `<div class="ffoot"><span>行情页右列</span><span class="sp"></span><span>${p.on ? "已启用" : "已关闭"}</span></div></div>`;
