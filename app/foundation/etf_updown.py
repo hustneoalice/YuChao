@@ -9,11 +9,14 @@
 - 有效阈值 10%：低点 → 高点涨 >10% 才算一段有效上涨；回落到 10% 才确认转跌，
   否则原上涨段继续延伸、起点不变（**没超过 10% 就不否定原逻辑**）。下跌同理。
 - 8%~10% 的回撤 / 反弹记为「无效线段」（灰色），说明趋势为何继续。
-- K 线一律用**前复权**（qfq）：分红除权造成的价格缺口不算跌，波段百分比才可比。
+- K 线一律用**后复权**（hfq）：分红除权造成的价格缺口不算跌，波段百分比才可比；
+  源站没有复权序列的少数标的退回裸价（页面标「不复权」）。
+- 全历史极值（最大涨幅 / 最大跌幅）用该 ETF 上市以来**所有日线**计算，
+  不按 10% 切段：低点→之后高点、高点→之后低点（即历史最大回撤）。
 
 数据来自腾讯日线（`sources.fetch_kline_tx`，本机可用；东财 push2his 目前被掐），
 实时价与今日涨跌来自腾讯 qt 快照。结果缓存到 `data/etf_updown.json`：
-日线按「数据日」缓存 6 小时，实时报价缓存 60 秒，页面刷新不会每次都打 33 次 HTTP。
+日线按「数据日」缓存 6 小时，实时报价缓存 60 秒，页面刷新不会每次都打 70 次 HTTP。
 """
 from __future__ import annotations
 
@@ -257,15 +260,36 @@ def updown_stats(bars: list[dict], valid: float = UD_VALID,
                       "pend": dict(pend) if pend else None}
 
 
-def _extreme(segs: list[dict], direction: int, dates: list[str]) -> dict | None:
-    pool = [s for s in segs if s["valid"] and s["dir"] == direction]
-    if not pool:
-        return None
-    best = max(pool, key=lambda s: abs(s["pct"]))
-    return {"pct": round(best["pct"], 2),
-            "from_date": dates[best["from"]] if best["from"] < len(dates) else "",
-            "to_date": dates[best["to"]] if best["to"] < len(dates) else "",
-            "from_price": best["from_price"], "to_price": best["to_price"]}
+def _history_extremes(bars: list[dict]) -> tuple[dict | None, dict | None]:
+    """全历史极值（不按 10% 波段切段，覆盖该 ETF 自上市以来所有日线）。
+
+    - 最大涨幅 = 任一低点 → 之后任一高点的最大涨幅；
+    - 最大跌幅 = 任一高点 → 之后任一低点的最大跌幅（即历史最大回撤 / 跌幅极致）。
+    """
+    if len(bars) < 2:
+        return None, None
+    up: dict | None = None
+    dn: dict | None = None
+    peak = trough = bars[0]
+    for b in bars[1:]:
+        if peak["h"] > 0:
+            pct = (b["l"] - peak["h"]) / peak["h"] * 100
+            if dn is None or pct < dn["pct"]:
+                dn = {"pct": pct, "from_date": peak["t"], "to_date": b["t"],
+                      "from_price": peak["h"], "to_price": b["l"]}
+        if trough["l"] > 0:
+            pct = (b["h"] - trough["l"]) / trough["l"] * 100
+            if up is None or pct > up["pct"]:
+                up = {"pct": pct, "from_date": trough["t"], "to_date": b["t"],
+                      "from_price": trough["l"], "to_price": b["h"]}
+        if b["h"] > peak["h"]:
+            peak = b
+        if b["l"] < trough["l"]:
+            trough = b
+    for x in (up, dn):
+        if x:
+            x["pct"] = round(x["pct"], 2)
+    return up, dn
 
 
 def _live_bar(last: dict, t: tuple, quote_date: str) -> dict | None:
@@ -331,11 +355,12 @@ def analyse(code: str, short: str, full: str, bars: list[dict],
         "upN": stats["upN"], "downN": stats["downN"],
         "upPct": round(stats["upPct"], 1),
         "upAvg": round(stats["upAvg"], 2), "downAvg": round(stats["downAvg"], 2),
-        "maxUp": _extreme(stats["segs"], 1, dates),
-        "maxDn": _extreme(stats["segs"], -1, dates),
+        "maxUp": None, "maxDn": None,
         "lastSeg": None, "run": None,
     }
     valid_segs = [s for s in stats["segs"] if s["valid"]]
+    max_up, max_dn = _history_extremes(work)
+    item["maxUp"], item["maxDn"] = max_up, max_dn
     if valid_segs:
         s = valid_segs[-1]
         item["lastSeg"] = {"dir": s["dir"], "pct": round(s["pct"], 2),

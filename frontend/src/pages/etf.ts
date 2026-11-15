@@ -244,11 +244,11 @@ function renderQuant(list: EtfRow[]): void {
       `</ul></div>
     </div>
     <div class="etf-qcard">
-      <div class="etf-qh"><b>历史最大上涨段</b><span>Top ${topUp.length}</span></div>
+      <div class="etf-qh"><b>全历史最大涨幅</b><span>Top ${topUp.length}</span></div>
       <ul class="etf-tops etf-ext">${topUp.map((r) => extremeRow(r, r.maxUp)).join("")}</ul>
     </div>
     <div class="etf-qcard">
-      <div class="etf-qh"><b>历史最大下跌段</b><span>Top ${topDn.length}</span></div>
+      <div class="etf-qh"><b>全历史最大跌幅</b><span>Top ${topDn.length}</span></div>
       <ul class="etf-tops etf-ext">${topDn.map((r) => extremeRow(r, r.maxDn)).join("")}</ul>
     </div>
     <div class="etf-qcard etf-help">
@@ -270,8 +270,8 @@ function initEtfUpdown(): void {
     { label: "当前幅度", num: true, pri: 2, title: "本轮波段起点 → 最新价（实时价，带符号）", sort: (r) => r.run?.cur_pct ?? null, render: (r) => runCell(r, "cur_pct") },
     { label: "反向回撤", num: true, pri: 2, title: "段内极值 → 最新价的反向幅度；不足 10% 不否定原逻辑", sort: (r) => r.run?.against_pct ?? null, render: againstCell },
     { label: "有效波段", num: true, pri: 2, title: "全历史有效上涨 / 下跌次数（每段均 >10%）", sort: (r) => r.upN + r.downN, render: (r) => `<span class="up">${r.upN}</span> / <span class="down">${r.downN}</span>` },
-    { label: "最大上涨段", num: true, pri: 3, sort: (r) => r.maxUp?.pct ?? null, render: (r) => extremeCell(r.maxUp) },
-    { label: "最大下跌段", num: true, pri: 3, sort: (r) => r.maxDn?.pct ?? null, render: (r) => extremeCell(r.maxDn) },
+    { label: "全历史最大涨幅", num: true, pri: 3, title: "该 ETF 上市以来：任一低点 → 之后最高点的最大涨幅（不按 10% 切段）", sort: (r) => r.maxUp?.pct ?? null, render: (r) => extremeCell(r.maxUp) },
+    { label: "全历史最大跌幅", num: true, pri: 3, title: "该 ETF 上市以来：任一高点 → 之后最低点的最大跌幅，即历史最大回撤", sort: (r) => r.maxDn?.pct ?? null, render: (r) => extremeCell(r.maxDn) },
     { label: "数据起点", pri: 3, sort: (r) => r.data_from ?? "", render: dataCell },
   ], {
     tblKey: "etf-updown",
