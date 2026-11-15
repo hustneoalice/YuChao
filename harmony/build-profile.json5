@@ -1,0 +1,56 @@
+{
+  "app": {
+    "signingConfigs": [
+      {
+        "name": "default",
+        "type": "HarmonyOS",
+        "material": {
+          "certpath": "/Users/neo/.ohos/config/default_harmony_CmB7mz9JnVTwKk-KKHeBO0NaW42xF_SGCsnATWbHERM=.cer",
+          "keyAlias": "debugKey",
+          "keyPassword": "0000001A223B78825222F139307FFD19432B87A2BF3CEA85C6E7464B07D6E0A1CCFEBBE9F6295F67F0DB",
+          "profile": "/Users/neo/.ohos/config/default_harmony_CmB7mz9JnVTwKk-KKHeBO0NaW42xF_SGCsnATWbHERM=.p7b",
+          "signAlg": "SHA256withECDSA",
+          "storeFile": "/Users/neo/.ohos/config/default_harmony_CmB7mz9JnVTwKk-KKHeBO0NaW42xF_SGCsnATWbHERM=.p12",
+          "storePassword": "0000001A9600C7CEAB805BA5E5F23E5D28E67D841B0CA91503923B25B0A8F849BD1FC065D0331828AD13"
+        }
+      }
+    ],
+    "products": [
+      {
+        "name": "default",
+        "signingConfig": "default",
+        "compatibleSdkVersion": "5.0.0(12)",
+        "runtimeOS": "HarmonyOS",
+        "buildOption": {
+          "strictMode": {
+            "caseSensitiveCheck": true,
+            "useNormalizedOHMUrl": true
+          }
+        },
+        "targetSdkVersion": "26.0.0"
+      }
+    ],
+    "buildModeSet": [
+      {
+        "name": "debug"
+      },
+      {
+        "name": "release"
+      }
+    ]
+  },
+  "modules": [
+    {
+      "name": "entry",
+      "srcPath": "./entry",
+      "targets": [
+        {
+          "name": "default",
+          "applyToProducts": [
+            "default"
+          ]
+        }
+      ]
+    }
+  ]
+}

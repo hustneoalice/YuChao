@@ -32,6 +32,8 @@ function localPrefs(): Prefs {
     k_main: j<string[]>("yc_kmain", []),
     k_sub: j<string[]>("yc_ksub", []),
     k_indfav: j<string[]>("yc_indfav", []),   // ★ 常显指标（工具栏两行）：换浏览器/换端也要一致
+    // 偏好最后修改时间：拉取时用来判定本地/服务器谁更新（旧云端值不得覆盖刚改的指标）
+    k_at: localStorage.getItem("yc_kprefsAt") || "",
     // 绘图常显：本地未配置过就不上送（否则空数组会把「默认全显」覆盖成空工具栏）
     ...(localStorage.getItem("yc_linefav") != null
       ? { k_linefav: j<string[]>("yc_linefav", []) } : {}),
@@ -54,6 +56,7 @@ function applyPrefs(p: Prefs): void {
     if (Array.isArray(p.k_main)) localStorage.setItem("yc_kmain", JSON.stringify(p.k_main));
     if (Array.isArray(p.k_sub)) localStorage.setItem("yc_ksub", JSON.stringify(p.k_sub));
     if (Array.isArray(p.k_indfav)) localStorage.setItem("yc_indfav", JSON.stringify(p.k_indfav));
+    if (typeof p.k_at === "string" && p.k_at) localStorage.setItem("yc_kprefsAt", p.k_at);
     // 空集合且本地从未配置过 → 保留默认（全部绘图工具常显）
     if (Array.isArray(p.k_linefav)
       && (p.k_linefav.length > 0 || localStorage.getItem("yc_linefav") != null))
@@ -69,8 +72,28 @@ function applyPrefs(p: Prefs): void {
 
 const timers: Partial<Record<string, number>> = {};
 
+/* 上次与云端对齐的偏好快照：推送时逐键比对，只发本次变过的键（服务端按键深合并，
+ * 多端并发各改各的项时不会互相覆盖） */
+let synced: Prefs | null = null;
+
+function diffPrefs(cur: Prefs, base: Prefs | null): Prefs {
+  if (!base) return cur;
+  const out: Prefs = {};
+  Object.keys(cur).forEach((k) => {
+    if (k === "k_at") return;
+    if (JSON.stringify(cur[k]) !== JSON.stringify(base[k])) out[k] = cur[k];
+  });
+  if (Object.keys(out).length) out.k_at = cur.k_at;
+  return out;
+}
+
 function pushPrefs(): void {
-  void meApi.putPrefs(localPrefs()).catch(() => { /* 离线静默，下次变更再试 */ });
+  // 还没有与云端对齐过（拉取未成功）：先拉取建立基线，避免拿本地旧值整包覆盖云端
+  if (!synced) { void pullOnLogin(); return; }
+  const cur = localPrefs();
+  const body = diffPrefs(cur, synced);
+  if (!Object.keys(body).length) return;
+  void meApi.putPrefs(body).then(() => { synced = cur; }).catch(() => { /* 离线静默，下次变更再试 */ });
 }
 function watchlistPayload(): WatchItem[] {
   return getState().watchlist.map((w) => ({
@@ -121,7 +144,10 @@ export function flushSync(): void {
       }).catch(() => { /* 尽力而为 */ });
     } catch { /* 尽力而为 */ }
   };
-  if (pending.includes("prefs")) send("/me/prefs", { prefs: localPrefs() });
+  if (pending.includes("prefs")) {
+    const body = diffPrefs(localPrefs(), synced);
+    if (Object.keys(body).length) send("/me/prefs", { prefs: body });
+  }
   if (pending.includes("watchlist")) send("/me/watchlist", { items: watchlistPayload() });
   if (pending.includes("cards")) send("/me/cards", { items: cardsPayload() });
 }
@@ -134,12 +160,39 @@ export async function pullOnLogin(): Promise<void> {
     const [prefsR, wlR, cardsR] = await Promise.all([
       meApi.prefs(), meApi.watchlist(), meApi.cards(),
     ]);
-    // prefs：服务器缺失键 → 本地补上（合并后回推一次）
+    // prefs：新设备/新账号一律服务器优先（本机默认值不得覆盖云端）；
+    // 同一账号才按时间戳判断——本地更晚（离线改过）则以本地为准并回推
     const local = localPrefs();
-    const merged: Prefs = { ...local, ...prefsR.prefs };
-    const missing = Object.keys(local).some((k) => !(k in prefsR.prefs));
-    applyPrefs(merged);
-    if (missing) void meApi.putPrefs(merged).catch(() => { /* 静默 */ });
+    const srvPrefs = prefsR.prefs;
+    const uid = getState().user?.id || "";
+    const owner = localStorage.getItem("yc_sync_owner");
+    const firstBind = !!uid && owner !== uid;
+
+    if (firstBind) {
+      if (Object.keys(srvPrefs).length === 0) {
+        // 账号还没有云端偏好（首次登录）：把本机现有设置作为初始值上传
+        applyPrefs(local);
+        void meApi.putPrefs(local).catch(() => { /* 静默 */ });
+      } else {
+        applyPrefs(srvPrefs);
+        // 本地时间戳对齐云端，避免下次被误判成「本地更新」
+        if (typeof srvPrefs.k_at === "string" && srvPrefs.k_at) {
+          localStorage.setItem("yc_kprefsAt", srvPrefs.k_at);
+        } else {
+          localStorage.removeItem("yc_kprefsAt");
+        }
+      }
+    } else {
+      const srvAt = String(srvPrefs.k_at || "");
+      const locAt = String(local.k_at || "");
+      const localNewer = !!locAt && (!srvAt || locAt > srvAt);
+      const merged: Prefs = localNewer ? local : { ...local, ...srvPrefs };
+      const missing = Object.keys(local).some((k) => !(k in srvPrefs));
+      applyPrefs(merged);
+      if (localNewer || missing) void meApi.putPrefs(merged).catch(() => { /* 静默 */ });
+    }
+    if (uid) localStorage.setItem("yc_sync_owner", uid);
+    synced = localPrefs();   // 对齐基线：后续推送只带变更键
 
     // watchlist：服务器空且本地非空 → 推本地；否则服务器覆盖本地
     if (wlR.items.length === 0 && getState().watchlist.length > 0) {

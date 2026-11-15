@@ -166,6 +166,17 @@ def _daily(conn, table: str, spec: dict, latest: str | None,
             "expected": str(expected), "lag_days": lag}
 
 
+_REPORT_NAME = {(3, 31): "一季报", (6, 30): "半年报",
+                (9, 30): "三季报", (12, 31): "年报"}
+_REPORT_DUE = {(3, 31): "4/30", (6, 30): "8/31", (9, 30): "10/31", (12, 31): "次年 4/30"}
+
+
+def _report_label(d: date | None) -> tuple[str, str]:
+    """报告期末 → (中文名, 法定披露截止)，例如 2026-09-30 → (三季报, 10/31)。"""
+    key = (d.month, d.day) if d else (0, 0)
+    return _REPORT_NAME.get(key, "财报"), _REPORT_DUE.get(key, "按季")
+
+
 def _report(conn, table: str, spec: dict, latest: str | None,
             now: datetime) -> dict:
     expected = _expected_report(now)
@@ -173,9 +184,10 @@ def _report(conn, table: str, spec: dict, latest: str | None,
     score = 100 if behind == 0 else (60 if behind == 1 else 20)
     state = "ok" if score >= 100 else ("warn" if score >= 60 else "bad")
     if behind == 0:
-        badge = "符合季度周期"
-        note = (f"最新报告期 {latest}，已覆盖最近应披露的报告期"
-                f"（{expected}），符合季度披露节奏")
+        name, due = _report_label(_as_date(latest))
+        badge = f"{name} · 最新"      # 「45 天前」是报告期末到今天，不是数据滞后
+        note = (f"最新报告期 {latest}（{name}），法定披露截止 {due}；"
+                f"最近应披露报告期 {expected} 已在库，披露节奏正常")
     elif behind >= 99:
         badge = "无数据"
         note = f"库里没有财报数据，最近应披露报告期为 {expected}"
@@ -228,7 +240,8 @@ def _resident(conn, table: str, spec: dict, latest: str | None,
               rows: int, now: datetime) -> dict:
     if rows > 0:
         return {"score": 100, "state": "ok", "badge": "常驻清单",
-                "note": f"共 {rows} 只证券，新股会自动入池",
+                "note": f"全市场证券底册，共 {rows} 只（代码 / 名称 / 行业 / 上市状态）；"
+                        f"筛选、板块成分、选股与搜索都以它为范围，新股上市自动入池",
                 "expected": None, "lag_days": 0}
     return {"score": 0, "state": "bad", "badge": "清单为空",
             "note": "证券清单为空，无法确定全市场范围",

@@ -49,3 +49,8 @@ data/mainforce_cache/
 data/pinyin_cache.json
 .screenshots/
 .trae-html-share-packages/
+
+# 发布安装包不入库（HAP/APK/DMG 体积大、可重新构建；截图保留作文档素材）
+release/*.apk
+release/*.dmg
+release/*.hap

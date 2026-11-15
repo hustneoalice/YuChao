@@ -1,6 +1,6 @@
 /* 涨停追击收盘版：历史快照、精确涨停价、当前板块成分。 */
 import { API_BASE, getToken } from "../api";
-import { esc, fmt, fmtYiS, fmtVol } from "../fmt";
+import { esc, fmt, fmtP, fmtYiS, fmtVol } from "../fmt";
 import { createDataTable, type DataTable, type DataTableCol } from "../table";
 import { createPager, slicePage, type Pager } from "../pager";
 
@@ -37,34 +37,34 @@ let tableMode="",drill:Block|null=null;
 const height=(r:Stock)=>r.streak>0?`${r.streak_complete?"":"≥"}${r.streak}板${r.streak_complete?"":"（历史不足）"}`:"未封板";
 const status=(s:string)=>({one:"一字封板",sealed:"封板",broken:"触板未封",normal:"未涨停",unknown:"数据不足"}[s]||s);
 function stockColumns():DataTableCol<Stock>[] {return [
-  {label:"股票",render:r=>`<b>${esc(r.name)}</b><br><span class="muted">${esc(r.symbol)}</span>`},
-  {label:"状态",render:r=>status(r.status)},
-  {label:"连板高度",sort:"streak",render:r=>height(r)},
-  {label:"收盘价",num:true,sort:"close",render:r=>fmt(r.close)},
-  {label:"当日涨幅",num:true,sort:"change_rate",render:r=>pct(r.change_rate)},
-  {label:"主力净额",num:true,sort:"net",render:r=>netCell(r.net)},
-  {label:"所属板块（当前）",render:r=>r.blocks.map(esc).join(" / ")||"—"},
-  {label:"快照封单量",num:true,sort:"seal_shares",render:r=>r.seal_shares==null?"—":`${fmtVol(r.seal_shares)}股`},
-  {label:"快照封单额",num:true,sort:"seal_amount",render:r=>fmtYiS(r.seal_amount)},
-  {label:"封成比",num:true,sort:"seal_ratio",title:"本版口径：快照封单额 / 同日成交额，显示原始比值",render:r=>fmt(r.seal_ratio,4)},
-  {label:"封流比",num:true,sort:"seal_flow_ratio",title:"本版口径：快照封单额 / 同日流通市值，显示原始比值",render:r=>fmt(r.seal_flow_ratio,4)},
-  {label:"换手率",num:true,sort:"turnover_rate",render:r=>rate(r.turnover_rate)},
-  {label:"首次涨停时间",title:"需要盘中事件记录；缺失显示—",render:r=>r.first_limit_time||"—"},
-  {label:"操作",render:()=>'<button class="hbtn">日K</button>'},
+  {label:"股票",pri:1,render:r=>`<b>${esc(r.name)}</b><br><span class="muted">${esc(r.symbol)}</span>`},
+  {label:"状态",pri:2,render:r=>status(r.status)},
+  {label:"连板高度",pri:1,sort:"streak",render:r=>height(r)},
+  {label:"收盘价",num:true,pri:2,sort:"close",render:r=>fmtP(r.close, r.symbol)},
+  {label:"当日涨幅",num:true,pri:1,sort:"change_rate",render:r=>pct(r.change_rate)},
+  {label:"主力净额",num:true,pri:1,sort:"net",render:r=>netCell(r.net)},
+  {label:"所属板块（当前）",pri:3,render:r=>r.blocks.map(esc).join(" / ")||"—"},
+  {label:"快照封单量",num:true,pri:3,sort:"seal_shares",render:r=>r.seal_shares==null?"—":`${fmtVol(r.seal_shares)}股`},
+  {label:"快照封单额",num:true,pri:2,sort:"seal_amount",render:r=>fmtYiS(r.seal_amount)},
+  {label:"封成比",num:true,pri:3,sort:"seal_ratio",title:"本版口径：快照封单额 / 同日成交额，显示原始比值",render:r=>fmt(r.seal_ratio,4)},
+  {label:"封流比",num:true,pri:3,sort:"seal_flow_ratio",title:"本版口径：快照封单额 / 同日流通市值，显示原始比值",render:r=>fmt(r.seal_flow_ratio,4)},
+  {label:"换手率",num:true,pri:2,sort:"turnover_rate",render:r=>rate(r.turnover_rate)},
+  {label:"首次涨停时间",pri:3,title:"需要盘中事件记录；缺失显示—",render:r=>r.first_limit_time||"—"},
+  {label:"操作",pri:2,render:()=>'<button class="hbtn">日K</button>'},
 ];}
 function ensureTable(mode:string):void {
   if(mode===tableMode)return;
   tableMode=mode;
   if(mode==='blocks')blockTable=createDataTable(el('wrap'),[
-    {label:"板块",key:"block",render:r=>`<b>${esc(r.name)}</b><br><span class="muted">${esc(r.category)}</span>`},
-    {label:"成分均涨",key:"change_rate",num:true,sort:"change_rate",render:r=>pct(r.change_rate)},
-    {label:`${select('period').value}日成分均涨`,key:"period_change",num:true,sort:"period_change",render:r=>pct(r.period_change)},
-    {label:"涨停 / 成分",num:true,sort:"up_count",render:r=>`<button class="hbtn" data-members>${r.unknown_limits?"≥":""}${r.up_count} / ${r.members}</button>`},
-    {label:"涨停占比",num:true,sort:"up_ratio",render:r=>`${r.unknown_limits?"≥":""}${rate(r.up_ratio)}`},
-    {label:"一字家数",num:true,sort:"one_count",render:r=>String(r.one_count)},
-    {label:"已确认连板",num:true,sort:"consecutive_count",title:"至少连续两个交易日快照封板",render:r=>String(r.consecutive_count)},
-    {label:"区间数据覆盖",num:true,render:r=>`${r.period_coverage}/${r.members}`},
-    {label:"涨停价未知",num:true,render:r=>String(r.unknown_limits)},
+    {label:"板块",key:"block",pri:1,render:r=>`<b>${esc(r.name)}</b><br><span class="muted">${esc(r.category)}</span>`},
+    {label:"成分均涨",key:"change_rate",num:true,pri:1,sort:"change_rate",render:r=>pct(r.change_rate)},
+    {label:`${select('period').value}日成分均涨`,key:"period_change",num:true,pri:2,sort:"period_change",render:r=>pct(r.period_change)},
+    {label:"涨停 / 成分",num:true,pri:1,sort:"up_count",render:r=>`<button class="hbtn" data-members>${r.unknown_limits?"≥":""}${r.up_count} / ${r.members}</button>`},
+    {label:"涨停占比",num:true,pri:2,sort:"up_ratio",render:r=>`${r.unknown_limits?"≥":""}${rate(r.up_ratio)}`},
+    {label:"一字家数",num:true,pri:3,sort:"one_count",render:r=>String(r.one_count)},
+    {label:"已确认连板",num:true,pri:2,sort:"consecutive_count",title:"至少连续两个交易日快照封板",render:r=>String(r.consecutive_count)},
+    {label:"区间数据覆盖",num:true,pri:3,render:r=>`${r.period_coverage}/${r.members}`},
+    {label:"涨停价未知",num:true,pri:3,render:r=>String(r.unknown_limits)},
   ],{tblKey:"chase-blocks",defaultSort:{label:"成分均涨",dir:-1},onChange:()=>{pager.reset();paint();},rowKey:r=>r.code,
       empty:"没有含已确认涨停股的板块。",onRow:r=>{drill=r;pager.reset();paint();}});
   else stockTable=createDataTable(el('wrap'),stockColumns(),{

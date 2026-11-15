@@ -28,7 +28,8 @@ def _topup(duckdb_file):
     conn = _rw(duckdb_file)
     conn.execute("INSERT INTO financials VALUES "
                  "('600519','2026-09-30',9.2e9,0.15,0.31,0.21,1.1e10,1)")
-    conn.execute("INSERT OR REPLACE INTO adjust_factor VALUES "
+    conn.execute("INSERT OR REPLACE INTO adjust_factor "
+                 "(symbol, ex_date, fore_adjust_factor, back_adjust_factor) VALUES "
                  "('600519','2026-10-24',1.0,1.12)")
     conn.execute("INSERT OR REPLACE INTO daily_valuation VALUES "
                  "('300750','2026-10-30',28.0,9.1,6.2,15.0,1.1e12,9.0e11,2.0e10)")

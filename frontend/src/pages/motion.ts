@@ -1,6 +1,6 @@
 /* 主力动向试验榜：固定近似模型，按所选日重算，不与原公式混淆。 */
 import { API_BASE, getToken } from "../api";
-import { esc, fmt, fmtYiS } from "../fmt";
+import { esc, fmt, fmtP, fmtYiS } from "../fmt";
 import { createDataTable, type DataTable } from "../table";
 
 interface MotionRow {
@@ -63,16 +63,16 @@ export async function loadMotion(): Promise<void> {
 function initMotion(): void {
   initialized=true;
   table=createDataTable(el("wrap"),[
-    {label:"力度排名",num:true,sort:"rank",render:r=>String(r.rank)},
-    {label:"股票",render:r=>`<b>${esc(r.name)}</b><br><span class="muted">${esc(r.symbol)}</span>`},
-    {label:"近似力度",num:true,sort:"score_raw",render:r=>`<b>${r.score}</b>`},
-    {label:"主力净额",num:true,sort:"net",render:r=>netCell(r.net)},
-    {label:"当日占比",num:true,sort:"ratio",render:r=>pct(r.ratio)},
-    {label:"相对20日放量",num:true,sort:"volume_rel20",title:"当日成交量 / 此前20个交易日平均成交量（不含当日）",render:r=>`${fmt(r.volume_rel20)}倍`},
-    {label:"收盘价",num:true,sort:"close",render:r=>fmt(r.close)},
-    {label:"当日涨幅",num:true,sort:"change_rate",render:r=>chgPct(r.change_rate)},
-    {label:"评分依据",render:r=>`<details><summary>查看贡献</summary><div>基准 ${fmt(r.contributions.intercept)}<br>资金项 ${fmt(r.contributions.log_net)}<br>占比项 ${fmt(r.contributions.ratio)}<br>放量项 ${fmt(r.contributions.volume_rel20)}</div></details>`},
-    {label:"操作",render:()=>'<button class="hbtn">日K</button>'},
+    {label:"力度排名",num:true,pri:3,sort:"rank",render:r=>String(r.rank)},
+    {label:"股票",pri:1,render:r=>`<b>${esc(r.name)}</b><br><span class="muted">${esc(r.symbol)}</span>`},
+    {label:"近似力度",num:true,pri:1,sort:"score_raw",render:r=>`<b>${r.score}</b>`},
+    {label:"主力净额",num:true,pri:1,sort:"net",render:r=>netCell(r.net)},
+    {label:"当日占比",num:true,pri:2,sort:"ratio",render:r=>pct(r.ratio)},
+    {label:"相对20日放量",num:true,pri:2,sort:"volume_rel20",title:"当日成交量 / 此前20个交易日平均成交量（不含当日）",render:r=>`${fmt(r.volume_rel20)}倍`},
+    {label:"收盘价",num:true,pri:2,sort:"close",render:r=>fmtP(r.close, r.symbol)},
+    {label:"当日涨幅",num:true,pri:1,sort:"change_rate",render:r=>chgPct(r.change_rate)},
+    {label:"评分依据",pri:3,render:r=>`<details><summary>查看贡献</summary><div>基准 ${fmt(r.contributions.intercept)}<br>资金项 ${fmt(r.contributions.log_net)}<br>占比项 ${fmt(r.contributions.ratio)}<br>放量项 ${fmt(r.contributions.volume_rel20)}</div></details>`},
+    {label:"操作",pri:2,render:()=>'<button class="hbtn">日K</button>'},
   ],{tblKey:"motion",defaultSort:{label:"近似力度",dir:-1},onChange:paint,rowKey:r=>r.symbol,
     empty:"该日暂无可评分股票；请检查同日资金、成交额及此前20日成交量。",
     onRow:(r,event)=>{

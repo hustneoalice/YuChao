@@ -1,0 +1,9 @@
+{
+  "name": "entry",
+  "version": "1.2.0",
+  "description": "驭潮 YuChao 入口模块",
+  "main": "",
+  "author": "neoix",
+  "license": "",
+  "dependencies": {}
+}

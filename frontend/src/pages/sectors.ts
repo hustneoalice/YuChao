@@ -81,19 +81,19 @@ function rowOf(code: string): ZyBlockRow | null {
 
 /* ── 排行表列 ── */
 const RANK_COLS: DataTableCol<ZyBlockRow>[] = [
-  { label: "#", width: 32, mono: true, render: (_r, i) => `<span style="color:var(--faint)">${i + 1}</span>` },
-  { label: "板块", sort: (r) => r.block_name, render: (r) =>
+  { label: "#", width: 32, mono: true, pri: 3, render: (_r, i) => `<span style="color:var(--faint)">${i + 1}</span>` },
+  { label: "板块", pri: 1, sort: (r) => r.block_name, render: (r) =>
       `<span style="font-weight:600">${esc(r.block_name)}</span>` },
-  { label: "均涨%", num: true, sort: (r) => r.avg_change ?? null, render: (r) => pctHtml(r.avg_change) },
-  { label: "上涨占比", num: true, sort: (r) => upRate(r), render: (r) => breadthCell(r) },
-  { label: "涨/跌", num: true, sort: (r) => r.up_count - r.down_count, render: (r) =>
+  { label: "均涨%", num: true, pri: 1, sort: (r) => r.avg_change ?? null, render: (r) => pctHtml(r.avg_change) },
+  { label: "上涨占比", num: true, pri: 1, sort: (r) => upRate(r), render: (r) => breadthCell(r) },
+  { label: "涨/跌", num: true, pri: 2, sort: (r) => r.up_count - r.down_count, render: (r) =>
       `<span class="up num">${r.up_count}</span><span style="color:var(--faint)"> / </span><span class="down num">${r.down_count}</span>` },
-  { label: "成交额", num: true, sort: (r) => r.amount ?? null, render: (r) => fmtYi(r.amount) },
-  { label: "领涨股", sort: (r) => r.leader_change ?? null, title: "板块内涨幅最高的成分股", render: (r) =>
+  { label: "成交额", num: true, pri: 2, sort: (r) => r.amount ?? null, render: (r) => fmtYi(r.amount) },
+  { label: "领涨股", pri: 2, sort: (r) => r.leader_change ?? null, title: "板块内涨幅最高的成分股", render: (r) =>
       r.leader ? `${esc(r.leader)} ${pctHtml(r.leader_change)}` : `<span style="color:var(--faint)">—</span>` },
-  { label: "热度", num: true, sort: (r) => hotScore(r), title: "成交额 40% + 上涨占比 25% + 领涨 20% + 均涨 15%",
+  { label: "热度", num: true, pri: 2, sort: (r) => hotScore(r), title: "成交额 40% + 上涨占比 25% + 领涨 20% + 均涨 15%",
     render: (r) => hotCell(hotScore(r)) },
-  { label: "成分", num: true, sort: (r) => r.total_members, title: "全部成分 / 有当日快照",
+  { label: "成分", num: true, pri: 3, sort: (r) => r.total_members, title: "全部成分 / 有当日快照",
     render: (r) => `<span style="color:var(--faint)">${r.total_members}</span>` },
 ];
 
@@ -111,13 +111,13 @@ function hotCell(score: number): string {
 
 /* ── 成分股列（服务端排序/分页，字段与全景大表一致） ── */
 const MEM_COLS: DataTableCol<BoardRow>[] = [
-  { label: "#", width: 30, mono: true, render: (_r, i) => `<span style="color:var(--faint)">${i + 1}</span>` },
-  { label: "代码", mono: true, sort: "symbol", render: (r) => r.symbol },
-  { label: "名称", sort: "name", render: (r) => `<span style="font-weight:600">${esc(r.name || "—")}</span>` },
-  { label: "现价", num: true, render: (r) => fmt(r.current) },
-  { label: "涨跌幅", num: true, sort: "change_rate", render: (r) => pctHtml(r.change_rate) },
-  { label: "成交额", num: true, sort: "amount", render: (r) => fmtYi(r.amount) },
-  { label: "换手%", num: true, render: (r) => fmt(r.turnover_rate) },
+  { label: "#", width: 30, mono: true, pri: 3, render: (_r, i) => `<span style="color:var(--faint)">${i + 1}</span>` },
+  { label: "代码", mono: true, pri: 2, sort: "symbol", render: (r) => r.symbol },
+  { label: "名称", pri: 1, sort: "name", render: (r) => `<span style="font-weight:600">${esc(r.name || "—")}</span>` },
+  { label: "现价", num: true, pri: 1, render: (r) => fmt(r.current) },
+  { label: "涨跌幅", num: true, pri: 1, sort: "change_rate", render: (r) => pctHtml(r.change_rate) },
+  { label: "成交额", num: true, pri: 2, sort: "amount", render: (r) => fmtYi(r.amount) },
+  { label: "换手%", num: true, pri: 3, render: (r) => fmt(r.turnover_rate) },
 ];
 
 /* ── 视图渲染 ── */

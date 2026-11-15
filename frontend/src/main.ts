@@ -26,12 +26,22 @@ import { SseClient } from "./sse";
 import { initWatchPanel } from "./watch";
 
 const loaded = { watchlist: false, sectors: false, corepicks: false };
+/** 手机底栏「更多」抽屉里的页面：当前页在其中时，更多按钮保持高亮 */
+const MORE_PAGES = ["mainforce", "motion", "chase", "sectors", "corepicks", "ai", "cards", "settings"];
+
+/** 手机搜索页的来路：返回时回到这一页（搜索页本身不记入） */
+let searchFrom = "market";
 
 function goPage(p: string): void {
+  if (p !== "search") searchFrom = p;
+  document.body.classList.toggle("in-search", p === "search");   // 搜索页收起顶栏
   document.querySelectorAll(".page").forEach((x) => x.classList.toggle("on", x.id === "page-" + p));
-  document.querySelectorAll("#rail a").forEach((a) => a.classList.toggle("on", (a as HTMLElement).dataset.page === p));
-  document.querySelectorAll("#mtabs a").forEach((a) => a.classList.toggle("on", (a as HTMLElement).dataset.page === p));
-  if (p === "market") renderKline();
+  if (p !== "search") {   // 搜索页不是固定页签：保持底栏/侧栏原高亮
+    document.querySelectorAll("#rail a").forEach((a) => a.classList.toggle("on", (a as HTMLElement).dataset.page === p));
+    document.querySelectorAll("#mtabs a").forEach((a) => a.classList.toggle("on", (a as HTMLElement).dataset.page === p));
+    document.querySelector("#m-more-btn")?.classList.toggle("on", MORE_PAGES.includes(p));
+  }
+  if (p === "market") { renderKline(); requestAnimationFrame(() => klResize()); }
   if (p === "panorama") loadPanorama();
   if (p === "mainforce") void loadMainforce();
   if (p === "motion") void loadMotion();
@@ -41,6 +51,17 @@ function goPage(p: string): void {
   if (p === "sectors" && !loaded.sectors) { loaded.sectors = true; void loadSectors(); }
   if (p === "corepicks" && !loaded.corepicks) { loaded.corepicks = true; initCorepicks(); }
   if (p === "cards") renderCards();
+  if (p === "mcards") renderRight();      // 手机版卡片页：进入时重画右侧卡片
+}
+
+/* ── 手机版「卡片」页：把行情页右侧卡片栏整块搬进独立页；回到桌面再搬回行情页 ── */
+function syncCardsHost(): void {
+  const col = document.getElementById("rightcol");
+  const row = document.querySelector(".mkt-row");
+  const page = document.getElementById("page-mcards");
+  if (!col || !row || !page) return;
+  const target = document.body.classList.contains("mobile") ? page : row;
+  if (col.parentElement !== target) target.appendChild(col);
 }
 
 /* ── 全局搜索（共享组件：代码/名称/拼音模糊 + 最近搜索历史 + 涨跌幅回填） ── */
@@ -73,6 +94,62 @@ function initSearch(): void {
       input.focus();
       input.select();
     }
+  });
+}
+
+/* ── 手机版：每个页面的标题行（.phead）末尾补一个搜索图标，搜索永远与标题同行 ── */
+function addMobileSearchButtons(): void {
+  document.querySelectorAll<HTMLElement>(".page .phead").forEach((ph) => {
+    if (ph.querySelector("[data-open-search]")) return;
+    const b = document.createElement("button");
+    b.type = "button";
+    b.className = "icbtn msearch-inline";
+    b.dataset.openSearch = "1";
+    b.title = "搜索";
+    b.setAttribute("aria-label", "搜索");
+    b.innerHTML = ic("magnifying-glass", 16);
+    ph.appendChild(b);
+  });
+}
+
+/* ── 手机版搜索页：顶栏放大镜进入，返回回到来路页面 ── */
+function initSearchPage(): void {
+  const input = document.getElementById("sinput") as HTMLInputElement;
+  const list = document.getElementById("sres")!;
+  const open = (): void => {
+    goPage("search");
+    window.setTimeout(() => input.focus(), 30);   // 等页面切换完成再聚焦，避免键盘抢占
+  };
+  const back = (): void => {
+    input.value = "";
+    input.blur();
+    goPage(searchFrom);
+  };
+  document.getElementById("btn-search")!.addEventListener("click", open);
+  // 各页标题行里的内联搜索按钮（手机版：搜索永远跟标题同一行，不单独占行）
+  document.addEventListener("click", (e) => {
+    if ((e.target as HTMLElement).closest("[data-open-search]")) open();
+  });
+  document.getElementById("btn-search-back")!.addEventListener("click", back);
+  document.getElementById("btn-search-cancel")!.addEventListener("click", back);
+  document.addEventListener("keydown", (e) => {
+    if (e.key === "Escape" && document.getElementById("page-search")!.classList.contains("on")) back();
+  });
+  stockSearch({
+    input,
+    list,
+    onPick: (u) => {
+      if (u.kind === "sector") {
+        document.dispatchEvent(new CustomEvent("yc:open-sector", {
+          detail: { id: u.symbol, sub: u.sub } }));
+        toast(`已切换至板块 ${u.name || u.symbol}`);
+      } else {
+        void openStock({ symbol: u.symbol, name: u.name || u.symbol });
+        toast(`已切换至 ${u.name || u.symbol}`);
+      }
+      input.value = "";
+      input.blur();
+    },
   });
 }
 
@@ -117,46 +194,88 @@ function applyDevice(m: DeviceMode, persist = true): void {
   document.body.classList.toggle("mobile", m !== "desktop");
   document.body.classList.toggle("fold", m === "fold");
   document.body.classList.toggle("phone", m === "phone");
-  document.querySelectorAll<HTMLElement>("#dev-toggle button").forEach((b) =>
+  document.querySelectorAll<HTMLElement>("#dev-toggle button, #dev-toggle-m button").forEach((b) =>
     b.classList.toggle("on", b.dataset.dev === m));
   if (persist) localStorage.setItem("yc_device", m);
+  window.dispatchEvent(new CustomEvent("yc:device", { detail: m }));
+  syncCardsHost();            // 卡片栏归属随设备档位切换
   if (document.getElementById("page-market")!.classList.contains("on")) klResize();
 }
 function initDevice(): void {
   const saved = localStorage.getItem("yc_device") as DeviceMode | null;
-  const w = window.innerWidth;
-  const auto: DeviceMode = w <= 480 ? "phone" : w <= 820 ? "fold" : "desktop";
-  const mode: DeviceMode = saved === "desktop" || saved === "fold" || saved === "phone"
-    ? saved : auto;
-  applyDevice(mode, saved != null); // 首次访问跟随视口且不落盘，手动切换后才记忆
+  const pick = (w: number): DeviceMode => w <= 480 ? "phone" : w <= 900 ? "fold" : "desktop";
+  // 预览/调试用：?device=phone|fold|desktop 强制档位，不写入本地偏好
+  const q = new URLSearchParams(location.search).get("device");
+  const forced: DeviceMode | null =
+    q === "desktop" || q === "fold" || q === "phone" ? q : null;
+  const mode: DeviceMode = forced
+    ?? (saved === "desktop" || saved === "fold" || saved === "phone" ? saved : pick(window.innerWidth));
+  applyDevice(mode, forced == null && saved != null); // 首次访问跟随视口且不落盘，手动切换后才记忆
+  let userPicked = forced != null || saved != null;
   document.getElementById("dev-toggle")!.addEventListener("click", (e) => {
     const b = (e.target as HTMLElement).closest<HTMLElement>("button[data-dev]");
-    if (b) applyDevice(b.dataset.dev as DeviceMode);
+    if (b) { userPicked = true; applyDevice(b.dataset.dev as DeviceMode); }
   });
-  document.querySelectorAll<HTMLElement>("#mtabs a").forEach((a) =>
-    a.addEventListener("click", () => goPage(a.dataset.page!)));
-  // 移动端行情页「图表 / 卡片」分段：卡片态隐藏 K 线列，直达信息卡片区免滚动
-  document.getElementById("m-mkt-seg")!.addEventListener("click", (e) => {
-    const b = (e.target as HTMLElement).closest<HTMLElement>("button[data-mv]");
+  // 折叠屏展开/合起、横竖屏切换：未手动选过设备时跟随视口重新分档
+  let rt = 0;
+  window.addEventListener("resize", () => {
+    if (userPicked) return;
+    clearTimeout(rt);
+    rt = window.setTimeout(() => {
+      const next = pick(window.innerWidth);
+      const cur: DeviceMode = document.body.classList.contains("phone") ? "phone"
+        : document.body.classList.contains("fold") ? "fold" : "desktop";
+      if (next !== cur) applyDevice(next, false);
+    }, 160);
+  });
+  // 手机底栏「更多」抽屉：其余页面收纳在这里
+  const more = document.getElementById("m-more")!;
+  const moreBtn = document.getElementById("m-more-btn")!;
+  const setMore = (on: boolean) => {
+    more.classList.toggle("on", on);
+    more.setAttribute("aria-hidden", String(!on));
+    moreBtn.setAttribute("aria-expanded", String(on));
+  };
+  moreBtn.addEventListener("click", () => setMore(!more.classList.contains("on")));
+  more.querySelectorAll("[data-close]").forEach((x) =>
+    x.addEventListener("click", () => setMore(false)));
+  more.querySelectorAll<HTMLElement>("a[data-page]").forEach((a) =>
+    a.addEventListener("click", () => { goPage(a.dataset.page!); setMore(false); }));
+  // 手机版顶栏隐藏后，设备档位只能在「更多」里切；选桌面后抽屉随之关闭
+  document.getElementById("dev-toggle-m")!.addEventListener("click", (e) => {
+    const b = (e.target as HTMLElement).closest<HTMLElement>("button[data-dev]");
     if (!b) return;
-    const cards = b.dataset.mv === "cards";
-    document.body.classList.toggle("m-cards", cards);
-    document.querySelectorAll<HTMLElement>("#m-mkt-seg button").forEach((x) =>
-      x.classList.toggle("on", x === b));
-    if (!cards) klResize();
+    userPicked = true;
+    applyDevice(b.dataset.dev as DeviceMode);
+    setMore(false);
   });
+  document.addEventListener("keydown", (e) => {
+    if (e.key === "Escape") setMore(false);
+  });
+
+  document.querySelectorAll<HTMLElement>("#mtabs a").forEach((a) =>
+    a.addEventListener("click", () => { goPage(a.dataset.page!); setMore(false); }));
+  // 移动端行情页「图表 / 卡片」分段：卡片态隐藏 K 线列，直达信息卡片区免滚动
 }
 
 /* ── 启动 ── */
 function boot(): void {
   applyAppearance();
   injectIcons();
+  // PWA：HTTPS / localhost 下注册外壳 SW，安装到桌面后全屏启动（HTTP 公网 IP 非安全上下文，自动跳过）
+  if ("serviceWorker" in navigator && window.isSecureContext) {
+    window.addEventListener("load", () => {
+      void navigator.serviceWorker.register("/sw.js").catch(() => {});
+    });
+  }
   bindModalChrome();          // 弹窗关闭（X / 遮罩）：之前漏调用，登录框弹出后关不掉
   bindSegInfo();              // 六分段「示意图」小按钮：全局委托，悬停/点击弹层
   bindNav();
   initDevice();
   initRailResize();
   initSearch();
+  addMobileSearchButtons();
+  initSearchPage();           // 手机版独立搜索页（顶栏放大镜进入）
   initAuth();
   initMarket();
   initPanorama();
@@ -194,6 +313,9 @@ function boot(): void {
     const dot = accentsEl.querySelector<HTMLElement>(".sw-custom i");
     if (inp) inp.value = s.accentCustom;
     if (dot) dot.style.background = s.accentCustom;
+    // 状态栏 / 任务栏跟随主题（PWA 全屏启动时生效）
+    document.querySelector('meta[name="theme-color"]')
+      ?.setAttribute("content", s.theme === "dark" ? "#0A0A0B" : "#F5F5F7");
   };
   drawTheme();
   btn.addEventListener("click", () => {

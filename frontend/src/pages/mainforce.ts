@@ -23,37 +23,38 @@ function numberCell(v: number | null, money = false): string {
 }
 function columns(): DataTableCol<MainforceRow>[] {
   const cols: DataTableCol<MainforceRow>[] = [
-    { label: "#", width: 40, mono: true, render: (_r, i) => String(i + 1) },
+    { label: "#", width: 40, mono: true, pri: 3, render: (_r, i) => String(i + 1) },
   ];
-  if (view === "stocks") cols.push({ label: "代码", width: 90, mono: true, render: (r) => esc(r.symbol || r.key) });
-  cols.push({ label: "名称", width: 140, sort: "name", render: (r) => `<b>${esc(r.name || "名称暂缺")}</b>` });
+  if (view === "stocks") cols.push({ label: "代码", width: 90, mono: true, pri: 2, render: (r) => esc(r.symbol || r.key) });
+  cols.push({ label: "名称", width: 140, pri: 1, sort: "name", render: (r) => `<b>${esc(r.name || "名称暂缺")}</b>` });
   sortKeys["名称"] = "name";
   const changeLabel = view === "blocks" ? "成分均涨%" : "涨幅%";
   sortKeys[changeLabel] = "change_rate";
-  cols.push({ label: changeLabel, num: true, sort: "change_rate", title: "资金截止日行情，板块为成分平均涨幅", render: (r) => numberCell(r.change_rate) });
+  cols.push({ label: changeLabel, num: true, pri: 1, sort: "change_rate", title: "资金截止日行情，板块为成分平均涨幅", render: (r) => numberCell(r.change_rate) });
   if (view === "blocks") {
     sortKeys["涨停家数"] = "limit_up_count";
     cols.push(
-      { label: "涨停家数", num: true, sort: "limit_up_count", title: "资金截止日收盘涨停家数；缺少同日精确涨停价时显示—", render: (r) => r.limit_up_count == null ? "—" : String(r.limit_up_count) },
-      { label: "成分股数量", num: true, render: (r) => r.block_code ? `<button class="hbtn" data-members title="查看成分股资金动向">成分股（${r.members}）</button>` : String(r.members) },
+      { label: "涨停家数", num: true, pri: 2, sort: "limit_up_count", title: "资金截止日收盘涨停家数；缺少同日精确涨停价时显示—", render: (r) => r.limit_up_count == null ? "—" : String(r.limit_up_count) },
+      { label: "成分股数量", num: true, pri: 2, render: (r) => r.block_code ? `<button class="hbtn" data-members title="查看成分股资金动向">成分股（${r.members}）</button>` : String(r.members) },
     );
   } else {
-    cols.push({ label: "查看", render: () => '<button class="hbtn" data-stock>日K</button>' });
+    cols.push({ label: "查看", pri: 2, render: () => '<button class="hbtn" data-stock>日K</button>' });
   }
   for (const [group, name] of [["main", "主力"], ["medium", "游资"], ["small", "散户"]] as const) {
     for (const [field, label] of [["net", "净额"], ["participation", "介入度"], ["ratio", "占比"]] as const) {
       const title = `${name}${label}`;
       sortKeys[title] = `${group}_${field}`;
-      cols.push({ label: title, num: true, sort: (r) => r[group][field],
+      const pri = group === "main" ? (field === "net" ? 1 : field === "participation" ? 2 : 3) : 3;
+      cols.push({ label: title, num: true, pri, sort: (r) => r[group][field],
         title: field === "net" ? "累计净流入，单位元（显示为亿元）" : field === "participation" ? "累计净额 / 同期流通市值合计 × 100%" : "累计净额 / 同期成交额合计 × 100%",
         render: (r) => numberCell(r[group][field], field === "net") });
     }
   }
   sortKeys["连续净流入"] = "continuous_inflow_days";
   cols.push(
-    { label: "连续净流入", num: true, sort: "continuous_inflow_days", title: "主力连续净流入天数；≥表示回溯上限", render: (r) => r.continuous_inflow_days == null ? "—" : `${r.streak_capped ? "≥" : ""}${r.continuous_inflow_days}天` },
-    { label: "资金覆盖", num: true, title: "有资金记录的成分股日 / 成分数 × 实际交易日数", render: (r) => `${r.covered}/${r.expected}` },
-    { label: "最大净流入股", render: (r) => r.top_stock_symbol ? `<button class="mf-stock" data-top title="打开日K">${esc(r.top_stock_name || r.top_stock_symbol)}</button>` : esc(r.top_stock_name || "—") },
+    { label: "连续净流入", num: true, pri: 2, sort: "continuous_inflow_days", title: "主力连续净流入天数；≥表示回溯上限", render: (r) => r.continuous_inflow_days == null ? "—" : `${r.streak_capped ? "≥" : ""}${r.continuous_inflow_days}天` },
+    { label: "资金覆盖", num: true, pri: 3, title: "有资金记录的成分股日 / 成分数 × 实际交易日数", render: (r) => `${r.covered}/${r.expected}` },
+    { label: "最大净流入股", pri: 2, render: (r) => r.top_stock_symbol ? `<button class="mf-stock" data-top title="打开日K">${esc(r.top_stock_name || r.top_stock_symbol)}</button>` : esc(r.top_stock_name || "—") },
   );
   return cols;
 }

@@ -2,7 +2,7 @@
  * 结构：头部信息条（密度可配）+ 指标控制条（主图/副图开关）+ K 线本体。
  * 行情页多面板共享一条信息条 → 面板用 head:"none"；全景用 title + 指标开关的紧凑配置。 */
 import type { Bar } from "./api";
-import { esc, fmt } from "./fmt";
+import { esc, fmt, fmtP } from "./fmt";
 import { ic } from "./icons";
 import { IND_BY_KEY, mountKline, type KlineChartHandle, type MainKey, type SubKey } from "./pages/kline";
 
@@ -65,8 +65,8 @@ const SHORT_LABEL: Record<string, string> = {
 
 const labelOf = (k: string): string => SHORT_LABEL[k] ?? IND_BY_KEY[k]?.label ?? k;
 
-const num = (v?: number | null): string =>
-  (v == null || !isFinite(v) ? "—" : fmt(v));
+const num = (v?: number | null, symbol?: string | null): string =>
+  (v == null || !isFinite(v) ? "—" : fmtP(v, symbol));
 
 /** 信息条 HTML：行情页共享条与面板头部共用同一套渲染，密度只由 mode 决定。
  *  quickAsk=true 时在「昨收」后挂一个快速问股机器人入口（行情页头部用）。 */
@@ -83,15 +83,15 @@ export function quoteHeadHtml(info: ChartInfo | null, mode: Exclude<ChartHeadMod
   if (mode === "full" && info.industry) parts.push(`<span class="ksy-ind">${esc(info.industry)}</span>`);
   let q = "";
   if (info.price != null) {
-    q += `<b class="${cls}">${num(info.price)}</b>`;
+    q += `<b class="${cls}">${num(info.price, info.code)}</b>`;
     if (pct != null) q += `<span class="${cls}">${pct >= 0 ? "+" : ""}${pct.toFixed(2)}%</span>`;
   }
   if (mode === "full") {
     const pc = info.prevClose;
-    q += `<span class="dim">开 <b class="${(info.open ?? 0) >= (pc ?? 0) ? "up" : "down"}">${num(info.open)}</b></span>` +
-      `<span class="dim">高 <b class="up">${num(info.high)}</b></span>` +
-      `<span class="dim">低 <b class="down">${num(info.low)}</b></span>` +
-      (pc == null ? "" : `<span class="dim">昨收 <b class="num">${num(pc)}</b></span>`);
+    q += `<span class="dim">开 <b class="${(info.open ?? 0) >= (pc ?? 0) ? "up" : "down"}">${num(info.open, info.code)}</b></span>` +
+      `<span class="dim">高 <b class="up">${num(info.high, info.code)}</b></span>` +
+      `<span class="dim">低 <b class="down">${num(info.low, info.code)}</b></span>` +
+      (pc == null ? "" : `<span class="dim">昨收 <b class="num">${num(pc, info.code)}</b></span>`);
   }
   parts.push(`<span class="ksy-q">${q}</span>`);
   if (quickAsk) {

@@ -70,5 +70,9 @@ sudo systemctl enable yuchao-api >/dev/null 2>&1 || true
 sudo systemctl restart yuchao-api
 sudo systemctl reload-or-restart caddy
 
-echo "完成：http://$(curl -s -m 3 https://api.ipify.org || echo 127.0.0.1)/"
+if [ "$DOMAIN" = ":80" ]; then
+  echo "完成：http://$(curl -s -m 3 https://api.ipify.org || echo 127.0.0.1)/"
+else
+  echo "完成：https://$DOMAIN/（Caddy 自动签发证书，首次打开可能等几秒）"
+fi
 echo "状态：systemctl status yuchao-api --no-pager"

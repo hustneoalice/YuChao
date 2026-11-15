@@ -94,6 +94,19 @@ const DATA_TYPE_ZH: Record<string, string> = {
 /** 大数 → 人话：1.2 万（数据总量/新增条数用） */
 const fmtW = (n: number): string => (n >= 10000 ? `${(n / 10000).toFixed(1)} 万` : fmt(n, 0));
 
+/** 更新记录时间：今天/昨天用相对词，更早补 MM-DD —— 只给时分会分不清是哪天 */
+function fmtWhen(v?: string | null): string {
+  const s = (v || "").replace("T", " ").trim();
+  const day = s.slice(0, 10), hm = s.slice(11, 16);
+  if (day.length !== 10 || !hm) return s.slice(0, 16) || "--:--:--";
+  const ds = (d: Date): string =>
+    `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-${String(d.getDate()).padStart(2, "0")}`;
+  const now = new Date();
+  if (day === ds(now)) return `今天 ${hm}`;
+  if (day === ds(new Date(now.getTime() - 86400000))) return `昨天 ${hm}`;
+  return `${day.slice(5)} ${hm}`;
+}
+
 
 let upTimer: ReturnType<typeof setInterval> | null = null;
 const stopUpState = (): void => { if (upTimer) { clearInterval(upTimer); upTimer = null; } };
@@ -208,7 +221,7 @@ async function refreshUpState(): Promise<void> {
       parts.push(`<details open><summary class="uprecent">最近 ${Math.min(recent.length, 5)} 次更新记录</summary>` +
         `<div class="uprecent-list">${recent.slice(0, 5).map((t) => {
           const st = UP_STATUS[t.status] ?? UP_STATUS.skipped;
-          const tm = (t.finished_at || t.started_at || "").slice(11, 19) || "--:--:--";
+          const tm = fmtWhen(t.finished_at || t.started_at);
           return `<div class="uprow" style="font-size:11.5px">` +
             `<i class="logdot ${st.dot}" style="width:6px;height:6px"></i>` +
             `<span class="num" style="color:var(--dim);flex:none">${esc(tm)}</span>` +
@@ -393,8 +406,10 @@ async function renderData(body: HTMLElement): Promise<void> {
       const cov = typeof t.coverage === "number" ? t.coverage : null;
       const covCls = cov == null ? "" : cov >= 90 ? "" : cov >= 50 ? "mid" : "bad";
       const title = [t.fresh_note, t.cycle ? `更新周期：${t.cycle}` : ""].filter(Boolean).join(" · ");
+      // 常驻清单没有日期维度：日期位写「全市场」，避免出现让人误解的「—」
+      const dtext = t.latest_date || (t.fresh_badge === "常驻清单" ? "全市场" : "—");
       return `<div class="dscard" title="${esc(title)}"><div class="ds-h"><i class="logdot ${cls}"></i><b>${esc(TABLE_ZH[t.table] || "其他数据")}</b></div>` +
-        `<div class="ds-date num">${esc(t.latest_date || "—")}</div>` +
+        `<div class="ds-date num">${esc(dtext)}</div>` +
         `<div class="ds-m"><span class="num">${fmtW(t.rows ?? 0)} 条</span>` +
         `<span class="sp"></span><span class="fresh ${cls}">${esc(label)}</span></div>` +
         (cov != null ? `<div class="ds-cov ${covCls}"><div class="bar"><i style="width:${Math.max(cov, 1.5)}%"></i></div>` +

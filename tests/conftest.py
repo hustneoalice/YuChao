@@ -17,6 +17,7 @@ CREATE TABLE IF NOT EXISTS daily_ohlcv (
 );
 CREATE TABLE IF NOT EXISTS adjust_factor (
     symbol VARCHAR, ex_date VARCHAR, fore_adjust_factor DOUBLE, back_adjust_factor DOUBLE,
+    fore_offset DOUBLE, back_offset DOUBLE,
     PRIMARY KEY (symbol, ex_date)
 );
 CREATE TABLE IF NOT EXISTS capital_flow (
@@ -87,7 +88,8 @@ def duckdb_file(tmp_path):
     )
     # 复权因子（1.0 口径：fore 最新=1，back 最早=1）
     conn.executemany(
-        "INSERT INTO adjust_factor VALUES (?,?,?,?)",
+        "INSERT INTO adjust_factor "
+        "(symbol, ex_date, fore_adjust_factor, back_adjust_factor) VALUES (?,?,?,?)",
         [("600519", "2026-09-05", 0.9, 1.0), ("600519", "2026-09-20", 1.0, 1.1)],
     )
     conn.executemany(

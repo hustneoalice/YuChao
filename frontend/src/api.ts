@@ -344,6 +344,10 @@ export const marketApi = {
   /* 当日分时（价格 + VWAP 均价 + 逐分钟量额，腾讯实时） */
   minute: (symbol: string) =>
     req<{ symbol: string; date: string; prev_close?: number; bars: (Bar & { avg: number; has_avg?: boolean })[] }>(`/market/minute?symbol=${encodeURIComponent(symbol)}`),
+  /* 历史某日的日内走势（5 分钟粒度，baostock；与 K 线同复权口径） */
+  histIntraday: (symbol: string, date: string, adjust = "qfq") =>
+    req<{ symbol: string; date: string; prev_close?: number | null; granularity: number; adjust: string; bars: (Bar & { avg: number; has_avg?: boolean })[] }>(
+      `/market/intraday?symbol=${encodeURIComponent(symbol)}&date=${encodeURIComponent(date)}&adjust=${encodeURIComponent(adjust)}`),
   quote: (symbol: string, opts?: { signal?: AbortSignal }) =>
     req<Quote>(`/market/quote?symbol=${encodeURIComponent(symbol)}`, { signal: opts?.signal }),
   /* 五档盘口（腾讯实时，后端 3s 缓存） */

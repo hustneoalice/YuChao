@@ -2,7 +2,15 @@
 <html lang="zh-CN" data-theme="dark" data-dir="cn" data-accent="amber">
 <head>
 <meta charset="UTF-8">
-<meta name="viewport" content="width=device-width,initial-scale=1">
+<meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
+<meta name="theme-color" content="#0A0A0B">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+<meta name="apple-mobile-web-app-title" content="驭潮">
+<meta name="format-detection" content="telephone=no">
+<link rel="manifest" href="/manifest.webmanifest">
+<link rel="apple-touch-icon" href="/icons/icon-180.png">
 <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns=%27http://www.w3.org/2000/svg%27 viewBox=%270 0 16 16%27%3E%3Crect width=%2716%27 height=%2716%27 rx=%274%27 fill=%27%230a0a0b%27/%3E%3Cpath d=%27M3 10 L6 7 L8 9 L13 4%27 stroke=%27%23ff9f43%27 stroke-width=%271.6%27 fill=%27none%27 stroke-linecap=%27round%27/%3E%3C/svg%3E">
 <title>复利分享站</title>
 <script>
@@ -30,7 +38,7 @@
 <div class="topbar">
   <div class="brand">
     <span class="mark" data-ic="chart-line-up" data-sz="15"></span>
-    <b>驭潮</b><span>YuChao</span>
+    <b>驭潮</b><span class="en">YuChao</span>
   </div>
   <div class="gsearch">
     <div class="gbox"><span data-ic="magnifying-glass" data-sz="14"></span>
@@ -74,9 +82,10 @@
 
     <!-- ═══════════ 行情 ═══════════ -->
     <section class="page on" id="page-market">
-      <!-- 移动端：图表/卡片 两段切换（替代纵向滚动） -->
-      <div class="m-mseg" id="m-mkt-seg">
-        <button data-mv="chart" class="on">图表</button><button data-mv="cards">卡片</button>
+      <!-- 手机版置顶标题：个股 / 指数名与代码 + 搜索，左右箭头或左右滑动切换标的（搜索与标题同一行） -->
+      <div class="m-title" id="m-title">
+        <div class="m-title-c"><b id="m-title-name">--</b><i id="m-title-code">--</i><span class="mt-meta" id="m-title-meta"></span></div>
+        <button class="icbtn msearch" id="btn-search" title="搜索" aria-label="搜索" data-ic="magnifying-glass" data-sz="16"></button>
       </div>
       <div class="mkt-row">
         <div class="kl-col">
@@ -95,10 +104,10 @@
               <span class="seg" id="kl-period">
                 <button data-p="t">分时</button><button data-p="60">60分</button><button data-p="120">120分</button><button class="on" data-p="d">日K</button><button data-p="w">周K</button><button data-p="m">月K</button>
               </span>
-              <span class="barsep"></span>
-              <span class="seg" id="kl-layout" title="多周期布局：上下/四格只显主图，左右可带副图">
-                <button class="on" data-ly="single">单屏</button><button data-ly="h">左右</button><button data-ly="v">上下</button><button data-ly="quad">四格</button>
+              <span class="seg" id="kl-adjust" title="复权口径：前复权看盘（历史价按之后的分红折算）/ 不复权真实成交价 / 后复权长期收益">
+                <button data-fq="qfq">前复权</button><button data-fq="raw">不复权</button><button data-fq="hfq">后复权</button>
               </span>
+              <button class="cbtn m-ind-btn" id="kl-ind-btn" title="主图 / 副图指标设置"><span data-ic="gear" data-sz="13"></span>指标</button>
               <span class="barsep"></span>
               <span class="seg" id="kl-view" title="观察档位：一键显示最近 N 根">
                 <button data-v="20">20</button><button data-v="40">40</button><button data-v="60">60</button>
@@ -107,7 +116,8 @@
               <button class="cbtn zbtn" id="kl-zout" title="缩小（看更长周期）">－</button>
               <button class="cbtn zbtn" id="kl-vreset" title="重置视图">⟲</button>
               <button class="cbtn" id="kl-range" title="框选：左键拖一段区间，统计涨跌幅 / 量额 / 资金，并同步到右侧资金卡">框选</button>
-              <button class="cbtn" id="kl-measure" title="连线：点击 K 线时按光标位置就近吸附该根最高点或最低点，再点另一根即测算两点区间涨跌幅">连线</button>
+              <button class="cbtn" id="kl-measure" title="测距：单击按光标价格落点（起点/终点）；在 K 线上双击则自动吸附该根的最高点或最低点；ESC 一次清线、再按一次退出">测距</button>
+              <button class="cbtn" id="kl-train" title="训练模式：隐藏未来K线，从指定日期起一根根往后推，记录盘中买入并算持仓浮盈">训练</button>
               <label class="cbtn kl-radio" id="kl-pick-mode" title="单选K线：勾选后左键点击一根K线选中单根，联动右侧当日资金卡（与框选互斥）">
                 <input type="checkbox" id="kl-pick-mode-cb"><span class="rdot"></span>单选
               </label>
@@ -118,14 +128,115 @@
             <!-- 指标控制（常显三组）：主图 + 副图 + 绘图 -->
             <div class="kl-ipanel ip-inline" id="kl-indbar"><div id="ip-inds"></div></div>
             <!-- 「更多」指标/绘图配置面板：搜索 + 分类全量；点行=显影切换，★=常显切换 -->
+            <div class="kl-mask" id="kl-mask" hidden></div>
             <div class="kl-more" id="kl-more" hidden>
+              <div class="im-head"><b>指标设置</b><button type="button" class="im-x" data-close-more>完成</button></div>
               <div class="im-search"><input type="text" placeholder="搜索指标 / 绘图：名称 / 说明 / 分类" autocomplete="off"></div>
+              <!-- 趋势通道配色（短线 = 主色，中线 = 副色）：手机端也能改 -->
+              <div class="im-pal"><b>通道配色</b>
+                <button type="button" data-tpl="A" title="A · 琥珀橙 × 皇家蓝"><i style="background:linear-gradient(135deg,#FF9800 50%,#0A84FF 50%)"></i>A</button>
+                <button type="button" data-tpl="B" title="B · 紫罗兰 × 青绿"><i style="background:linear-gradient(135deg,#C084FC 50%,#2DD4BF 50%)"></i>B</button>
+                <button type="button" data-tpl="C" title="C · 玫红 × 天蓝"><i style="background:linear-gradient(135deg,#FB7185 50%,#38BDF8 50%)"></i>C</button>
+                <button type="button" data-tpl="D" title="D · 金黄 × 石墨"><i style="background:linear-gradient(135deg,#EAB308 50%,#94A3B8 50%)"></i>D</button>
+                <span class="im-pal-t">短线=主色 · 中线=副色</span>
+              </div>
               <div class="im-tabs" id="kl-more-tabs"></div>
               <div class="im-list" id="kl-more-list"></div>
               <div class="im-foot">点行 = 叠加 / 移除 · ★ = 常显到工具栏（绘图在最后）· ◆ = VIP 特色指标</div>
             </div>
             <div class="kl-stage" id="kl-stage">
               <div class="kl-panels" id="kl-panels"></div>
+              <!-- 训练模式浮层：未开始=选起点 / 进行中=逐根推进 + 买入记录 + 持仓浮盈 -->
+              <div class="ktrain" id="kl-train-panel" hidden>
+                <div class="kt-h" title="按住标题拖动可移动浮层">
+                  <b>训练模式</b><span class="kt-sub" id="kt-status"></span>
+                  <button class="kt-archbtn" id="kt-arch" title="训练存档：翻看操作记录 / 复盘 / 改名 / 删除">存档</button>
+                  <button class="kt-archbtn kt-endbtn" id="kt-end" title="结束本次训练：可选择存档，存档后可复盘">结束</button>
+                  <button class="kt-fold" id="kt-fold" title="折叠 / 展开详细设置" aria-label="折叠">⌃</button>
+                  <button class="kt-x" id="kt-x" title="收起（训练进度与买入记录本地保留）" aria-label="收起">✕</button>
+                </div>
+                <div class="kt-setup" id="kt-setup">
+                  <label class="kt-date"><span>开始日期</span><input type="date" id="kt-start"></label>
+                  <div class="kt-btns">
+                    <button class="cbtn on" id="kt-begin">开始训练</button>
+                    <button class="cbtn" id="kt-here" title="以当前图表视图最后一根作为起点">按当前视图开始</button>
+                  </div>
+                  <div class="kt-hint">只显示到当前这根K线，未来数据全部隐藏；切到周K/月K可整根推进。</div>
+                </div>
+                <div class="kt-run" id="kt-run" hidden>
+                  <div class="kt-pos"><span id="kt-pos"></span><b id="kt-date"></b>
+                    <label class="kt-step" title="建仓后：相对建仓价跌一格标「加」，涨一格标「减」"><span>刻度</span>
+                      <select id="kt-step">
+                        <option value="3">3%</option>
+                        <option value="5" selected>5%</option>
+                        <option value="8">8%</option>
+                        <option value="10">10%</option>
+                      </select>
+                    </label>
+                  </div>
+                  <div class="kt-track"><i id="kt-fill"></i></div>
+                  <div class="kt-btns">
+                    <button class="cbtn" id="kt-prev" title="退一根">◀ 上一根</button>
+                    <button class="cbtn on" id="kt-next" title="推进一根K线">下一根 ▶</button>
+                    <button class="cbtn" id="kt-play" title="自动逐根推进">播放</button>
+                    <button class="cbtn" id="kt-reset" title="清空进度与买入记录，重新选起点">重置</button>
+                  </div>
+                  <!-- 状态卡：持仓 / 成本 / 现价 · 浮盈 / 账户 / 可用（原 mini + acct + hold 三处合并） -->
+                  <div class="kt-stat">
+                    <div class="kt-mini" id="kt-mini"></div>
+                    <div class="kt-acct" id="kt-acct"></div>
+                  </div>
+                  <div class="kt-sig" id="kt-sig"></div>
+                  <div class="kt-dd" id="kt-dd" title="训练起点 / 逻辑改写起点 → 当前K线最低点的涨跌幅，以及起点以来的最大反弹"></div>
+                  <div class="kt-addhint" id="kt-addhint" hidden></div>
+                  <button type="button" class="kt-warn" id="kt-warn" hidden title="账户涨幅超过5%：点这里卖出一半持仓"></button>
+                  <button type="button" class="kt-warn" id="kt-warn2" hidden title="持仓盈利超过10%：点这里一键清仓"></button>
+                  <!-- 建仓阶梯价：建仓价 ± 刻度 自动算出加仓 / 减仓价，点一行回填成交价 -->
+                  <div class="kt-lad" id="kt-lad" title="按建仓价与刻度自动算出：跌一格=加仓价，涨一格=减仓价；点一行把成交价填成该价位"></div>
+                  <!-- 卖出：默认按「上次买入股数的一半」算，也可按股数 / 清仓 -->
+                  <div class="kt-sec">
+                    <div class="kt-sec-h"><b>卖出</b><span id="kt-sellhint"></span></div>
+                    <div class="kt-sellrow">
+                      <label class="kt-sqty"><span>股数</span>
+                        <input id="kt-sellqty" type="number" step="100" min="0" placeholder="一半" inputmode="numeric">
+                      </label>
+                      <div class="kt-chips" id="kt-sell-chips" title="按「上次买入」的股数比例快速填入">
+                        <button type="button" data-q="half">一半</button>
+                        <button type="button" data-q="quarter">1/4</button>
+                        <button type="button" data-q="all">全部</button>
+                      </div>
+                    </div>
+                    <div class="kt-qty-amt" id="kt-sellamt"></div>
+                    <div class="kt-kinds">
+                      <button class="kt-sellbtn" id="kt-sellin" title="按左侧股数卖出，留空则卖一半">按股数卖出</button>
+                      <button class="kt-sellbtn" id="kt-sell" title="按当前价格卖出一半持仓">卖一半持仓</button>
+                      <button class="kt-sellbtn" id="kt-close" title="按当前价格清空全部持仓">一键平仓</button>
+                    </div>
+                  </div>
+                  <!-- 买入：按金额下单；默认「接回上次卖出的金额」 -->
+                  <div class="kt-sec">
+                    <div class="kt-sec-h"><b>买入</b><span id="kt-buyhint"></span></div>
+                    <div class="kt-fields">
+                      <label><span>价格</span><input id="kt-price" type="number" step="0.001" min="0" inputmode="decimal"></label>
+                      <label><span>金额</span><input id="kt-amt" type="number" step="1000" min="0" placeholder="自动" inputmode="decimal"><i>元</i></label>
+                    </div>
+                    <div class="kt-chips" id="kt-amt-chips" title="快速填入买入金额（元）；「现金」= 可用现金全部"></div>
+                    <div class="kt-qty-amt" id="kt-qty-amt"></div>
+                    <div class="kt-buyrow">
+                      <input id="kt-note" type="text" placeholder="备注（选填）" autocomplete="off">
+                      <button class="kt-buybtn" id="kt-buy">买入 · <span id="kt-buy-date">--</span></button>
+                    </div>
+                  </div>
+                  <details class="kt-set">
+                    <summary>资金 / 仓位</summary>
+                    <div class="kt-funds">
+                      <label><span>初始资金</span><input id="kt-cap" type="number" step="10000" min="0" value="1000000" inputmode="numeric"></label>
+                      <label><span>仓位</span><input id="kt-pos-pct" type="number" step="1" min="1" max="100" value="5" inputmode="numeric"><i>%</i></label>
+                    </div>
+                  </details>
+                  <div class="kt-list" id="kt-list"></div>
+                </div>
+              </div>
               <div class="empty" id="kl-empty" style="display:none">
                 <span data-ic="chart-line" data-sz="30" style="color:var(--faint)"></span>
                 <b>选择一个标的开始看盘</b>
@@ -148,6 +259,9 @@
             </div>
           </div>
 
+          <!-- 手机版 K 线底部指标快捷切换条（主图 / 副图指标点选，超出横滑，末位「更多」开设置面板） -->
+          <div class="kl-botbar" id="kl-botbar"><div class="bb-scroll" id="bb-chips"></div></div>
+
           <div class="panel brief collapsed" id="brief-panel" hidden>
             <div class="brief-tabs">
               <button class="on" data-bt="news">资讯</button>
@@ -168,6 +282,11 @@
         <div class="rcol-grip" id="rcol-grip" title="拖拽调整卡片栏宽度"></div>
         <aside class="rightcol" id="rightcol"></aside>
       </div>
+    </section>
+
+    <!-- ═══════════ 卡片（手机版：行情页右侧卡片独立成页，见 syncCardsHost） ═══════════ -->
+    <section class="page" id="page-mcards">
+      <div class="phead"><h1>卡片</h1><span class="sp"></span></div>
     </section>
 
     <!-- ═══════════ 全景 ═══════════ -->
@@ -304,21 +423,11 @@
           <h3>全市场扫描</h3>
           <span class="sub" id="tgt-hits">—</span>
           <span class="sp"></span>
+          <button class="hbtn" data-seg-info title="六分段理论示意图：点击弹出查看（不占列表空间）">示意图</button>
           <button class="hbtn" id="tgt-tail" aria-pressed="false" title="尾盘估算：14:50 起用实时快照价估算钱袋/地雷，当天可见信号（收盘前可能变化）">尾盘估算</button>
           <span class="sub" id="tgt-status"></span>
         </div>
         <div id="tgt-conds"></div>
-        <!-- 六分段理论示意图：示意 K 线 + 短线趋势指标叠加，六段各拉线说明（默认收起，hover/点击展开） -->
-        <div class="segmap" id="tgt-segmap">
-          <div class="segmap-head">
-            <b>六分段理论示意图</b>
-            <span class="segmap-sub">围绕日线短线趋势指标（MA7/MA10）的六个位置 · 超跌 → 反弹 → 突破 → 超涨 → 回踩 → 跌破</span>
-            <span class="sp"></span>
-            <span class="segmap-lg" id="tgt-segmap-lg"></span>
-            <button class="hbtn" id="tgt-segmap-btn" aria-expanded="false">展开</button>
-          </div>
-          <div class="segmap-body" id="tgt-segmap-body"></div>
-        </div>
         <div class="tblwrap" style="flex:1" id="tgt-wrap"></div>
         <div id="tgt-pager" class="pager"></div>
         <div class="empty" id="tgt-empty" style="display:none;padding:44px 20px">
@@ -336,10 +445,15 @@
     <!-- ═══════════ 自选 ═══════════ -->
     <section class="page" id="page-watchlist">
       <div class="phead">
-        <span class="crumb">自选 /</span><h1>自选股</h1>
+        <span class="crumb">自选 /</span>
+        <span class="seg wl-switch" id="wl-switch">
+          <button class="on" data-v="self">自选</button><button data-v="mkt">行情</button>
+        </span>
         <span class="sp"></span>
         <button class="hbtn primary" id="wl-add" data-ic="plus" data-sz="14">添加自选</button>
       </div>
+      <div id="wl-self">
+      <div class="wl-idx" id="wl-idx"></div>
       <div style="display:flex;gap:8px;align-items:center;flex-wrap:wrap" id="wl-groups"></div>
       <div class="panel" style="flex:1;min-height:0;display:flex;flex-direction:column">
         <div class="phead2">
@@ -358,6 +472,15 @@
           <span>搜索添加你关注的标的，或从行情页直接加入。</span>
           <button class="hbtn primary" id="wl-empty-add" data-ic="plus" data-sz="13">添加自选</button>
         </div>
+      </div>
+      </div>
+      <div id="wl-mkt" hidden>
+        <div class="mkt-tabs"><button class="on">A股</button><button data-off="1">港股</button><button data-off="1">沪深港通</button></div>
+        <div class="mkt-card" id="mkt-idx"></div>
+        <div class="mkt-sec"><b>概念板块</b><span id="mkt-more-c">更多 ›</span></div>
+        <div class="mkt-grid" id="mkt-concepts"></div>
+        <div class="mkt-sec"><b>行业板块</b><span id="mkt-more-i">更多 ›</span></div>
+        <div class="mkt-grid" id="mkt-industry"></div>
       </div>
     </section>
 
@@ -505,6 +628,18 @@
       </div>
     </section>
 
+    <!-- ═══════════ 搜索（手机版：顶栏搜索按钮进入的独立页） ═══════════ -->
+    <section class="page" id="page-search">
+      <div class="shead">
+        <button class="icbtn" id="btn-search-back" title="返回" aria-label="返回" data-ic="arrow-left" data-sz="17"></button>
+        <div class="sbox"><span data-ic="magnifying-glass" data-sz="14"></span>
+          <input id="sinput" placeholder="代码 / 名称 / 拼音" autocomplete="off" enterkeyhint="search">
+        </div>
+        <span class="scancel" id="btn-search-cancel">取消</span>
+      </div>
+      <div class="sdrop" id="sres"></div>
+    </section>
+
     <!-- ═══════════ 设置 ═══════════ -->
     <section class="page" id="page-settings">
       <div class="phead">
@@ -522,18 +657,41 @@
 <!-- ═══ 手机版底部页签（body.mobile 时显示，替代左侧图标栏） ═══ -->
 <nav class="mtabs" id="mtabs">
   <a class="on" data-page="market"><span data-ic="chart-line-up" data-sz="19"></span><span>行情</span></a>
+  <a data-page="mcards"><span data-ic="cards" data-sz="19"></span><span>卡片</span></a>
   <a data-page="panorama"><span data-ic="trend-up" data-sz="19"></span><span>全景</span></a>
-  <a data-page="mainforce"><span data-ic="force" data-sz="19"></span><span>主力军情</span></a>
-  <a data-page="motion"><span data-ic="lightning" data-sz="19"></span><span>主力动向</span></a>
-  <a data-page="chase"><span data-ic="rocket" data-sz="19"></span><span>涨停追击</span></a>
   <a data-page="watchlist"><span data-ic="star" data-sz="19"></span><span>自选</span></a>
   <a data-page="targets"><span data-ic="funnel" data-sz="19"></span><span>目标</span></a>
-  <a data-page="sectors"><span data-ic="squares-four" data-sz="19"></span><span>板块</span></a>
-  <a data-page="corepicks"><span data-ic="target" data-sz="19"></span><span>核心标</span></a>
-  <a data-page="ai"><span data-ic="ai-sparkle" data-sz="19"></span><span>智能</span></a>
-  <a data-page="cards"><span data-ic="cards" data-sz="19"></span><span>卡片</span></a>
-  <a data-page="settings"><span data-ic="gear" data-sz="19"></span><span>设置</span></a>
+  <button class="mmore-btn" id="m-more-btn" aria-haspopup="true" aria-expanded="false">
+    <span data-ic="squares-four" data-sz="19"></span><span>更多</span>
+  </button>
 </nav>
+
+<!-- 手机版「更多」：其余页面收纳在底部抽屉，避免 12 个页签挤成两行 -->
+<div class="msheet" id="m-more" aria-hidden="true">
+  <div class="msheet-mask" data-close></div>
+  <div class="msheet-card" role="dialog" aria-label="更多功能">
+    <div class="msheet-h"><b>更多功能</b>
+      <button class="mclose" data-close aria-label="关闭"><span data-ic="x" data-sz="13"></span></button>
+    </div>
+    <div class="msheet-grid">
+      <a data-page="mainforce"><span data-ic="force" data-sz="21"></span><span>主力军情</span></a>
+      <a data-page="motion"><span data-ic="lightning" data-sz="21"></span><span>主力动向</span></a>
+      <a data-page="chase"><span data-ic="rocket" data-sz="21"></span><span>涨停追击</span></a>
+      <a data-page="sectors"><span data-ic="squares-four" data-sz="21"></span><span>板块</span></a>
+      <a data-page="corepicks"><span data-ic="target" data-sz="21"></span><span>核心标</span></a>
+      <a data-page="ai"><span data-ic="ai-sparkle" data-sz="21"></span><span>智能</span></a>
+      <a data-page="cards"><span data-ic="cards" data-sz="21"></span><span>功能卡片</span></a>
+      <a data-page="settings"><span data-ic="gear" data-sz="21"></span><span>设置</span></a>
+    </div>
+    <!-- 手机版顶栏被隐藏，设备档位切换必须留在这里，否则切到手机后回不去桌面 -->
+    <div class="msheet-dev">
+      <span>界面</span>
+      <span class="seg" id="dev-toggle-m" role="group" aria-label="界面宽度">
+        <button data-dev="desktop">桌面</button><button data-dev="fold">折叠屏</button><button data-dev="phone">普通屏</button>
+      </span>
+    </div>
+  </div>
+</div>
 
 <!-- ═══ 弹窗层 ═══ -->
 <div class="scrim" id="scrim"></div>
@@ -597,12 +755,28 @@
   </div>
 </div>
 
+<div class="modal" id="modal-hday">
+  <div class="mhead"><h3 id="hd-title">当日分时</h3><span class="sp"></span>
+    <button class="mclose" data-close><span data-ic="x" data-sz="13"></span></button></div>
+  <p class="mdesc" id="hd-desc">5 分钟粒度 · 与 K 线同复权口径</p>
+  <div id="hd-chart" style="position:relative;height:min(58vh,420px)"></div>
+</div>
+
 <div class="modal" id="modal-add">
   <div class="mhead"><h3>添加自选</h3><span class="sp"></span>
     <button class="mclose" data-close><span data-ic="x" data-sz="13"></span></button></div>
   <p class="mdesc">与顶栏搜索一致：支持代码 / 名称 / 拼音缩写，聚焦显示最近搜索。</p>
   <input class="field" id="add-search" placeholder="代码 / 名称 / 拼音" style="width:100%">
   <div style="margin-top:10px;max-height:300px;overflow:auto" id="add-list"></div>
+  <div class="add-bulk">
+    <div class="add-bulk-h"><b>批量粘贴</b><span>自动提取 6 位代码，可整段粘贴 Excel / 文本</span></div>
+    <textarea class="field" id="add-bulk" rows="4" placeholder="600519 000001 159915 …&#10;（含名称、表头也可以，只认 6 位数字）"></textarea>
+    <div class="add-bulk-row">
+      <select class="field" id="add-bulk-group" title="导入到哪个分组"></select>
+      <button class="hbtn primary" id="add-bulk-ok">批量导入</button>
+    </div>
+    <div class="add-bulk-hint" id="add-bulk-hint"></div>
+  </div>
   <div class="acts"><button class="hbtn" data-close>完成</button></div>
 </div>
 

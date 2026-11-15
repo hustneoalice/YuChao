@@ -16,6 +16,8 @@ export interface DataTableCol<T> {
   mono?: boolean;   // td 追加等宽字体（代码/序号）
   width?: number;
   title?: string;
+  /** 移动端列优先级：1 手机必显 / 2 折叠屏与宽屏 / 3 仅桌面（用户改过列设置后不再裁剪） */
+  pri?: 1 | 2 | 3;
   sort?: string | ((row: T) => number | string | null | undefined);  // 属性名或取值函数；不传=不可排
   render: (row: T, i: number) => string;
 }
@@ -252,11 +254,15 @@ export function createDataTable<T>(
     lastRows = rows;
     lastStart = startIndex;
     const shown = effCols();
+    /* 用户动过列设置（隐藏/排序）就不再按优先级裁剪，完全尊重手动配置 */
+    const customized = !!(cfg.hidden.length || cfg.order.length);
+    const priOf = (c: DataTableCol<T>): string => (!customized && c.pri ? `pm${c.pri}` : "");
     const ths = shown.map((c) => {
       const style = [c.width ? `width:${c.width}px` : "",
         c.sort != null ? "cursor:pointer" : ""].filter(Boolean).join(";");
       const arrow = c.sort != null && sortLabel === c.label ? (sortDir === -1 ? " ▾" : " ▴") : "";
-      return `<th${c.num ? ' class="n"' : ""}${style ? ` style="${style}"` : ""}` +
+      const cls = [c.num ? "n" : "", priOf(c)].filter(Boolean).join(" ");
+      return `<th${cls ? ` class="${cls}"` : ""}${style ? ` style="${style}"` : ""}` +
         `${c.title ? ` title="${esc(c.title)}"` : ""}` +
         `${c.sort != null ? ` data-sort="${esc(c.label)}"` : ""}>${esc(c.label)}${arrow}</th>`;
     }).join("");
@@ -265,8 +271,10 @@ export function createDataTable<T>(
           aria-label="列设置" aria-haspopup="dialog" aria-expanded="false">${ic("gear", 13)}</button></th>` : "";
     const body = rows.map((row, i) => {
       const rk = opts.rowKey ? opts.rowKey(row) : "";
-      return `<tr${rk ? ` data-key="${esc(rk)}"` : ""}>${shown.map((c) =>
-        `<td${c.num ? ' class="n num"' : c.mono ? ' class="num"' : ""}>${c.render(row, startIndex + i)}</td>`).join("")}</tr>`;
+      return `<tr${rk ? ` data-key="${esc(rk)}"` : ""}>${shown.map((c) => {
+        const cls = [c.num ? "n num" : c.mono ? "num" : "", priOf(c)].filter(Boolean).join(" ");
+        return `<td${cls ? ` class="${cls}"` : ""}>${c.render(row, startIndex + i)}</td>`;
+      }).join("")}</tr>`;
     }).join("");
     const colspan = shown.length + (tblKey ? 1 : 0);
     const emptyRow = opts.empty && rows.length === 0

@@ -1,7 +1,8 @@
 /* 六分段理论示意图（共享）：真实日 K 走完 1 超跌 → 2 反弹 → 3 突破 → 4 超涨 → 5 回踩 → 6 跌破。
- *  · 目标页底部大图（SegmentsMap 区块）与各处的「示意图」小按钮弹层共用同一份 SVG；
- *  · 小按钮 <button class="seg-info"> 由 bindSegInfo() 全局委托：悬停弹出、点击固定、Esc / 点外部关闭；
- *  · 样例行惰引用 002472.SZ 的真实日 K，5 分钟缓存，取回后自动重绘弹层与目标页大图。 */
+ *  · 目标页顶部「示意图」按钮与各行「示意图」小按钮共用同一份 SVG；
+ *  · 只认点击：<button class="seg-info"> / [data-seg-info] 由 bindSegInfo() 全局委托，
+ *    点击弹出、再点关闭、Esc / 点外部关闭（不做 hover 弹层，避免遮挡列表）；
+ *  · 样例行惰引用 002472.SZ 的真实日 K，5 分钟缓存，取回后自动重绘。 */
 import { marketApi, type Bar } from "./api";
 import { esc } from "./fmt";
 import { ic } from "./icons";
@@ -193,9 +194,9 @@ export function segMapSvg(): string {
     `下方为趋势柱（收盘−慢线）｜六段取最近一个完整循环｜当前段：${SEGFULL[cur]}</div>`;
 }
 
-/** 六分段「示意图」小按钮（悬停/点击弹层） */
+/** 六分段「示意图」小按钮（点击弹层，不占列表空间） */
 export function segInfoBtn(): string {
-  return `<button type="button" class="seg-info" title="六分段理论示意图（悬停查看，点击固定）"` +
+  return `<button type="button" class="seg-info" title="六分段理论示意图（点击查看）"` +
     ` aria-label="六分段理论示意图">${ic("chart-line", 12)}</button>`;
 }
 
@@ -203,21 +204,15 @@ export function segInfoBtn(): string {
 let pop: HTMLDivElement | null = null;
 let curTrigger: Element | null = null;
 let pinned = false;
-let hoverT = 0;
-let hideT = 0;
 
 function ensurePop(): HTMLDivElement {
   if (pop) return pop;
   pop = document.createElement("div");
   pop.className = "seg-pop";
   pop.innerHTML = `<div class="seg-pop-h"><b>六分段理论 · 示意图</b>` +
-    `<span class="seg-pop-tip">悬停查看 · 点击固定 · Esc 关闭</span>` +
+    `<span class="seg-pop-tip">再点按钮或 Esc 关闭</span>` +
     `<button type="button" class="seg-pop-x" aria-label="关闭">✕</button></div>` +
     `<div class="seg-pop-body"></div>`;
-  pop.addEventListener("mouseenter", () => { window.clearTimeout(hideT); });
-  pop.addEventListener("mouseleave", () => {
-    if (!pinned) hideT = window.setTimeout(hidePop, 160);
-  });
   pop.querySelector(".seg-pop-x")!.addEventListener("click", () => { pinned = false; hidePop(); });
   document.body.appendChild(pop);
   return pop;
@@ -248,31 +243,18 @@ function hidePop(): void {
   if (!pinned) curTrigger = null;
 }
 
-/** 全局绑定（幂等）：悬停弹出、点击固定、点外部 / Esc 关闭 */
+/** 全局绑定（幂等）：点击开 / 再点关 / 点外部 / Esc 关闭 */
 export function bindSegInfo(): void {
   if (bound) return;
   bound = true;
-  document.addEventListener("mouseover", (e) => {
-    const t = (e.target as Element | null)?.closest?.(".seg-info");
-    if (!t) return;
-    window.clearTimeout(hideT);
-    hoverT = window.setTimeout(() => { if (!pinned) showPop(t); }, 120);
-  });
-  document.addEventListener("mouseout", (e) => {
-    const t = (e.target as Element | null)?.closest?.(".seg-info");
-    if (!t) return;
-    window.clearTimeout(hoverT);
-    if (!pinned) hideT = window.setTimeout(hidePop, 180);
-  });
+  const triggerOf = (t: Element | null): Element | null => t?.closest?.(".seg-info,[data-seg-info]") ?? null;
   // 捕获阶段先拦一次：避免表格行/卡片自身的点击（打开个股）被顺带触发
   document.addEventListener("click", (e) => {
     const target = e.target as Element | null;
-    const t = target?.closest?.(".seg-info");
+    const t = triggerOf(target);
     if (t) {
       e.preventDefault();
       e.stopPropagation();
-      window.clearTimeout(hoverT);
-      window.clearTimeout(hideT);
       if (pinned && curTrigger === t) { pinned = false; hidePop(); }
       else { pinned = true; showPop(t); }
       return;

@@ -2,7 +2,7 @@
  * 左轴涨跌幅、右轴价格、昨收虚线、VWAP 均价线、分钟量柱 VOLFS；横轴固定交易时段
  * 09:30-15:00（午休压成一格），不随数据根数漂移。独立 canvas 实现，避免 K 线组件
  * 在分时场景下时间刻度退化成日期、且无法同时给出左右两套坐标轴。 */
-import { cssv, fmt, fmtChg, fmtVol } from "./fmt";
+import { cssv, fmt, fmtChg, fmtP, fmtVol, priceDigits } from "./fmt";
 
 export interface MinutePoint {
   date: string;
@@ -162,6 +162,7 @@ export function createIntraday(el: HTMLElement): IntradayHandle {
     const c = palette();
     const w = cssW, h = cssH;
     if (!w || !h) return;
+    const pd = priceDigits(series?.symbol);   // ETF 价格轴保留三位小数
     const box = measure(w, h);
     ctx.clearRect(0, 0, w, h);
     ctx.lineJoin = "round";
@@ -211,7 +212,7 @@ export function createIntraday(el: HTMLElement): IntradayHandle {
         ctx.fillText(`${(p).toFixed(2)}%`, box.plotL - 5, y);
         ctx.textAlign = "left";
         ctx.fillStyle = pctColor;
-        ctx.fillText(priceOfPct(p).toFixed(2), box.plotR + 6, y);
+        ctx.fillText(priceOfPct(p).toFixed(pd), box.plotR + 6, y);
         ctx.textAlign = "right";
       }
       // 轴刻度短线（只画在绘图区边缘，不侵入数据区）
@@ -240,7 +241,7 @@ export function createIntraday(el: HTMLElement): IntradayHandle {
     ctx.font = font(10.5, 600); ctx.textAlign = "right"; ctx.fillStyle = c.text;
     ctx.fillText("0.00%", box.plotL - 5, y0);
     ctx.textAlign = "left";
-    ctx.fillText(prev.toFixed(2), box.plotR + 6, y0);
+    ctx.fillText(prev.toFixed(pd), box.plotR + 6, y0);
 
     /* ── 价格面积（蓝渐变，向下跌水一直铺到副图上方） ── */
     ctx.save();
@@ -366,9 +367,9 @@ export function createIntraday(el: HTMLElement): IntradayHandle {
     tip.innerHTML =
       `<div class="t num">${p.date.slice(5, 10)} ${p.date.slice(11, 16)} · 分时</div>` +
       `<div class="grp">` +
-      `<span>价<b class="${cls}">${fmt(p.price)}</b></span>` +
+      `<span>价<b class="${cls}">${fmtP(p.price, series?.symbol)}</b></span>` +
       `<span>涨幅<b class="${cls}">${fmtChg(pct)}%</b></span>` +
-      `<span>均价<b>${p.avg == null ? "—" : fmt(p.avg)}</b></span>` +
+      `<span>均价<b>${p.avg == null ? "—" : fmtP(p.avg, series?.symbol)}</b></span>` +
       `<span>量<b>${fmtVol(p.vol)}手</b></span>` +
       `</div>`;
     tip.style.display = "block";

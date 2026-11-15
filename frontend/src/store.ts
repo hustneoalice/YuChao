@@ -154,6 +154,8 @@ export function isApplying(): boolean { return applying; }
 export function beginApply(): void { applying = true; }
 export function endApply(): void { applying = false; }
 export function notifyLocal(kind: LocalKind): void {
+  // 偏好变更打时间戳：登录拉取时用它判断「本地新」还是「服务器新」，避免旧云端值覆盖刚改的设置
+  if (!applying && kind === "prefs") localStorage.setItem("yc_kprefsAt", new Date().toISOString());
   if (!applying) document.dispatchEvent(new CustomEvent("yc:local", { detail: kind }));
 }
 

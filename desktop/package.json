@@ -1,0 +1,14 @@
+{
+  "name": "yuchao-desktop",
+  "private": true,
+  "version": "1.2.0",
+  "description": "驭潮 YuChao macOS 桌面壳（Tauri 2，加载线上看盘工作台）",
+  "scripts": {
+    "dev": "tauri dev",
+    "build": "tauri build",
+    "icon": "tauri icon ../frontend/public/icons/icon-512.png -o src-tauri/icons"
+  },
+  "devDependencies": {
+    "@tauri-apps/cli": "^2"
+  }
+}

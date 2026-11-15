@@ -5,7 +5,7 @@
  *  · 价格红涨绿跌按昨收判定；逐笔按买卖方向着色（主买红 / 主卖绿）
  */
 import { marketApi, type DepthQuote, type Quote, type TradeItem } from "./api";
-import { esc, fmt, fmtYi } from "./fmt";
+import { esc, fmt, fmtP, fmtYi } from "./fmt";
 
 interface DepthSt { data: DepthQuote | null; error: string; busy: boolean }
 interface TradesSt { items: TradeItem[]; error: string; busy: boolean }
@@ -65,7 +65,7 @@ function capYi(v: number | null | undefined): string {
 }
 
 /* ── 名称 / 行业 / 概念 / 现价 ── */
-function headHtml(d: DepthQuote, q: Quote | null): string {
+function headHtml(d: DepthQuote, q: Quote | null, symbol: string): string {
   const chgCls = pnlClass(d.pct);
   const cons = (q?.concept ?? "").split(/[,，、;；\s]+/).map((x) => x.trim())
     .filter((c) => c && c !== q?.industry);   // 概念里常回带行业名，避免和行业 chip 重复
@@ -82,9 +82,9 @@ function headHtml(d: DepthQuote, q: Quote | null): string {
       : "";
   const chgTxt = d.pct == null ? "" : (d.pct > 0 ? "+" : "") + fmt(d.pct) + "%";
   return `<div class="dp-head">
-      <div class="dp-last ${chgCls}">${fmt(d.price)}</div>
+      <div class="dp-last ${chgCls}">${fmtP(d.price, symbol)}</div>
       ${d.pct == null ? "" : `<div class="dp-chg ${chgCls}"><i class="dp-arrow ${chgCls}"></i>` +
-        `${d.chg != null ? (d.chg > 0 ? "+" : "") + fmt(d.chg) : ""}<span>${chgTxt}</span></div>`}
+        `${d.chg != null ? (d.chg > 0 ? "+" : "") + fmtP(d.chg, symbol) : ""}<span>${chgTxt}</span></div>`}
       <div class="dp-time">${esc(d.time || "")}</div>
     </div>
     ${rz || ind || shown ? `<div class="dp-con"${dataCons}>${rz}${ind}${shown}${more}</div>` : ""}`;
@@ -172,7 +172,7 @@ function bindConPop(card: HTMLElement): void {
 }
 
 /* ── 关键字段网格（2 列 · 标签左值右，对标众赢盘口左栏） ── */
-function overviewGrid(d: DepthQuote, q: Quote | null): string {
+function overviewGrid(d: DepthQuote, q: Quote | null, symbol: string): string {
   const val = q?.valuation;
   const base = d.prev_close ?? null;
   const rel = (x: number | null | undefined): string =>
@@ -182,14 +182,14 @@ function overviewGrid(d: DepthQuote, q: Quote | null): string {
   const pe = val?.pe_ttm != null ? (val.pe_ttm > 0 ? fmt(val.pe_ttm) : "亏损") : "—";
   const pb = val?.pb != null && val.pb > 0 ? fmt(val.pb) : "—";
   const items = [
-    cell("最高", fmt(d.high), rel(d.high)),
-    cell("开盘", fmt(d.open), rel(d.open)),
-    cell("最低", fmt(d.low), rel(d.low)),
-    cell("昨收", fmt(base)),
+    cell("最高", fmtP(d.high, symbol), rel(d.high)),
+    cell("开盘", fmtP(d.open, symbol), rel(d.open)),
+    cell("最低", fmtP(d.low, symbol), rel(d.low)),
+    cell("昨收", fmtP(base, symbol)),
     cell("振幅", d.amplitude != null ? fmt(d.amplitude) + "%" : "—"),
-    cell("涨停", (d.limit_up ?? 0) > 0 ? fmt(d.limit_up) : "—", "up"),
+    cell("涨停", (d.limit_up ?? 0) > 0 ? fmtP(d.limit_up, symbol) : "—", "up"),
     cell("量比", fmt(d.vol_ratio)),
-    cell("跌停", (d.limit_down ?? 0) > 0 ? fmt(d.limit_down) : "—", "down"),
+    cell("跌停", (d.limit_down ?? 0) > 0 ? fmtP(d.limit_down, symbol) : "—", "down"),
     cell("换手", d.turnover_rate != null ? fmt(d.turnover_rate) + "%" : "—"),
     cell("市盈率", pe),
     cell("成交额", fmtYi(d.amount)),
@@ -199,13 +199,13 @@ function overviewGrid(d: DepthQuote, q: Quote | null): string {
     cell("流通市值", capYi(val?.circ_mv)),
     cell("内盘", fmtLots(d.inner_vol), "down"),
     cell("总市值", capYi(val?.total_mv)),
-    cell("均价", fmt(d.avg_price), rel(d.avg_price)),
+    cell("均价", fmtP(d.avg_price, symbol), rel(d.avg_price)),
   ];
   return `<div class="dp-kpis">${items.join("")}</div>`;
 }
 
 /* ── 五档买卖盘 ── */
-function bookRows(d: DepthQuote, detailed: boolean): string {
+function bookRows(d: DepthQuote, detailed: boolean, symbol: string): string {
   const levels = [...d.asks.map((x, i) => ({ ...x, label: ["卖一", "卖二", "卖三", "卖四", "卖五"][i] })).reverse(),
     ...d.bids.map((x, i) => ({ ...x, label: ["买一", "买二", "买三", "买四", "买五"][i] }))];
   const maxVol = Math.max(1, ...levels.map((x) => x.volume));
@@ -216,7 +216,7 @@ function bookRows(d: DepthQuote, detailed: boolean): string {
     return `<div class="dp-row ${side(x.label)}">
       <i class="dp-bar" style="width:${pct}%"></i>
       <span class="dp-sd">${x.label}</span>
-      <span class="dp-px ${cls}">${fmt(x.price)}</span>
+      <span class="dp-px ${cls}">${fmtP(x.price, symbol)}</span>
       <span class="dp-vv">${fmt(x.volume, 0)}</span>
       ${detailed ? `<span class="dp-amt">${amtWan(x.amount)}</span>` : ""}
     </div>`;
@@ -228,8 +228,8 @@ function depthHtml(symbol: string, detailed: boolean, preview: boolean, q: Quote
   if (s.error) return `<div class="bempty">${esc(s.error)}</div>`;
   const d = s.data;
   if (!d) return `<div class="bempty">${s.busy ? "盘口加载中…" : "加载盘口…"}</div>`;
-  const head = headHtml(d, q);
-  const grid = overviewGrid(d, q);
+  const head = headHtml(d, q, symbol);
+  const grid = overviewGrid(d, q, symbol);
   if (!d.applicable || (!d.bids.length && !d.asks.length)) {
     return `${head}${grid}<div class="dp-sec">买卖五档</div>
       <div class="bempty">暂无五档盘口（非交易时段 / 指数）</div>`;
@@ -248,7 +248,7 @@ function depthHtml(symbol: string, detailed: boolean, preview: boolean, q: Quote
   </div>`;
   return `${head}${grid}
     <div class="dp-sec">买卖五档</div>
-    <div class="dp-book">${bookRows(d, detailed)}</div>
+    <div class="dp-book">${bookRows(d, detailed, symbol)}</div>
     ${bar}
     ${foot}
     ${preview ? "" : `<div class="dp-note">五档单位：手${detailed ? " / 金额：元" : ""}　更新 ${esc(d.time || "")}</div>`}`;
@@ -268,7 +268,7 @@ function tradesHtml(symbol: string, detailed: boolean): string {
     const amt = detailed && t.price != null ? `<span class="dp-am">${amtWan(t.price * t.volume * 100)}</span>` : "";
     return `<div class="dp-tr ${cls}">
       <span class="dp-tt">${esc(t.time)}</span>
-      <span class="dp-tp">${fmt(t.price)}</span>
+      <span class="dp-tp">${fmtP(t.price, symbol)}</span>
       <span class="dp-tv">${fmtLotsK(t.volume)}</span>
       ${amt}
       <span class="dp-td">${t.direction === 1 ? "B" : t.direction === 2 ? "S" : "—"}</span>

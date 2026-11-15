@@ -5,7 +5,7 @@
  * 与交易所披露口径不同，仅作形态参考。
  */
 import { marketApi, type Bar } from "./api";
-import { esc, fmt } from "./fmt";
+import { esc, fmt, fmtP, priceDigits } from "./fmt";
 import { estimateFloatShares } from "./volume-activity";
 
 export interface ChipBin { price: number; weight: number }
@@ -156,20 +156,20 @@ export function chipBody(symbol: string, mode: string): string {
   for (let p = Math.ceil(pMin / tickStep) * tickStep; p <= pMax + tickStep * 0.001; p += tickStep) {
     const yy = py(p).toFixed(1);
     ticks.push(`<line x1="10" x2="${AX}" y1="${yy}" y2="${yy}" stroke="var(--grid)"/>` +
-      `<text x="${AX + 8}" y="${yy}" dy="3.5" fill="var(--faint)" font-size="10">${fmt(p, tickStep >= 1 ? 0 : 2)}</text>`);
+      `<text x="${AX + 8}" y="${yy}" dy="3.5" fill="var(--faint)" font-size="10">${fmt(p, tickStep >= 1 ? 0 : priceDigits(symbol))}</text>`);
   }
 
   const kv = (label: string, value: string, cls = "", wide = false): string =>
     `<div class="chip-kv${wide ? " wide" : ""}"><span>${label}</span><b class="${cls}">${value}</b></div>`;
   return `<div class="chip-kpis">` +
     kv("获利比例", `${(d.profit * 100).toFixed(1)}%`, "up") +
-    kv("平均成本", fmt(d.avgCost, 2)) +
-    kv("90%成本区间", `${fmt(d.low90, 2)} – ${fmt(d.high90, 2)}`, "", true) +
+    kv("平均成本", fmtP(d.avgCost, symbol)) +
+    kv("90%成本区间", `${fmtP(d.low90, symbol)} – ${fmtP(d.high90, symbol)}`, "", true) +
     (mode === "detailed" ? kv("集中度", `${d.concentration.toFixed(1)}%`) +
-      kv("现价", fmt(d.close, 2)) : "") +
+      kv("现价", fmtP(d.close, symbol)) : "") +
     `</div>` +
     `<div class="chip-legend"><span><i class="profit"></i>获利盘</span><span><i class="loss"></i>套牢盘</span>` +
-    `<span><i class="now"></i>现价 ${fmt(d.close, 2)}</span><span><i class="avg"></i>均本 ${fmt(d.avgCost, 2)}</span>` +
+    `<span><i class="now"></i>现价 ${fmtP(d.close, symbol)}</span><span><i class="avg"></i>均本 ${fmtP(d.avgCost, symbol)}</span>` +
     `<span class="sp"></span><span class="mono">${d.date} · ${d.bars}日</span></div>` +
     `<svg class="chip-chart" viewBox="0 0 ${W} ${H}" role="img" aria-label="筹码分布山形曲线">` +
     `<defs><clipPath id="chip-clip-profit"><rect x="0" y="${yClose.toFixed(1)}" width="${W}" height="${(H - yClose).toFixed(1)}"/></clipPath>` +

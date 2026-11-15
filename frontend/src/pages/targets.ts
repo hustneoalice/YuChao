@@ -4,10 +4,10 @@
  * 后端 screening.CONDITIONS 新增指标（如主力吸筹）后前端自动出现，
  * 勾选/改阈值即时重筛（毫秒级），数据更新才重算指标层。 */
 import { marketApi, type TargetCond, type TargetItem, type TargetSpark } from "../api";
-import { esc, fmt, fmtChg } from "../fmt";
+import { esc, fmt, fmtChg, fmtP } from "../fmt";
 import { SEGFULL, sixSegmentSeries } from "../indicators";
 import { createPager, slicePage, type Pager } from "../pager";
-import { onSegMapData, segInfoBtn, segMapSvg } from "../segmap";
+import { segInfoBtn } from "../segmap";
 import { createDataTable, type DataTable, type DataTableCol } from "../table";
 import { chartDown, chartUp, trendPalette } from "./kline";
 
@@ -187,85 +187,53 @@ function segMeter(seg: number, name?: string | null): string {
     <small style="color:${tint}">第${n}段 · ${esc(name || SEG_NAMES[n - 1])}</small>${segInfoBtn()}</span>`;
 }
 
-let segMapOn = false;
-try { segMapOn = localStorage.getItem("yc_tgt_segmap") === "1"; } catch { /* 默认收起 */ }
-let segMapHover = false;
-
-function applySegMapState(): void {
-  const body = document.getElementById("tgt-segmap-body");
-  const btn = document.getElementById("tgt-segmap-btn");
-  if (!body) return;
-  const open = segMapOn || segMapHover;
-  body.style.display = open ? "" : "none";
-  if (btn) {
-    btn.textContent = segMapOn ? "收起" : "展开";
-    btn.setAttribute("aria-expanded", String(open));
-  }
-}
-
-function renderSegMap(): void {
-  const body = document.getElementById("tgt-segmap-body");
-  if (!body) return;
-  const pal = trendPalette();
-  const lg = document.getElementById("tgt-segmap-lg");
-  if (lg) {
-    lg.innerHTML = `<i class="fill" style="background:${pal.fast}"></i>短线趋势·强（站上慢线）` +
-      `<i class="fill" style="background:${pal.slow}"></i>短线趋势·弱（跌破慢线）` +
-      `<i style="background:${pal.fast}"></i>快线 MA7` +
-      `<i style="background:${pal.slow}"></i>慢线 MA10` +
-      `<i class="fill" style="background:linear-gradient(90deg,var(--up) 50%,var(--down) 50%)"></i>趋势柱（收盘−慢线）`;
-  }
-  body.innerHTML = segMapSvg();
-  applySegMapState();
-}
-
 const tailFlag = (t: TargetItem): string =>
   t.tail_provisional
     ? `<small class="tgt-tail-flag" title="尾盘估算值：用实时快照价暂估，收盘前可能变化">估</small>`
     : "";
 
 const TGT_COLS: DataTableCol<TargetItem>[] = [
-  { label: "#", width: 34, mono: true, render: (_t, i) => `<span style="color:var(--faint)">${i + 1}</span>` },
-  { label: "代码", mono: true, sort: "symbol", render: (t) => t.symbol },
-  { label: "名称", sort: "name", render: (t) => `<span style="font-weight:600">${esc(t.name || t.symbol)}</span>` },
-  { label: "近况", width: 150, title: "上方：K 线 + 中线趋势（站上中线趋势线为橙、跌破为蓝）；下方：趋势柱线。鼠标悬停可放大查看",
+  { label: "#", width: 34, mono: true, pri: 3, render: (_t, i) => `<span style="color:var(--faint)">${i + 1}</span>` },
+  { label: "代码", mono: true, pri: 3, sort: "symbol", render: (t) => t.symbol },
+  { label: "名称", pri: 1, sort: "name", render: (t) => `<span style="font-weight:600">${esc(t.name || t.symbol)}</span>` },
+  { label: "近况", width: 150, pri: 2, title: "上方：K 线 + 中线趋势（站上中线趋势线为橙、跌破为蓝）；下方：趋势柱线。鼠标悬停可放大查看",
     render: (t) => `<canvas class="tgt-spark" data-sym="${esc(t.symbol)}" style="width:132px;height:56px"></canvas>` },
-  { label: "现价", num: true, sort: "close", render: (t) => fmt(t.close ?? 0) },
-  { label: "涨跌幅", num: true, sort: (t) => t.pct_chg ?? null, render: (t) => {
+  { label: "现价", num: true, pri: 2, sort: "close", render: (t) => fmtP(t.close ?? 0, t.symbol) },
+  { label: "涨跌幅", num: true, pri: 1, sort: (t) => t.pct_chg ?? null, render: (t) => {
       const ch = t.pct_chg ?? 0;
       return `<span class="${ch >= 0 ? "up" : "down"}">${fmtChg(ch)}%</span>`; } },
-  { label: "趋势柱线", num: true, sort: t => t.trend_value ?? null, render: t => t.trend_value == null ? "—" : `<span class="${t.trend_value > 0 ? "up" : "down"}">${t.trend_value.toFixed(2)}</span>${t.trend_provisional ? '<small> 盘中暂定</small>' : ''}` },
-  { label: "最近转正", sort: t => t.trend_cross_date ?? "", render: t => t.trend_cross_date ?? "—" },
-  { label: "距今交易日", num: true, sort: t => t.trend_cross_ago ?? null, render: t => t.trend_cross_ago == null ? "—" : t.trend_cross_ago === 0 ? "当日" : `${t.trend_cross_ago}日前` },
-  { label: "连续上方", num: true, sort: t => t.trend_above_days, render: t => t.trend_value == null ? "—" : `${t.trend_above_days}日` },
-  { label: "负柱收敛", num: true, title: "趋势柱线连续为负且逐日收窄的天数（绿柱缩短，提前捕捉上穿零轴）",
+  { label: "趋势柱线", num: true, pri: 2, sort: t => t.trend_value ?? null, render: t => t.trend_value == null ? "—" : `<span class="${t.trend_value > 0 ? "up" : "down"}">${t.trend_value.toFixed(2)}</span>${t.trend_provisional ? '<small> 盘中暂定</small>' : ''}` },
+  { label: "最近转正", pri: 3, sort: t => t.trend_cross_date ?? "", render: t => t.trend_cross_date ?? "—" },
+  { label: "距今交易日", num: true, pri: 3, sort: t => t.trend_cross_ago ?? null, render: t => t.trend_cross_ago == null ? "—" : t.trend_cross_ago === 0 ? "当日" : `${t.trend_cross_ago}日前` },
+  { label: "连续上方", num: true, pri: 3, sort: t => t.trend_above_days, render: t => t.trend_value == null ? "—" : `${t.trend_above_days}日` },
+  { label: "负柱收敛", num: true, pri: 3, title: "趋势柱线连续为负且逐日收窄的天数（绿柱缩短，提前捕捉上穿零轴）",
     sort: t => t.neg_run ?? 0, render: t => t.neg_run
       ? `<span class="tag ${t.neg_run >= 3 ? "acc" : "p1"}">${t.neg_run}日</span>`
       : `<span style="color:var(--faint)">—</span>` },
-  { label: "距零轴", num: true, title: "当前负柱幅度，越小越贴近零轴",
+  { label: "距零轴", num: true, pri: 3, title: "当前负柱幅度，越小越贴近零轴",
     sort: t => t.neg_abs ?? null,
     render: t => t.neg_abs == null ? `<span style="color:var(--faint)">—</span>` : t.neg_abs.toFixed(1) },
-  { label: "均量", num: true, title: "当日成交量 / 均量", sort: (t) => t.vol_ratio,
+  { label: "均量", num: true, pri: 3, title: "当日成交量 / 均量", sort: (t) => t.vol_ratio,
     render: (t) => `<span style="color:${t.vol_hit ? PAL.o : "var(--dim)"}">${t.vol_ratio == null ? "—" : `${t.vol_ratio.toFixed(2)}x`}</span>` },
-  { label: "短线趋势", sort: (t) => (t.short_orange ? 1 : 0), render: (t) =>
+  { label: "短线趋势", pri: 3, sort: (t) => (t.short_orange ? 1 : 0), render: (t) =>
       `<span style="color:${t.short_orange ? PAL.o : PAL.b}">●</span> ${t.short_orange ? "橙" : "蓝"}` },
-  { label: "中线趋势", sort: (t) => (t.mid_orange ? 1 : 0), render: (t) =>
+  { label: "中线趋势", pri: 3, sort: (t) => (t.mid_orange ? 1 : 0), render: (t) =>
       `<span style="color:${t.mid_orange ? PAL.o : PAL.b}">●</span> ${t.mid_orange ? "橙" : "蓝"}` },
-  { label: "20日涨停", num: true, title: "近 20 个交易日涨停次数", sort: (t) => t.limit_up_cnt,
+  { label: "20日涨停", num: true, pri: 3, title: "近 20 个交易日涨停次数", sort: (t) => t.limit_up_cnt,
     render: (t) => t.limit_up_20d ? `<span class="tag acc">${t.limit_up_cnt}次</span>` : `<span style="color:var(--faint)">—</span>` },
-  { label: "低点拐头", num: true, title: "近 20 日低点拐头（阶段低点确认后向上拐头）的日期 · 出现次数；越新鲜越靠前，便于观察波段节奏",
+  { label: "低点拐头", num: true, pri: 3, title: "近 20 日低点拐头（阶段低点确认后向上拐头）的日期 · 出现次数；越新鲜越靠前，便于观察波段节奏",
     sort: (t) => t.money_ago ?? 9999,
     render: (t) => t.money_date == null ? `<span style="color:var(--faint)">—</span>` :
       `<span style="color:${(t.money_ago ?? 9) <= 3 ? PAL.o : "var(--text)"}">${t.money_date.slice(5)}</span>` +
       ((t.money_cnt ?? 0) > 1 ? `<small style="color:var(--faint)"> · ${t.money_cnt}次</small>` : "") +
       tailFlag(t) },
-  { label: "高点拐头", num: true, title: "近 20 日高点拐头（阶段高点确认后向下拐头）的日期 · 出现次数；越新鲜越靠前，属风险提示",
+  { label: "高点拐头", num: true, pri: 3, title: "近 20 日高点拐头（阶段高点确认后向下拐头）的日期 · 出现次数；越新鲜越靠前，属风险提示",
     sort: (t) => t.mine_ago ?? 9999,
     render: (t) => t.mine_date == null ? `<span style="color:var(--faint)">—</span>` :
       `<span style="color:${(t.mine_ago ?? 9) <= 3 ? "var(--down)" : "var(--text)"}">${t.mine_date.slice(5)}</span>` +
       ((t.mine_cnt ?? 0) > 1 ? `<small style="color:var(--faint)"> · ${t.mine_cnt}次</small>` : "") +
       tailFlag(t) },
-  { label: "DKX交叉", num: true, title: "最近一次 DKX 金叉/死叉距今交易日数（金叉=DKX 上穿 MADKX，死叉=下穿）；越新鲜越靠前",
+  { label: "DKX交叉", num: true, pri: 3, title: "最近一次 DKX 金叉/死叉距今交易日数（金叉=DKX 上穿 MADKX，死叉=下穿）；越新鲜越靠前",
     sort: (t) => Math.min(t.dkx_gold_ago ?? 9999, t.dkx_death_ago ?? 9999),
     render: (t) => {
       const g = t.dkx_gold_ago, d = t.dkx_death_ago;
@@ -274,9 +242,9 @@ const TGT_COLS: DataTableCol<TargetItem>[] = [
       const ago = gold ? g! : d!;
       return `<span style="color:${gold ? "var(--up)" : "var(--down)"}">${gold ? "金叉" : "死叉"} ${ago === 0 ? "当日" : `${ago}日前`}</span>`;
     } },
-  { label: "六分段", sort: "seg", title: "六分段理论：围绕日线短线趋势线的六个位置，1 趋势线超跌 → 2 反弹趋势线 → 3 趋势线突破 → 4 趋势线超涨 → 5 回踩趋势线 → 6 趋势线跌破；亮格为当前所在位置",
+  { label: "六分段", pri: 1, sort: "seg", title: "六分段理论：围绕日线短线趋势线的六个位置，1 趋势线超跌 → 2 反弹趋势线 → 3 趋势线突破 → 4 趋势线超涨 → 5 回踩趋势线 → 6 趋势线跌破；亮格为当前所在位置",
     render: (t) => (t.seg ? segMeter(t.seg, t.seg_name) : `<span style="color:var(--faint)">—</span>`) },
-  { label: "短线状态", sort: (t) => (t.pullback ? 0 : 1), render: (t) =>
+  { label: "短线状态", pri: 3, sort: (t) => (t.pullback ? 0 : 1), render: (t) =>
       `<span style="font-size:11.5px;color:${t.short_orange ? PAL.o : PAL.b}">${t.pullback ? "回调中" : "上行"} · ${t.short_orange ? "橙" : "蓝"}</span>` },
 ];
 
@@ -533,6 +501,11 @@ function condControl(d: TargetCond): string {
     ` step="${d.step ?? "any"}" value="${tvals[d.key]}"${on ? "" : " disabled"}>${unit}</label></span>`;
 }
 
+/* 条件区默认收起：只留预设 + 已启用计数一行，展开后再显示分组与阈值设置，
+   把纵向空间让给下方股票列表（折叠状态本地记忆） */
+let condOpen = false;
+try { condOpen = localStorage.getItem("yc_tgt_cond_open") === "1"; } catch { /* 默认收起 */ }
+
 function renderConds(): void {
   const el = document.getElementById("tgt-conds")!;
   const onKeys = meta.filter((d) => conds[d.key]).map((d) => d.key);
@@ -549,14 +522,24 @@ function renderConds(): void {
   const conflict = (!!conds["money"] || !!conds["mine"]) && (!!conds["short"] || !!conds["mid"]);
   el.innerHTML =
     `<div class="tgt-presets">` +
+    `<button type="button" class="tgt-fold${condOpen ? " on" : ""}" data-fold aria-expanded="${condOpen}"` +
+    ` title="展开 / 收起条件设置">条件设置<i>${condOpen ? "收起" : "展开"}</i></button>` +
     ([["all", "全部条件"], ["money", "只看低点拐头"], ["mine", "只看高点拐头"], ["trend", "只看趋势"], ["none", "清空"]] as [string, string][])
       .map(([p, label]) => `<button type="button" class="tgt-preset${active === p ? " on" : ""}" data-p="${p}" aria-pressed="${active === p}">${label}</button>`).join("") +
     `<span class="tgt-preset-count">已启用 <b>${onKeys.length}</b>/${meta.length}</span></div>` +
+    `<div class="tgt-condbody${condOpen ? " on" : ""}">` +
     groups +
     `<div class="tgt-grp-hint">所有勾选条件同时满足 · ST 已剔除 · 未勾选不参与判定</div>` +
-    (conflict ? `<div class="tgt-conflict">阶段拐点是拐点确认信号，价格通常在趋势线另一侧，与趋势橙方向相反；叠加后命中极少。<button type="button" class="tgt-conflict-fix" data-p="${conds["mine"] && !conds["money"] ? "mine" : "money"}">只看信号</button></div>` : "");
+    (conflict ? `<div class="tgt-conflict">阶段拐点是拐点确认信号，价格通常在趋势线另一侧，与趋势橙方向相反；叠加后命中极少。<button type="button" class="tgt-conflict-fix" data-p="${conds["mine"] && !conds["money"] ? "mine" : "money"}">只看信号</button></div>` : "") +
+    `</div>`;
+  const cbody = el.querySelector<HTMLElement>(".tgt-condbody")!;
+  el.querySelector<HTMLElement>("[data-fold]")!.addEventListener("click", () => {
+    condOpen = !condOpen;
+    localStorage.setItem("yc_tgt_cond_open", condOpen ? "1" : "0");
+    renderConds();
+  });
   if (conds["trend"]) {
-    el.insertAdjacentHTML("beforeend", `<div class="tgt-trend-set">
+    cbody.insertAdjacentHTML("beforeend", `<div class="tgt-trend-set">
       <label>趋势柱线 <select id="tgt-trend-mode"><option value="cross" ${trend.mode === "cross" ? "selected" : ""}>负转正</option><option value="above" ${trend.mode === "above" ? "selected" : ""}>零轴上方</option></select></label>
       ${trend.mode === "cross" ? `<label>最近 <select id="tgt-trend-recent">${[1,3,5,10,20].map(n => `<option value="${n}" ${trend.recent === n ? "selected" : ""}>${n}</option>`).join('')}<option value="custom" ${![1,3,5,10,20].includes(trend.recent) ? "selected" : ""}>自定义</option></select> 个交易日</label>
       <label>天数 <input aria-label="最近交易日数" id="tgt-trend-days" type="number" min="1" max="250" step="1" value="${trend.recent}"></label>
@@ -573,7 +556,7 @@ function renderConds(): void {
     if (still) still.onchange = () => { trend.stillAbove = still.checked; save(); };
   }
   /* 行内缩略图：开关 + 三挡范围（默认开启，本地记忆，不参与筛选） */
-  el.insertAdjacentHTML("beforeend",
+  cbody.insertAdjacentHTML("beforeend",
     `<div class="tgt-trend-set tgt-spark-set">` +
     `<label><input type="checkbox" id="tgt-spark-on" ${sparkOn ? "checked" : ""}> 显示缩略图</label>` +
     `<label>范围 <select id="tgt-spark-range">${(Object.keys(SPARK_BARS) as SparkRange[])
@@ -664,23 +647,7 @@ export function initTargets(): void {
   document.getElementById("tgt-empty-money")!.addEventListener("click", () => applyPreset("money"));
   document.getElementById("tgt-empty-mine")!.addEventListener("click", () => applyPreset("mine"));
   document.getElementById("tgt-empty-clear")!.addEventListener("click", () => applyPreset("none"));
-  /* 六分段示意图：静态内容只在启动渲染一次，展开/收起状态本地记忆 */
-  onSegMapData(renderSegMap);
-  renderSegMap();
-  /* 默认收起：点击按钮保持展开；鼠标移入整块示意图时临时弹出，移出恢复 */
-  const segmapBox = document.getElementById("tgt-segmap");
-  segmapBox?.addEventListener("mouseenter", () => {
-    if (!segMapOn && !segMapHover) { segMapHover = true; applySegMapState(); }
-  });
-  segmapBox?.addEventListener("mouseleave", () => {
-    if (segMapHover) { segMapHover = false; applySegMapState(); }
-  });
-  document.getElementById("tgt-segmap-btn")!.addEventListener("click", () => {
-    segMapOn = !segMapOn;
-    segMapHover = false;
-    localStorage.setItem("yc_tgt_segmap", segMapOn ? "1" : "0");
-    applySegMapState();
-  });
+  /* 六分段示意图：顶部「示意图」按钮（[data-seg-info]）点击弹出，由 segmap 全局委托处理 */
   /* 缩略图悬停放大：事件委托，表格重绘后无需重新绑定 */
   const wrap = document.getElementById("tgt-wrap")!;
   const canvasOf = (target: EventTarget | null): HTMLCanvasElement | null =>

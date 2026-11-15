@@ -20,7 +20,7 @@ TICKER_INDICES: list[tuple[str, str, str]] = [
 ]
 
 INDEX_NAMES: dict[str, str] = {s: n for s, n, _ in TICKER_INDICES} | {
-    "000016.SH": "上证50", "399005.SZ": "中小100",
+    "000016.SH": "上证50", "399005.SZ": "中小100", "399330.SZ": "深证100",
 }
 
 # 全景页指数条固定清单（2.2：静态常识不建表；复用 TICKER_INDICES 的 7 个
@@ -39,6 +39,17 @@ GLOBAL_INDICES: list[tuple[str, str]] = [
     ("usINX", "标普500"),
     ("hkHSI", "恒生指数"),
 ]
+
+# 搜索补充指数：不进 INDEX_CATALOG（底部指数条 / 全景顺序不动），
+# 只让未上指数条的宽基也能被代码或名称搜到（399330 有完整日线，可直接跳 K 线）。
+INDEX_SEARCH_EXTRA: tuple[tuple[str, str], ...] = (
+    ("399330.SZ", "深证100"),
+)
+
+# 口语别名 → 指数代码：搜索时按「包含」匹配（深圳100 / 深100 都是深证100）
+INDEX_ALIASES: dict[str, tuple[str, ...]] = {
+    "399330.SZ": ("深圳100", "深100", "深证一百"),
+}
 
 
 def index_form(symbol: str) -> str | None:

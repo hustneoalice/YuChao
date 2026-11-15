@@ -8,7 +8,8 @@ from threading import Lock
 from datetime import datetime
 
 from .. import db
-from ..symbol import INDEX_CATALOG, INDEX_NAMES, index_form, is_bj, normalize_symbol
+from ..symbol import (INDEX_ALIASES, INDEX_CATALOG, INDEX_NAMES, INDEX_SEARCH_EXTRA,
+                      index_form, is_bj, normalize_symbol)
 from ...config import settings
 from ...errors import not_found
 from ...contracts.common import Adjust
@@ -357,7 +358,7 @@ def search(conn, q: str, limit: int = 10,
         ]
     if "index" in kinds:
         rows["index"] = [(s, n, s.split(".")[1].lower(), None, None)
-                         for s, n in INDEX_CATALOG]
+                         for s, n in INDEX_CATALOG + INDEX_SEARCH_EXTRA]
     if "sector" in kinds:
         rows["sector"] = [
             # symbol=板块名（即板块页 id）；row[5]=kind（industry|concept）
@@ -378,6 +379,9 @@ def search(conn, q: str, limit: int = 10,
         if s.startswith(qu) or n.startswith(qs):
             return 2
         if qu in s or qs in n:
+            return 3
+        # 口语别名（深圳100 → 399330.SZ）也按「包含」命中
+        if any(qs in a for a in INDEX_ALIASES.get(s, ())):
             return 3
         return None
 

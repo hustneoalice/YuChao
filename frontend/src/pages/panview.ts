@@ -5,7 +5,7 @@
  * 驻留期间 30s 轮询左表；右侧图表点选时拉取（腾讯实时）。 */
 import { marketApi, type BoardRow, type IndexBarItem, type BreadthOut,
          type ZyBlockRow } from "../api";
-import { esc, fmt, fmtChg, fmtVol, fmtYi } from "../fmt";
+import { esc, fmt, fmtChg, fmtP, fmtVol, fmtYi } from "../fmt";
 import { createPager, type Pager } from "../pager";
 import { createDataTable, type DataTable, type DataTableCol } from "../table";
 import { createIntraday, type IntradayHandle } from "../intraday";
@@ -60,44 +60,44 @@ function pctCell(v: number | null | undefined, suffix = "%"): string {
 }
 
 const BOARD_COLS: DataTableCol<BoardRow>[] = [
-  { label: "#", width: 34, mono: true, render: (_r, i) => `<span style="color:var(--faint)">${i + 1}</span>` },
-  { label: "代码", mono: true, sort: "symbol", render: (r) => r.symbol },
-  { label: "名称", sort: "name", render: (r) => `<span style="font-weight:600">${esc(r.name || "—")}</span>` },
-  { label: "现价", num: true, render: (r) => fmt(r.current) },
-  { label: "涨跌额", num: true, render: (r) => pctCell(r.change_amount, "") },
-  { label: "涨跌幅", num: true, sort: "change_rate", render: (r) => pctCell(r.change_rate) },
-  { label: "买入", num: true, title: "买一价", render: (r) => fmt(r.bid1) },
-  { label: "卖出", num: true, title: "卖一价", render: (r) => fmt(r.ask1) },
-  { label: "最高", num: true, render: (r) => (r.high != null ? `<span class="up">${fmt(r.high)}</span>` : "—") },
-  { label: "最低", num: true, render: (r) => (r.low != null ? `<span class="down">${fmt(r.low)}</span>` : "—") },
-  { label: "今开", num: true, render: (r) => fmt(r.open) },
-  { label: "昨收", num: true, render: (r) => fmt(r.pre_close) },
-  { label: "成交量", num: true, title: "手", render: (r) => fmtVol(r.volume) },
-  { label: "成交额", num: true, sort: "amount", render: (r) => fmtYi(r.amount) },
-  { label: "换手%", num: true, sort: "turnover_rate", render: (r) => fmt(r.turnover_rate) },
-  { label: "量比", num: true, sort: "vol_ratio", render: (r) => fmt(r.vol_ratio) },
-  { label: "振幅%", num: true, sort: "amplitude", render: (r) => fmt(r.amplitude) },
-  { label: "流通市值", num: true, render: (r) => fmtYi(r.circ_value) },
-  { label: "总市值", num: true, render: (r) => fmtYi(r.market_value) },
-  { label: "涨停", num: true, render: (r) => (r.up_limit ? `<span class="up">${fmt(r.up_limit)}</span>` : "—") },
-  { label: "跌停", num: true, render: (r) => (r.down_limit ? `<span class="down">${fmt(r.down_limit)}</span>` : "—") },
+  { label: "#", width: 34, mono: true, pri: 3, render: (_r, i) => `<span style="color:var(--faint)">${i + 1}</span>` },
+  { label: "代码", mono: true, pri: 2, sort: "symbol", render: (r) => r.symbol },
+  { label: "名称", pri: 1, sort: "name", render: (r) => `<span style="font-weight:600">${esc(r.name || "—")}</span>` },
+  { label: "现价", num: true, pri: 1, render: (r) => fmtP(r.current, r.symbol) },
+  { label: "涨跌额", num: true, pri: 3, render: (r) => pctCell(r.change_amount, "") },
+  { label: "涨跌幅", num: true, pri: 1, sort: "change_rate", render: (r) => pctCell(r.change_rate) },
+  { label: "买入", num: true, pri: 3, title: "买一价", render: (r) => fmtP(r.bid1, r.symbol) },
+  { label: "卖出", num: true, pri: 3, title: "卖一价", render: (r) => fmtP(r.ask1, r.symbol) },
+  { label: "最高", num: true, pri: 2, render: (r) => (r.high != null ? `<span class="up">${fmtP(r.high, r.symbol)}</span>` : "—") },
+  { label: "最低", num: true, pri: 2, render: (r) => (r.low != null ? `<span class="down">${fmtP(r.low, r.symbol)}</span>` : "—") },
+  { label: "今开", num: true, pri: 3, render: (r) => fmtP(r.open, r.symbol) },
+  { label: "昨收", num: true, pri: 3, render: (r) => fmtP(r.pre_close, r.symbol) },
+  { label: "成交量", num: true, pri: 3, title: "手", render: (r) => fmtVol(r.volume) },
+  { label: "成交额", num: true, pri: 2, sort: "amount", render: (r) => fmtYi(r.amount) },
+  { label: "换手%", num: true, pri: 2, sort: "turnover_rate", render: (r) => fmt(r.turnover_rate) },
+  { label: "量比", num: true, pri: 2, sort: "vol_ratio", render: (r) => fmt(r.vol_ratio) },
+  { label: "振幅%", num: true, pri: 3, sort: "amplitude", render: (r) => fmt(r.amplitude) },
+  { label: "流通市值", num: true, pri: 3, render: (r) => fmtYi(r.circ_value) },
+  { label: "总市值", num: true, pri: 3, render: (r) => fmtYi(r.market_value) },
+  { label: "涨停", num: true, pri: 3, render: (r) => (r.up_limit ? `<span class="up">${fmtP(r.up_limit, r.symbol)}</span>` : "—") },
+  { label: "跌停", num: true, pri: 3, render: (r) => (r.down_limit ? `<span class="down">${fmtP(r.down_limit, r.symbol)}</span>` : "—") },
 ];
 
 /* 板块列表列（zy_blocks 聚合行：均涨/涨跌家数/领涨股/成分数） */
 const BLOCK_COLS: DataTableCol<ZyBlockRow>[] = [
-  { label: "#", width: 34, mono: true, render: (_r, i) => `<span style="color:var(--faint)">${i + 1}</span>` },
-  { label: "板块名称", sort: "block_code", render: (r) =>
+  { label: "#", width: 34, mono: true, pri: 3, render: (_r, i) => `<span style="color:var(--faint)">${i + 1}</span>` },
+  { label: "板块名称", pri: 1, sort: "block_code", render: (r) =>
       `<span style="font-weight:600">${esc(r.block_name)}</span>` },
-  { label: "子行业", render: (r) => r.children ? `<button class="hbtn" data-children>${r.children}个子级</button>` : "—" },
-  { label: "均涨%", num: true, sort: "avg_change", title: "成分涨跌幅平均", render: (r) => pctCell(r.avg_change) },
-  { label: "上涨", num: true, render: (r) => (r.up_count ? `<span class="up num">${r.up_count}</span>` : `<span style="color:var(--faint)">0</span>`) },
-  { label: "下跌", num: true, render: (r) => (r.down_count ? `<span class="down num">${r.down_count}</span>` : `<span style="color:var(--faint)">0</span>`) },
-  { label: "上涨占比", num: true, sort: "up_rate", render: (r) =>
+  { label: "子行业", pri: 3, render: (r) => r.children ? `<button class="hbtn" data-children>${r.children}个子级</button>` : "—" },
+  { label: "均涨%", num: true, pri: 1, sort: "avg_change", title: "成分涨跌幅平均", render: (r) => pctCell(r.avg_change) },
+  { label: "上涨", num: true, pri: 2, render: (r) => (r.up_count ? `<span class="up num">${r.up_count}</span>` : `<span style="color:var(--faint)">0</span>`) },
+  { label: "下跌", num: true, pri: 2, render: (r) => (r.down_count ? `<span class="down num">${r.down_count}</span>` : `<span style="color:var(--faint)">0</span>`) },
+  { label: "上涨占比", num: true, pri: 1, sort: "up_rate", render: (r) =>
       (r.members ? `${Math.round((r.up_count / r.members) * 100)}%` : "—") },
-  { label: "领涨股", render: (r) => (r.leader
+  { label: "领涨股", pri: 2, render: (r) => (r.leader
       ? `${esc(r.leader)} ${pctCell(r.leader_change, "")}` : `<span style="color:var(--faint)">—</span>`) },
-  { label: "成分 / 有行情", num: true, title: "全部成分数量 / 有当日快照的数量", render: (r) => `${r.total_members} / ${r.members}` },
-  { label: "成交额", num: true, sort: "amount", render: (r) => fmtYi(r.amount) },
+  { label: "成分 / 有行情", num: true, pri: 3, title: "全部成分数量 / 有当日快照的数量", render: (r) => `${r.total_members} / ${r.members}` },
+  { label: "成交额", num: true, pri: 2, sort: "amount", render: (r) => fmtYi(r.amount) },
 ];
 
 /* 当前 sort 参数（"-" 前缀 = 降序）；默认涨跌幅降序（行情习惯） */
@@ -230,7 +230,7 @@ async function setLink(symbol: string, name: string,
   head.textContent = name || symbol;
   code.textContent = symbol;
   quote.innerHTML = row && row.current != null
-    ? `${fmt(row.current)} <b class="${(row.change_rate ?? 0) > 0 ? "up" : (row.change_rate ?? 0) < 0 ? "down" : ""}">${fmtChg(row.change_rate ?? 0)}%</b>`
+    ? `${fmtP(row.current, symbol)} <b class="${(row.change_rate ?? 0) > 0 ? "up" : (row.change_rate ?? 0) < 0 ? "down" : ""}">${fmtChg(row.change_rate ?? 0)}%</b>`
     : `<span style="color:var(--faint)">—</span>`;
   if (linkSymbol === symbol) return;      // 同标的重复点击：不重拉（30s 轮询在管左表）
   linkSymbol = symbol;
@@ -447,13 +447,13 @@ async function loadMembers(): Promise<void> {
 
 /* 指数 tab：INDEX_CATALOG × 当日快照，客户端排序（数据量小，不分页） */
 const INDEX_COLS: DataTableCol<IndexBarItem>[] = [
-  { label: "#", width: 34, mono: true, render: (_r, i) => `<span style="color:var(--faint)">${i + 1}</span>` },
-  { label: "名称", sort: "name", render: (r) => `<span style="font-weight:600">${esc(r.name)}</span>` },
-  { label: "代码", mono: true, sort: "symbol", render: (r) => r.symbol },
-  { label: "现价", num: true, sort: "current", render: (r) => fmt(r.current) },
-  { label: "涨跌额", num: true, sort: "change_amount", render: (r) => pctCell(r.change_amount, "") },
-  { label: "涨跌幅", num: true, sort: "change_rate", render: (r) => pctCell(r.change_rate) },
-  { label: "成交额", num: true, sort: "amount", render: (r) => fmtYi(r.amount) },
+  { label: "#", width: 34, mono: true, pri: 3, render: (_r, i) => `<span style="color:var(--faint)">${i + 1}</span>` },
+  { label: "名称", pri: 1, sort: "name", render: (r) => `<span style="font-weight:600">${esc(r.name)}</span>` },
+  { label: "代码", mono: true, pri: 3, sort: "symbol", render: (r) => r.symbol },
+  { label: "现价", num: true, pri: 1, sort: "current", render: (r) => fmt(r.current) },
+  { label: "涨跌额", num: true, pri: 3, sort: "change_amount", render: (r) => pctCell(r.change_amount, "") },
+  { label: "涨跌幅", num: true, pri: 1, sort: "change_rate", render: (r) => pctCell(r.change_rate) },
+  { label: "成交额", num: true, pri: 2, sort: "amount", render: (r) => fmtYi(r.amount) },
 ];
 
 async function loadIndices(): Promise<void> {

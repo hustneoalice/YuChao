@@ -56,26 +56,26 @@ export function initCorepicks(): void {
   if (initialized) { void renderCorepicks(); return; }
   initialized = true;
   table = createDataTable(el("wrap"), [
-    { label:"所属板块", render:r => r.sources.map(s => `${esc(s.category)}·${esc(s.name)}`).join(" / ") },
-    { label:"板块内排名", render:r => String(r.rank) },
-    { label:"代码", render:r => esc(r.symbol) },
-    { label:"名称", render:r => `<b>${esc(r.name)}</b>` },
-    { label:"市场", render:r => r.mainboard ? "主板" : "其他A股" },
-    { label:"涨幅", num:true, render:r => pct(r.change_rate) },
-    { label:"资金排名", render:r => r.fund_rank ? `第${r.fund_rank}名 / 前12` : "—" },
-    { label:"主力净额", num:true, render:r => money(r.main.net) },
-    { label:"主力介入度", num:true, render:r => pct(r.main.participation) },
-    { label:"主力占比", num:true, render:r => pct(r.main.ratio) },
-    { label:"入选依据", render:r => r.sources.map(s => `${esc(s.category)}·${esc(s.name)}（板块涨幅第${s.change_rank}）`).join(" / ") },
-    { label:"操作", render:() => '<button class="hbtn" data-k>日K</button> <button class="hbtn" data-watch>自选</button>' },
+    { label:"所属板块", pri:2, render:r => r.sources.map(s => `${esc(s.category)}·${esc(s.name)}`).join(" / ") },
+    { label:"板块内排名", pri:3, render:r => String(r.rank) },
+    { label:"代码", pri:2, render:r => esc(r.symbol) },
+    { label:"名称", pri:1, render:r => `<b>${esc(r.name)}</b>` },
+    { label:"市场", pri:3, render:r => r.mainboard ? "主板" : "其他A股" },
+    { label:"涨幅", num:true, pri:1, render:r => pct(r.change_rate) },
+    { label:"资金排名", pri:3, render:r => r.fund_rank ? `第${r.fund_rank}名 / 前12` : "—" },
+    { label:"主力净额", num:true, pri:1, render:r => money(r.main.net) },
+    { label:"主力介入度", num:true, pri:2, render:r => pct(r.main.participation) },
+    { label:"主力占比", num:true, pri:3, render:r => pct(r.main.ratio) },
+    { label:"入选依据", pri:3, render:r => r.sources.map(s => `${esc(s.category)}·${esc(s.name)}（板块涨幅第${s.change_rank}）`).join(" / ") },
+    { label:"操作", pri:1, render:() => '<button class="hbtn" data-k>日K</button> <button class="hbtn" data-watch>自选</button>' },
   ], {tblKey:"corepicks-main",rowKey:r => `${r.sources[0]?.code}:${r.symbol}`, onRow:(r,e) => {
     if ((e.target as HTMLElement).closest('[data-watch]')) { openWatchPanel(r.symbol,r.name); return; }
     document.dispatchEvent(new CustomEvent('yc:open-stock',{detail:{symbol:r.symbol,name:r.name,from:{page:'corepicks',label:'核心标'}}}));
   }});
   candidates = createDataTable(el("candidates"), [
-    {label:"涨幅排名",render:r => String(r.change_rank)}, {label:"板块",render:r => esc(r.name)},
-    {label:"涨幅",num:true,render:r => pct(r.change_rate)}, {label:"主力净额",num:true,render:r => money(r.main.net)},
-    {label:"筛选结果",render:r => esc(r.reason)},
+    {label:"涨幅排名",pri:3,render:r => String(r.change_rank)}, {label:"板块",pri:1,render:r => esc(r.name)},
+    {label:"涨幅",num:true,pri:1,render:r => pct(r.change_rate)}, {label:"主力净额",num:true,pri:1,render:r => money(r.main.net)},
+    {label:"筛选结果",pri:2,render:r => esc(r.reason)},
   ],{tblKey:"corepicks-cands",rowKey:r => r.key});
   el("kinds").addEventListener('click',e => { const b=(e.target as HTMLElement).closest<HTMLElement>('[data-kind]'); if(!b) return; kind=b.dataset.kind!; el("kinds").querySelectorAll('button').forEach(x=>x.classList.toggle('on',x===b)); renderCandidates(); });
   history().addEventListener('change',() => { dateInput().value=history().value; void renderCorepicks(); });

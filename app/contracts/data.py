@@ -11,6 +11,12 @@ class TableStatus(BaseModel):
     latest_date: Optional[str] = None
     earliest_date: Optional[str] = None  # 数据起始日（前端展示数据范围年限）
     coverage: Optional[float] = None  # 0-100，最新截面覆盖的标的数 / 全市场证券数
+    # 按数据类别自带的更新周期判定（日更 / 季度 / 周更 / 常驻），前端据此上色与说明
+    cycle: Optional[str] = None
+    expected: Optional[str] = None
+    fresh: Optional[str] = None          # ok | warn | bad
+    fresh_badge: Optional[str] = None    # 「最新」「符合季度周期」「常驻清单」…
+    fresh_note: Optional[str] = None     # 一句话说明（悬停可见）
 
 
 class DataStatus(BaseModel):

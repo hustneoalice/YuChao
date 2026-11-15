@@ -33,26 +33,30 @@ from ..config import settings
 # init 脚本与测试夹具共用同一份字符串，避免副本漂移。仓库查询层直接读视图。
 PRICE_VIEW_DDL = """
     -- 前复权视图（看盘口径，K线默认输出）：无因子记录的品种（指数等）自动退化为原始价
+    -- 个股：等比因子 fore_adjust_factor（baostock）。场内基金：现金分红是减法
+    -- （qfq = raw - 累计分红），单一乘数无法同时对齐 OHLC，故另用 fore_offset
+    -- 的加法项承载累计分红，乘数只吸收份额折算（拆分）。
     CREATE OR REPLACE VIEW v_daily_ohlcv_qfq AS
     SELECT
         o.symbol, o.date,
-        o.open  * COALESCE(af.fore_adjust_factor, 1) AS open,
-        o.high  * COALESCE(af.fore_adjust_factor, 1) AS high,
-        o.low   * COALESCE(af.fore_adjust_factor, 1) AS low,
-        o.close * COALESCE(af.fore_adjust_factor, 1) AS close,
+        o.open  * COALESCE(af.fore_adjust_factor, 1) + COALESCE(af.fore_offset, 0) AS open,
+        o.high  * COALESCE(af.fore_adjust_factor, 1) + COALESCE(af.fore_offset, 0) AS high,
+        o.low   * COALESCE(af.fore_adjust_factor, 1) + COALESCE(af.fore_offset, 0) AS low,
+        o.close * COALESCE(af.fore_adjust_factor, 1) + COALESCE(af.fore_offset, 0) AS close,
         o.volume, o.amount, o.pct_chg, o.turnover_rate
     FROM daily_ohlcv o
     ASOF LEFT JOIN adjust_factor af
         ON o.symbol = af.symbol AND CAST(o.date AS DATE) >= CAST(af.ex_date AS DATE);
 
-    -- 后复权视图（收益计算口径，无未来函数）
+    -- 后复权视图（收益计算口径，无未来函数）：场内基金用 back_offset 承载
+    -- 累计已分红（加法），back_adjust_factor 吸收份额折算
     CREATE OR REPLACE VIEW v_daily_ohlcv_hfq AS
     SELECT
         o.symbol, o.date,
-        o.open  * COALESCE(af.back_adjust_factor, 1) AS open,
-        o.high  * COALESCE(af.back_adjust_factor, 1) AS high,
-        o.low   * COALESCE(af.back_adjust_factor, 1) AS low,
-        o.close * COALESCE(af.back_adjust_factor, 1) AS close,
+        o.open  * COALESCE(af.back_adjust_factor, 1) + COALESCE(af.back_offset, 0) AS open,
+        o.high  * COALESCE(af.back_adjust_factor, 1) + COALESCE(af.back_offset, 0) AS high,
+        o.low   * COALESCE(af.back_adjust_factor, 1) + COALESCE(af.back_offset, 0) AS low,
+        o.close * COALESCE(af.back_adjust_factor, 1) + COALESCE(af.back_offset, 0) AS close,
         o.volume, o.amount, o.pct_chg, o.turnover_rate
     FROM daily_ohlcv o
     ASOF LEFT JOIN adjust_factor af
@@ -194,6 +198,8 @@ NEW_TABLES_DDL = """
 # 存量表迁移（幂等；writer.ensure_schema / scripts/ensure_schema.py 共用执行）。
 # 1.0 继承库没有 kind 列——概念板块接入（2.1）统一在此补齐，老库/导入包全兼容。
 MIGRATIONS = (
+    "ALTER TABLE adjust_factor ADD COLUMN IF NOT EXISTS fore_offset DOUBLE",
+    "ALTER TABLE adjust_factor ADD COLUMN IF NOT EXISTS back_offset DOUBLE",
     "ALTER TABLE sector_index ADD COLUMN IF NOT EXISTS kind VARCHAR DEFAULT 'industry'",
     "ALTER TABLE target_trend ADD COLUMN IF NOT EXISTS neg_run INTEGER",
     "ALTER TABLE target_trend ADD COLUMN IF NOT EXISTS neg_abs DOUBLE",

@@ -459,7 +459,7 @@ def fetch_kline_em(code: str, count: int = 3000, fqt: int = 0) -> List[Dict[str,
     return rows
 
 
-def fetch_kline_tx(code: str, count: int = 3200) -> List[Dict[str, Any]]:
+def fetch_kline_tx(code: str, count: int = 3200, fqt: str = "") -> List[Dict[str, Any]]:
     """腾讯 fqkline 日线（不复权原始价）→ [{t,o,h,l,c,v,amount,...}]（主车道）。
 
     单车道内 4 个域名轮换（1.0 kline_lanes 教训：单端点被 WAF 拦会让全市场
@@ -479,26 +479,32 @@ def fetch_kline_tx(code: str, count: int = 3200) -> List[Dict[str, Any]]:
         return []
     klines: list = []
     if count <= _TX_MAX_PAGE:
-        klines = _tx_raw_bars(tx, None, count)
+        klines = _tx_raw_bars(tx, None, count, fqt)
     else:
-        klines = _tx_paged_bars(tx, count)
+        klines = _tx_paged_bars(tx, count, fqt)
     return _tx_rows(pure_of(code), klines)
 
 
 #: 腾讯单次请求根数硬顶（实测 2500 起 param error；留 2000 安全边际）
 _TX_MAX_PAGE = 2000
-_TX_MAX_PAGES = 4
+_TX_MAX_PAGES = 12
 
 
-def _tx_raw_bars(tx: str, end: str | None, count: int) -> list:
+def _tx_raw_bars(tx: str, end: str | None, count: int, fqt: str = "") -> list:
     """打一次腾讯日线，返回原始 bar 列表；end 为空 = 取最近 count 根。
 
-    4 端点轮换（WAF 只拦特定路径），全部失败才抛；param error 的 list 结构
-    显式识别，避免旧代码 .get() 崩成 AttributeError。
+    fqt="" 不复权 · "qfq" 前复权 · "hfq" 后复权（仅 fqkline/newfqkline 端点
+    支持；不支持 fq 的端点会回空，按失败轮换到下一个）。4 端点轮换（WAF 只拦
+    特定路径），全部失败才抛；param error 的 list 结构显式识别，避免旧代码
+    .get() 崩成 AttributeError。
     """
-    param = (f"{tx},day,,{end},{count}," if end else f"{tx},day,,,{count},")
+    param = (f"{tx},day,,{end},{count},{fqt}" if end
+             else f"{tx},day,,,{count},{fqt}")
+    key = f"{fqt}day" if fqt else "day"
     failures: list[str] = []
     for url, ref in _TX_KLINE_ENDPOINTS:
+        if fqt and "fqkline" not in url:      # kline/kline 不认复权参数，会静默回裸价
+            continue
         try:
             data = get_json(url, {"param": param}, ref, timeout=10)
         except Exception as e:
@@ -509,20 +515,31 @@ def _tx_raw_bars(tx: str, end: str | None, count: int) -> list:
             failures.append(f"{url.split('/')[2]}:param error(count={count})")
             continue
         node = (body or {}).get(tx) or {}
-        bars = node.get("day") or node.get("qfqday") or []
+        bars = node.get(key) or []
         if bars:
             return bars
+        if fqt and node.get("day"):
+            return []        # 只有裸价、没有 *_day 复权键：源站没有该品种复权序列
         failures.append(f"{url.split('/')[2]}:空数据")
     raise RuntimeError("腾讯 K 线全部端点不可用（" + "；".join(failures) + "）")
 
 
-def _tx_paged_bars(tx: str, count: int) -> list:
-    """按日期区间往回翻页取深度历史（去重后按时间升序）。"""
+def _tx_paged_bars(tx: str, count: int, fqt: str = "") -> list:
+    """按日期区间往回翻页取深度历史（去重后按时间升序）。
+
+    前复权（fqt=qfq）单页硬顶只有 640 根（复权端点另一条限制），因此页数上限
+    放到 12；翻到上市日之前源站回空，属正常结束而非故障。
+    """
     got: list = []
     seen: set = set()
     window_end = date.today()
     for _ in range(_TX_MAX_PAGES):
-        page = _tx_raw_bars(tx, window_end.isoformat(), _TX_MAX_PAGE)
+        try:
+            page = _tx_raw_bars(tx, window_end.isoformat(), _TX_MAX_PAGE, fqt)
+        except RuntimeError:
+            if not got:          # 首屏就取不到 = 端点整体不可用，向上抛
+                raise
+            break                # 已翻过上市日，源站回空
         for k in page:
             if isinstance(k, list) and k and str(k[0]) not in seen:
                 seen.add(str(k[0]))

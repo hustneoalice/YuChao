@@ -7,6 +7,16 @@ export function fmtChg(v: number | null | undefined): string {
   if (v == null || Number.isNaN(v)) return "—";
   return (v > 0 ? "+" : "") + v.toFixed(2);
 }
+/** 价格小数位：ETF / LOF / 场内基金最小变动 0.001，股票 0.01。
+ *  按代码前缀判断（沪 5xx 基金、深 15x/16x），不依赖后端字段。 */
+export function priceDigits(symbol: string | null | undefined): number {
+  const s = String(symbol ?? "").replace(/^(sh|sz|bj)\.?/i, "");
+  return /^(15|16|5)/.test(s) ? 3 : 2;
+}
+/** 按标的格式化价格：ETF 保留三位（1.216 不四舍五入成 1.22），股票两位 */
+export function fmtP(v: number | null | undefined, symbol: string | null | undefined): string {
+  return fmt(v, priceDigits(symbol));
+}
 /** 金额（元）→ 亿 / 万亿字符串（≥1 万亿自动进位，避免出现 298,030.32亿 这种读数） */
 export function fmtYi(v: number | null | undefined, digits = 2): string {
   if (v == null || Number.isNaN(v)) return "—";

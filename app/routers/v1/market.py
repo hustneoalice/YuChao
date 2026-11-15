@@ -1,4 +1,5 @@
 """行情端点：GET /market/kline · /market/minute · /market/quote · /market/search · 资讯/研报。"""
+import threading as _threading
 import time as _time
 from datetime import date
 from typing import Literal, Optional
@@ -218,6 +219,100 @@ def minute(symbol: str = Query(description="6 位代码，兼容 sh.600519 形�
     return _cached(f"m|{symbol}", 30, lambda: _minute_series(symbol))
 
 
+_BM_LOCK = _threading.Lock()
+
+
+def _hist_minute(symbol: str, day: str, adjust: str) -> dict:
+    """指定交易日的日内走势：baostock 5 分钟线（腾讯/东财只保留最近 5 天，翻不了历史）。
+
+    baostock 是单会话全局状态，多请求并发会串号 → 整个查询串行化；单日数据只读不写。
+    """
+    from datetime import date as _date, timedelta as _timedelta
+
+    from ...foundation.symbol import normalize_symbol
+    from ...updater.collectors.http import market_prefix
+
+    code = normalize_symbol(symbol)
+    try:
+        d0 = _date.fromisoformat(day)
+    except ValueError as e:
+        raise invalid_param(f"日期格式应为 YYYY-MM-DD：{day}") from e
+    try:
+        pre = market_prefix(code)
+    except ValueError as e:
+        raise invalid_param(f"非法代码：{symbol}") from e
+    if pre == "bj":
+        raise data_not_ready("北交所暂无历史分时数据")
+
+    try:
+        import baostock as bs
+    except ImportError as e:
+        raise data_not_ready("历史分时数据源未安装（baostock）") from e
+
+    flag = {"qfq": "2", "hfq": "1", "raw": "3"}.get(adjust, "2")
+    bs_code = f"{pre}.{code}"
+    with _BM_LOCK:
+        lg = bs.login()
+        if getattr(lg, "error_code", "0") not in ("0", 0):
+            raise data_not_ready("历史分时数据源连接失败")
+        try:
+            rs = bs.query_history_k_data_plus(
+                bs_code, "date,time,open,high,low,close,volume,amount",
+                start_date=day, end_date=day, frequency="5", adjustflag=flag)
+            rows = []
+            while rs.error_code == "0" and rs.next():
+                rows.append(rs.get_row_data())
+            prev = None
+            rs2 = bs.query_history_k_data_plus(
+                bs_code, "date,close",
+                start_date=(d0 - _timedelta(days=20)).isoformat(),
+                end_date=(d0 - _timedelta(days=1)).isoformat(),
+                frequency="d", adjustflag=flag)
+            while rs2.error_code == "0" and rs2.next():
+                v = rs2.get_row_data()
+                if v[1]:
+                    prev = float(v[1])
+        finally:
+            bs.logout()
+
+    bars = []
+    cum_v = cum_a = 0.0
+    for r in rows:
+        if len(r) < 8 or not r[7]:
+            continue
+        cum_v += float(r[6] or 0)
+        cum_a += float(r[7] or 0)
+        c = float(r[5])
+        t = r[1]                                     # 20241008093500000
+        bars.append({
+            "date": f"{day} {t[8:10]}:{t[10:12]}",
+            "open": float(r[2]), "high": float(r[3]), "low": float(r[4]), "close": c,
+            "volume": float(r[6] or 0), "amount": float(r[7] or 0),
+            "avg": round(cum_a / cum_v, 4) if cum_v > 0 else c,
+            "has_avg": True,
+        })
+    return {"symbol": code, "date": day, "prev_close": prev,
+            "granularity": 5, "adjust": adjust, "bars": bars}
+
+
+@router.get("/market/intraday", summary="历史分时（指定交易日的日内 5 分钟走势，baostock）")
+def intraday(
+    symbol: str = Query(description="6 位代码，兼容 sh.600519 形态"),
+    date: str = Query(description="交易日 YYYY-MM-DD"),
+    adjust: Adjust = Query(default=Adjust.qfq, description="qfq 与 K 线口径一致；hfq / raw"),
+):
+    from datetime import date as _date
+
+    day = date.strip().replace("/", "-")
+    try:
+        _date.fromisoformat(day)
+    except ValueError as e:
+        raise invalid_param(f"日期格式应为 YYYY-MM-DD：{date}") from e
+    ttl = 60 if day == _date.today().isoformat() else 86400   # 当天还在长，短缓存
+    return _cached(f"hi|{symbol}|{day}|{adjust.value}", ttl,
+                   lambda: _hist_minute(symbol, day, adjust.value))
+
+
 @router.get("/market/sparks", summary="批量当日走势（自选列表 sparkline：降采样价格点 + 昨收）")
 def sparks(symbols: str = Query(description="逗号分隔代码，≤50 只")):
     """自选列表行内迷你走势：每只降采样 ≈40 点（首尾保留），昨收供涨跌着色与基线。
@@ -300,8 +395,11 @@ def _merge_live_bar(bars: list, symbol: str, adjust: Adjust) -> list:
         if prev_qfq and rt["prev_close"]:
             ratio = prev_qfq / rt["prev_close"]
             # 守卫 4：跨源昨收对不上（>2%）说明快照陈旧或复权口径错位，
-            # 此时宁可不合并，也不能把一根缩放过 3% 的假 bar 塞进 K 线尾巴
-            if abs(ratio - 1) > 0.02:
+            # 此时宁可不合并，也不能把一根缩放过 3% 的假 bar 塞进 K 线尾巴。
+            # 后复权例外：昨收比 ≈ 累计分红倍数（恒 >1，可达 1.4+），按区间放行，
+            # 否则后复权视图会一直缺「今日」这根线上 bar。
+            bad = ratio < 0.98 or (ratio > 3 if adjust is Adjust.hfq else abs(ratio - 1) > 0.02)
+            if bad:
                 return bars
             scale = ratio or 1.0
     f = lambda v: (v * scale) if v is not None else None  # noqa: E731
