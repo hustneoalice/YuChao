@@ -10,10 +10,14 @@ import logging
 import time
 
 from ..writer import writer
+from ...foundation.bulk import bulk_upsert
 from . import zy_source
 from .zy_local import LOCAL_CONFIG, import_config
 
 logger = logging.getLogger("yuchao.updater")
+
+_BLOCK_COLS = ("block_code", "block_name", "type_code", "parent_code", "sort_no")
+_BLOCK_MEMBER_COLS = ("block_code", "symbol", "stock_name")
 
 
 def update_zy_blocks(progress=None, ctx=None) -> dict:
@@ -34,12 +38,10 @@ def update_zy_blocks(progress=None, ctx=None) -> dict:
             raise RuntimeError("板块清单为空（接口可能变更/被限流）")
         progress(stage="写板块清单", total=len(blocks), done=len(blocks),
                  message=f"众赢板块清单 {len(blocks)} 个")
-        conn.executemany(
-            "INSERT OR REPLACE INTO zy_block "
-            "(block_code, block_name, type_code, parent_code, sort_no) "
-            "VALUES (?,?,?,?,?)",
-            [(b["block_code"], b["block_name"], b["type_code"],
-              b["parent_code"], b["sort_no"]) for b in blocks])
+        bulk_upsert(conn, "zy_block", _BLOCK_COLS,
+                    [(b["block_code"], b["block_name"], b["type_code"],
+                      b["parent_code"], b["sort_no"]) for b in blocks],
+                    ("block_code",))
         conn.commit()
 
         codes = [b["block_code"] for b in blocks]
@@ -53,9 +55,8 @@ def update_zy_blocks(progress=None, ctx=None) -> dict:
                 for code in members:
                     if members[code]:
                         conn.execute("DELETE FROM zy_block_member WHERE block_code=?", [code])
-                conn.executemany(
-                    "INSERT OR REPLACE INTO zy_block_member "
-                    "(block_code, symbol, stock_name) VALUES (?,?,?)", rows)
+                bulk_upsert(conn, "zy_block_member", _BLOCK_MEMBER_COLS, rows,
+                            ("block_code", "symbol"))
                 conn.execute("COMMIT")
             except Exception:
                 conn.execute("ROLLBACK")

@@ -7,9 +7,11 @@ from __future__ import annotations
 
 import logging
 import time
+from datetime import datetime
 
 from ..util import expected_asof
 from ..writer import writer
+from ...foundation.bulk import bulk_update
 from . import sources
 
 logger = logging.getLogger("yuchao.updater")
@@ -36,21 +38,19 @@ def update_quotes(progress=None, ctx=None) -> dict:
 
         conn = writer.conn()    # 抓完再拿锁，写完立即释放
         # 换手率：当日 daily_ohlcv 行的 turnover_rate 补写（K线车道不带换手率）
-        turn_rows = [(v[7], s, day) for s, v in raw.items()
-                     if v[7] is not None]
+        turn_rows = [(s, day, v[7]) for s, v in raw.items() if v[7] is not None]
         n_turn = 0
         if turn_rows:
-            conn.executemany(
-                "UPDATE daily_ohlcv SET turnover_rate = ? "
-                "WHERE symbol = ? AND date = ?", turn_rows)
+            bulk_update(conn, "daily_ohlcv", ("symbol", "date", "turnover_rate"),
+                        turn_rows, ("symbol", "date"))
             n_turn = len(turn_rows)
 
         # 名称刷新：证券简称会变（ST/摘帽/更名），universe.name 唯一自动写入路径
-        name_rows = [(v[0], s) for s, v in raw.items() if v[0]]
+        stamp = datetime.now()
+        name_rows = [(s, v[0], stamp) for s, v in raw.items() if v[0]]
         if name_rows:
-            conn.executemany(
-                "UPDATE stock_universe SET name = ?, updated_at = CURRENT_TIMESTAMP "
-                "WHERE symbol = ?", name_rows)
+            bulk_update(conn, "stock_universe", ("symbol", "name", "updated_at"),
+                        name_rows, ("symbol",))
         conn.commit()
         writer.reset()
 

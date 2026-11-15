@@ -13,6 +13,7 @@ from datetime import datetime, time as dtime
 from ..util import expected_asof, now_cst
 from ..trading_calendar import is_trading_day
 from ..writer import writer
+from ...foundation.bulk import bulk_insert
 from ...foundation.symbol import INDEX_CATALOG
 from . import sources
 
@@ -20,6 +21,12 @@ logger = logging.getLogger("yuchao.updater")
 
 # 单轮快照行数下限（疑似限流/整包垃圾拒绝落库；测试可 monkeypatch 调低）
 _MIN_SNAPSHOT_ROWS = 3000
+
+_SNAPSHOT_COLS = ("symbol", "kind", "market", "name", "current", "change_amount",
+                  "change_rate", "open", "high", "low", "pre_close", "up_limit",
+                  "down_limit", "volume", "amount", "turnover_rate", "vol_ratio",
+                  "amplitude", "bid1", "bid1_vol", "ask1", "ask1_vol", "outer_vol",
+                  "inner_vol", "market_value", "circ_value", "trade_date")
 
 
 def _in_trading_hours(now: datetime) -> bool:
@@ -88,14 +95,7 @@ def update_market_snapshot(progress=None, ctx=None) -> dict:
                 continue
             rows.append((sym, kind, market) + t + (day,))
         conn.execute("DELETE FROM market_snapshot WHERE trade_date = ?", [day])
-        conn.executemany(
-            "INSERT OR REPLACE INTO market_snapshot "
-            "(symbol, kind, market, name, current, change_amount, change_rate, "
-            "open, high, low, pre_close, up_limit, down_limit, volume, amount, "
-            "turnover_rate, vol_ratio, amplitude, bid1, bid1_vol, ask1, ask1_vol, "
-            "outer_vol, inner_vol, market_value, circ_value, trade_date) "
-            "VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)",
-            rows)
+        bulk_insert(conn, "market_snapshot", _SNAPSHOT_COLS, rows)
         conn.commit()
         n_stk = sum(1 for r in rows if r[1] == "stock")
         n_fund = sum(1 for r in rows if r[1] == "fund")

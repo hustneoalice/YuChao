@@ -12,10 +12,16 @@ from datetime import datetime
 
 from ..util import expected_asof
 from ..writer import writer
+from ...foundation.bulk import bulk_insert, bulk_update
 from . import sources
 from .http import market_prefix
 
 logger = logging.getLogger("yuchao.updater")
+
+_VALUATION_COLS = ("symbol", "date", "pe_ttm", "pb", "ps_ttm", "pcf_ncf_ttm",
+                   "total_mv", "circ_mv", "amount")
+_NEW_STOCK_COLS = ("symbol", "name", "market", "industry", "status", "list_date",
+                   "updated_at")
 
 
 def update_valuation(progress=None, ctx=None) -> dict:
@@ -54,10 +60,7 @@ def update_valuation(progress=None, ctx=None) -> dict:
                  message=f"{day} 共 {len(rows)} 个标的")
         conn = writer.conn()
         conn.execute("DELETE FROM daily_valuation WHERE date = ?", [d0])
-        conn.executemany(
-            "INSERT OR REPLACE INTO daily_valuation "
-            "(symbol,date,pe_ttm,pb,ps_ttm,pcf_ncf_ttm,total_mv,circ_mv,amount) "
-            "VALUES (?,?,?,?,?,?,?,?,?)", rows)
+        bulk_insert(conn, "daily_valuation", _VALUATION_COLS, rows)
 
         # 停牌信号落旁表（当日无成交、f6='-'）；只存停牌，一天几行到几十行。
         # 只删同来源行：行情源自证（source='kline'）的结论更权威，不能被快照覆盖。
@@ -94,9 +97,8 @@ def update_valuation(progress=None, ctx=None) -> dict:
         ind_fixed = 0
         try:
             if industries:
-                conn.executemany(
-                    "UPDATE stock_universe SET industry = ? WHERE symbol = ?",
-                    [(v, k) for k, v in industries.items()])
+                bulk_update(conn, "stock_universe", ("symbol", "industry"),
+                            [(k, v) for k, v in industries.items()], ("symbol",))
                 ind_fixed = len(industries)
         except Exception as e:
             logger.warning("[Valuation] 补行业分类失败: %s", e)
@@ -107,19 +109,18 @@ def update_valuation(progress=None, ctx=None) -> dict:
         added = 0
         try:
             if names:
+                now = datetime.now()      # 原 SQL 用 CURRENT_TIMESTAMP，批量路径显式带时间戳
                 have = {str(r[0]) for r in conn.execute(
                     "SELECT symbol FROM stock_universe").fetchall()}
                 fresh = [
                     (sym, nm, market_prefix(sym), industries.get(sym), "traded",
                      datetime.strptime(listed[sym], "%Y-%m-%d").date()
-                     if listed.get(sym) else None)
+                     if listed.get(sym) else None, now)
                     for sym, nm in names.items() if sym not in have
                 ]
                 if fresh:
-                    conn.executemany(
-                        "INSERT OR IGNORE INTO stock_universe "
-                        "(symbol,name,market,industry,status,list_date,updated_at) "
-                        "VALUES (?,?,?,?,?,?,CURRENT_TIMESTAMP)", fresh)
+                    # 已按 have 去重，纯追加等价于原 INSERT OR IGNORE
+                    bulk_insert(conn, "stock_universe", _NEW_STOCK_COLS, fresh)
                     added = len(fresh)
         except Exception as e:
             logger.warning("[Valuation] 新股入池失败: %s", e)

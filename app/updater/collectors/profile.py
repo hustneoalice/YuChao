@@ -11,6 +11,7 @@ import time
 from datetime import datetime
 
 from ..writer import writer
+from ...foundation.bulk import bulk_insert
 from .http import get_json_hosts
 
 logger = logging.getLogger("yuchao.updater")
@@ -78,9 +79,9 @@ def update_stock_profile(progress=None, ctx=None) -> dict:
         payload = [(sym, n, mb, ind, now) for sym, (n, mb, ind) in rows.items()]
         conn = writer.conn()
         conn.execute("DELETE FROM stock_profile")     # 全量重建，幂等
-        conn.executemany(
-            "INSERT INTO stock_profile (symbol,name,main_business,industry,updated_at)"
-            " VALUES (?,?,?,?,?)", payload)
+        bulk_insert(conn, "stock_profile",
+                    ("symbol", "name", "main_business", "industry", "updated_at"),
+                    payload)
         conn.commit()
         writer.reset()
         with_mb = sum(1 for _, _, mb, _, _ in payload if mb)

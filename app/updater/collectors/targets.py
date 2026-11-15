@@ -15,6 +15,7 @@ import time
 from datetime import datetime, time as dtime
 
 from ..writer import writer
+from ...foundation.bulk import bulk_insert
 from ...foundation.repo import market as repo
 
 logger = logging.getLogger("yuchao.updater")
@@ -23,6 +24,11 @@ _SCAN_COLS = ("symbol", "name", "close", "pct_chg", "vol_ma40", "vol_ratio",
               "vol_hit", "short_orange", "mid_orange", "limit_up_20d",
               "limit_up_cnt", "seg", "seg_name", "pullback", "acc_strength",
               "dkx_gold_ago", "dkx_death_ago", "as_of")
+_TREND_COLS = ("symbol", "data_date", "trend_value", "cross_date", "cross_ago",
+               "above_days", "neg_run", "neg_abs", "money_date", "money_ago",
+               "money_cnt", "mine_date", "mine_ago", "mine_cnt")
+_TAIL_COLS = ("symbol", "data_date", "snapshot_at", "computed_at", "money_date",
+              "money_ago", "money_cnt", "mine_date", "mine_ago", "mine_cnt")
 
 
 def update_target_scan(progress=None, ctx=None) -> dict:
@@ -45,10 +51,8 @@ def update_target_scan(progress=None, ctx=None) -> dict:
             return result
         as_of = meta["as_of"]
         conn.execute("DELETE FROM target_scan")
-        conn.executemany(
-            "INSERT OR REPLACE INTO target_scan (" + ",".join(_SCAN_COLS) + ") "
-            "VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)",
-            [tuple(r.get(c) for c in _SCAN_COLS[:-1]) + (as_of,) for r in scan])
+        bulk_insert(conn, "target_scan", _SCAN_COLS,
+                    [tuple(r.get(c) for c in _SCAN_COLS[:-1]) + (as_of,) for r in scan])
         conn.execute("DELETE FROM target_trend")
         tr_rows = [(sym, r.get("trend_data_date"), r.get("trend_value"),
                     r.get("trend_cross_date"), r.get("trend_cross_ago"),
@@ -57,12 +61,7 @@ def update_target_scan(progress=None, ctx=None) -> dict:
                     r.get("mine_date"), r.get("mine_ago"), r.get("mine_cnt"))
                    for sym, r in trend.items()]
         if tr_rows:
-            conn.executemany(
-                "INSERT OR REPLACE INTO target_trend "
-                "(symbol,data_date,trend_value,cross_date,cross_ago,above_days,"
-                "neg_run,neg_abs,money_date,money_ago,money_cnt,"
-                "mine_date,mine_ago,mine_cnt) "
-                "VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?)", tr_rows)
+            bulk_insert(conn, "target_trend", _TREND_COLS, tr_rows)
         conn.commit()
         result.update(status="completed", rows=len(scan), trend_rows=len(tr_rows), as_of=as_of,
                       detail=f"{as_of}：目标指标 {len(scan)} 只，趋势柱线 {len(tr_rows)} 只")
@@ -105,10 +104,8 @@ def update_target_scan_live(progress=None, ctx=None) -> dict:
             result.update(status="cancelled")
             return result
         conn.execute("DELETE FROM target_scan")
-        conn.executemany(
-            "INSERT OR REPLACE INTO target_scan (" + ",".join(_SCAN_COLS) + ") "
-            "VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)",
-            [tuple(r.get(c) for c in _SCAN_COLS[:-1]) + (meta["as_of"],) for r in scan])
+        bulk_insert(conn, "target_scan", _SCAN_COLS,
+                    [tuple(r.get(c) for c in _SCAN_COLS[:-1]) + (meta["as_of"],) for r in scan])
         conn.commit()
         result.update(status="completed", rows=len(scan), as_of=meta["as_of"],
                       detail=f"盘中快照 {live['updated_at'][:16]}：目标指标 {len(scan)} 只")
@@ -121,13 +118,8 @@ def update_target_scan_live(progress=None, ctx=None) -> dict:
                 if tail:
                     conn.execute("DELETE FROM target_tail WHERE data_date = ?",
                                  [tmeta["as_of"]])
-                    tail_cols = ("symbol", "data_date", "snapshot_at", "computed_at",
-                                 "money_date", "money_ago", "money_cnt",
-                                 "mine_date", "mine_ago", "mine_cnt")
-                    conn.executemany(
-                        "INSERT OR REPLACE INTO target_tail ("
-                        + ",".join(tail_cols) + ") VALUES (?,?,?,?,?,?,?,?,?,?)",
-                        [tuple(r.get(c) for c in tail_cols) for r in tail])
+                    bulk_insert(conn, "target_tail", _TAIL_COLS,
+                                [tuple(r.get(c) for c in _TAIL_COLS) for r in tail])
                     conn.commit()
                     result["tail_rows"] = len(tail)
                     result["snapshot_at"] = tmeta["snapshot_at"]

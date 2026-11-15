@@ -11,11 +11,13 @@ import time
 from datetime import date
 
 from ..writer import writer
+from ...foundation.bulk import bulk_insert, bulk_upsert
 
 logger = logging.getLogger("yuchao.updater")
 
 _BAOSTOCK_SLEEP = 0.05
 _COMMIT_EVERY = 200
+_QFACTOR_COLS = ("symbol", "ex_date", "fore_adjust_factor", "back_adjust_factor")
 
 
 def update_adjust_factor(progress=None, ctx=None) -> dict:
@@ -88,10 +90,8 @@ def update_adjust_factor(progress=None, ctx=None) -> dict:
                 if len(buf) >= 5000 or done % _COMMIT_EVERY == 0:
                     if buf:
                         c = writer.conn()    # 写批次：拿锁 → 写 → 立即释放
-                        c.executemany(
-                            "INSERT OR REPLACE INTO adjust_factor "
-                            "(symbol,ex_date,fore_adjust_factor,back_adjust_factor) "
-                            "VALUES (?,?,?,?)", buf)
+                        bulk_upsert(c, "adjust_factor", _QFACTOR_COLS, buf,
+                                    ("symbol", "ex_date"))
                         c.commit()
                         writer.reset()
                         buf.clear()
@@ -101,10 +101,7 @@ def update_adjust_factor(progress=None, ctx=None) -> dict:
 
             if buf:
                 c = writer.conn()
-                c.executemany(
-                    "INSERT OR REPLACE INTO adjust_factor "
-                    "(symbol,ex_date,fore_adjust_factor,back_adjust_factor) "
-                    "VALUES (?,?,?,?)", buf)
+                bulk_upsert(c, "adjust_factor", _QFACTOR_COLS, buf, ("symbol", "ex_date"))
                 c.commit()
                 writer.reset()
                 buf.clear()
@@ -203,11 +200,10 @@ def _funds_pass(progress, cancel) -> int:
                     rows = _fund_factor_rows(sym, raw, qfq)
                     c.execute("DELETE FROM adjust_factor WHERE symbol = ?", [sym])
                     if rows:
-                        c.executemany(
-                            "INSERT OR REPLACE INTO adjust_factor "
-                            "(symbol,ex_date,fore_adjust_factor,fore_offset,"
-                            "back_adjust_factor,back_offset) "
-                            "VALUES (?,?,?,?,?,?)", rows)
+                        bulk_insert(c, "adjust_factor",
+                                    ("symbol", "ex_date", "fore_adjust_factor",
+                                     "fore_offset", "back_adjust_factor", "back_offset"),
+                                    rows)
                     c.commit()
                 except Exception:   # 单只接口抖动不中断全量（限流偶发，下次调度会补齐）
                     failed += 1

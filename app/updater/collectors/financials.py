@@ -13,9 +13,13 @@ import time
 from datetime import date
 
 from ..writer import writer
+from ...foundation.bulk import bulk_insert
 from . import sources
 
 logger = logging.getLogger("yuchao.updater")
+
+_FIN_COLS = ("symbol", "report_date", "net_profit", "net_profit_yoy", "roe",
+             "debt_ratio", "operating_cashflow", "audit_opinion")
 
 
 _QEND = [(3, 31), (6, 30), (9, 30), (12, 31)]
@@ -68,10 +72,7 @@ def update_financials(progress=None, ctx=None) -> dict:
             conn = writer.conn()        # 写窗口：拿锁 → 写 → 立即释放
             # 幂等：先删该报告期再整批插入（不依赖主键存在）
             conn.execute("DELETE FROM financials WHERE report_date = ?", [period])
-            conn.executemany(
-                "INSERT INTO financials "
-                "(symbol,report_date,net_profit,net_profit_yoy,roe,debt_ratio,"
-                "operating_cashflow,audit_opinion) VALUES (?,?,?,?,?,?,?,?)", rows)
+            bulk_insert(conn, "financials", _FIN_COLS, rows)
             conn.commit()
             writer.reset()
             total_rows += len(rows)

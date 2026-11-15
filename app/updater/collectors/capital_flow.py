@@ -16,10 +16,14 @@ import threading
 import time
 
 from ...config import settings
+from ...foundation.bulk import bulk_upsert
 from ..writer import writer
 from . import sources
 
 logger = logging.getLogger("yuchao.updater")
+
+_FLOW_COLS = ("symbol", "date", "net_main", "net_super", "net_large",
+              "net_medium", "net_small")
 
 _COMMIT_ROWS = 2000         # 缓冲行数上限：到量即写，避免内存堆积
 _COMMIT_DONE = 500          # 标的数：批提交节奏（并发下按标的数节流，别每百只敲一次锁）
@@ -59,10 +63,7 @@ def update_capital_flow(progress=None, ctx=None) -> dict:
             if not buf:
                 return
             c = writer.conn()
-            c.executemany(
-                "INSERT OR REPLACE INTO capital_flow "
-                "(symbol,date,net_main,net_super,net_large,net_medium,net_small) "
-                "VALUES (?,?,?,?,?,?,?)", buf)
+            bulk_upsert(c, "capital_flow", _FLOW_COLS, buf, ("symbol", "date"))
             c.commit()
             writer.reset()
             buf.clear()

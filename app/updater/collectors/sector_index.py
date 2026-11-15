@@ -13,9 +13,14 @@ from datetime import datetime
 
 from ..util import expected_asof
 from ..writer import writer
+from ...foundation.bulk import bulk_insert, bulk_upsert
 from . import sources
 
 logger = logging.getLogger("yuchao.updater")
+
+_SECTOR_COLS = ("industry", "trade_date", "close", "pct_change", "code",
+                "up_count", "down_count", "leader", "leader_change", "kind")
+_MEMBER_COLS = ("bk_code", "bk_name", "symbol", "stock_name")
 
 
 def update_sector_index(progress=None, ctx=None) -> dict:
@@ -40,13 +45,10 @@ def update_sector_index(progress=None, ctx=None) -> dict:
                              f"{len(sectors)} 个")
             conn.execute("DELETE FROM sector_index WHERE trade_date = ? AND kind = ?",
                          [day, kind])
-            conn.executemany(
-                "INSERT OR REPLACE INTO sector_index "
-                "(industry, trade_date, close, pct_change, code, up_count, down_count, "
-                " leader, leader_change, kind) VALUES (?,?,?,?,?,?,?,?,?,?)",
-                [(s["industry"], day, s["close"], s["pct_change"], s["code"],
-                  s["up_count"], s["down_count"], s["leader"], s["leader_change"], kind)
-                 for s in sectors])
+            bulk_insert(conn, "sector_index", _SECTOR_COLS,
+                        [(s["industry"], day, s["close"], s["pct_change"], s["code"],
+                          s["up_count"], s["down_count"], s["leader"],
+                          s["leader_change"], kind) for s in sectors])
             conn.commit()
             counts[kind] = len(sectors)
             if kind == "concept":
@@ -73,11 +75,9 @@ def _sync_concept_members(conn, concepts: list[dict], progress, cancel) -> int:
             continue
         members = sources.fetch_board_members(code)
         if members:
-            conn.executemany(
-                "INSERT OR REPLACE INTO sector_member "
-                "(bk_code, bk_name, symbol, stock_name) VALUES (?,?,?,?)",
-                [(code, s["industry"], m["symbol"], m["stock_name"])
-                 for m in members])
+            bulk_upsert(conn, "sector_member", _MEMBER_COLS,
+                        [(code, s["industry"], m["symbol"], m["stock_name"])
+                         for m in members], ("bk_code", "symbol"))
             n += len(members)
         if i % 20 == 0:
             conn.commit()                       # 分批提交：370 板块中途失败不整包丢

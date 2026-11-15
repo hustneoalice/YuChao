@@ -40,6 +40,7 @@ import time
 from datetime import date, datetime, timedelta
 
 from ...config import settings
+from ...foundation.bulk import bulk_upsert
 from ...foundation.symbol import is_bj
 from ..util import expected_asof
 from ..writer import writer
@@ -50,6 +51,8 @@ logger = logging.getLogger("yuchao.updater")
 
 _COMMIT_EVERY = 50          # 标的数：批提交节奏（1.0 同款）
 _PCT_FILL_DAYS = 45         # pct 补算回看窗口（天）：只补近期缺口，不全表扫
+_OHLCV_COLS = ("symbol", "date", "open", "high", "low", "close", "volume",
+               "amount", "pct_chg", "turnover_rate")
 
 #: 车道序列（1.0 kline_lanes 语义）：腾讯 4 端点轮换主车道 → 新浪备车道 →
 #: 东财 push2his 兜底。任一车道连续 3 失败即冷却 300s，跳过换下家。
@@ -207,10 +210,8 @@ def update_kline(progress=None, ctx=None) -> dict:
             if not buf:
                 return
             c = writer.conn()
-            c.executemany(
-                "INSERT OR REPLACE INTO daily_ohlcv "
-                "(symbol,date,open,high,low,close,volume,amount,pct_chg,turnover_rate) "
-                "VALUES (?,?,?,?,?,?,?,?,?,?)", buf)
+            # CSV → 临时堆表 → 按键 DELETE+INSERT：20k 行约 0.2s（executemany 要 110s）
+            bulk_upsert(c, "daily_ohlcv", _OHLCV_COLS, buf, ("symbol", "date"))
             c.commit()
             writer.reset()
             buf.clear()
