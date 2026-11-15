@@ -271,19 +271,21 @@ def _extreme(segs: list[dict], direction: int, dates: list[str]) -> dict | None:
 def _live_bar(last: dict, t: tuple, quote_date: str) -> dict | None:
     """用实时快照补出「今天」这根日线（后复权口径），让盘中就参与 10% 波段判定。
 
-    - 复权比例 = 最后一根日线收盘 / 快照昨收（hfq 与裸价的固定比例；裸价比例≈1）。
+    - 用今日涨跌幅把「昨日收盘（后复权）」推到今日收盘：hfq 序列的收益率连续，
+      除权日也不会因分红缺口算错。
     - 只在快照归属日晚于最后一根日线时补；数据源延迟/休市（同日快照）不补，
       避免凭空多出一根重复 K 线。
     """
-    price, o, h, l, prev = t[1], t[4], t[5], t[6], t[7]
-    if not price or not prev or last["c"] <= 0 or last["t"] >= quote_date:
+    price, o, h, l, pct = t[1], t[4], t[5], t[6], t[3]
+    if not price or pct is None or last["c"] <= 0 or last["t"] >= quote_date:
         return None
-    factor = last["c"] / prev
+    close_hfq = last["c"] * (1 + pct / 100.0)
+    factor = close_hfq / price
     o = o if o and o > 0 else price
     h = h if h and h > 0 else max(price, o)
     l = l if l and l > 0 else min(price, o)
     bar = {"t": quote_date, "o": o * factor, "h": h * factor,
-           "l": l * factor, "c": price * factor}
+           "l": l * factor, "c": close_hfq}
     if not (0.75 <= bar["c"] / last["c"] <= 1.35):      # 复权比例异常，宁可不补
         return None
     tol = last["c"] * 0.002
@@ -299,16 +301,15 @@ def analyse(code: str, short: str, full: str, bars: list[dict],
     work = bars
     live = bars[-1]["c"]                    # 与日线同口径（复权后）的最新价
     new_day = bool(quote_date and quote_date > bars[-1]["t"])
-    if quote:
-        live_raw, prev = quote[1], quote[7]
-        if live_raw:
-            if adj == "hfq" and prev:
-                # 复权比例取「同一交易日」的 hfq/裸价：新交易日用最后一根，当天用倒数第二根。
-                ref = (bars[-1]["c"] if (new_day or len(bars) < 2)
-                       else bars[-2]["c"])
-                live = live_raw * (ref / prev)
-            else:
-                live = live_raw                      # raw 序列本身就是裸价
+    fresh = bool(quote) and (not quote_date or quote_date >= bars[-1]["t"])
+    if fresh:
+        pct = quote[3]
+        if pct is not None and len(bars) >= 2:
+            # 用涨跌幅从「昨日收盘」推到最新价：hfq 收益连续，除权日也不会错位。
+            base = bars[-1]["c"] if new_day else bars[-2]["c"]
+            live = base * (1 + pct / 100.0)
+        elif adj != "hfq" and quote[1]:
+            live = quote[1]
         tb = _live_bar(bars[-1], quote, quote_date) if quote_date else None
         if tb:
             work = bars + [tb]
