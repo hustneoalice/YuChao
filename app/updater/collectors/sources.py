@@ -346,7 +346,8 @@ def fetch_qt_batch(codes: List[str], progress=None, cancel=None) -> Dict[str, Tu
     return out
 
 
-def fetch_qt_snapshot(codes: List[str], progress=None, cancel=None, expected_date=None) -> Dict[str, Tuple]:
+def fetch_qt_snapshot(codes: List[str], progress=None, cancel=None, expected_date=None,
+                      with_date: bool = False) -> Dict[str, Tuple]:
     """腾讯 qt 全字段快照 → {sym: 快照元组}（全景大页 market_snapshot 专用）。
 
     字段口径（qt payload 下标实测）：[3]现价 [4]昨收 [5]今开 [6]成交量(手)
@@ -356,7 +357,8 @@ def fetch_qt_snapshot(codes: List[str], progress=None, cancel=None, expected_dat
     (name, current, change_amount, change_rate, open, high, low, pre_close,
      up_limit, down_limit, volume, amount, turnover_rate, vol_ratio,
      amplitude, bid1, bid1_vol, ask1, ask1_vol, outer_vol, inner_vol,
-     market_value, circ_value)。
+     market_value, circ_value)。with_date=True 时末尾追加快照归属日
+    （YYYY-MM-DD，来自 p[30] 时间戳；解析失败为 None）。
     指数同样适用（涨跌停/换手等为空，写入侧按 kind 兜底 0）。"""
     out: Dict[str, Tuple] = {}
     from .http import tx_symbol
@@ -387,7 +389,7 @@ def fetch_qt_snapshot(codes: List[str], progress=None, cancel=None, expected_dat
             amt = _num(p[37])
             total_mv = _num(p[45])
             circ_mv = _num(p[44])
-            out[sym] = (
+            row = (
                 p[1], price, chg, chg_pct,
                 _num(p[5]), _num(p[33]), _num(p[34]), _num(p[4]),
                 _num(p[47]), _num(p[48]),
@@ -399,6 +401,12 @@ def fetch_qt_snapshot(codes: List[str], progress=None, cancel=None, expected_dat
                 total_mv * 1e8 if total_mv else None,
                 circ_mv * 1e8 if circ_mv else None,
             )
+            if with_date:
+                ts = p[30] if len(p) > 30 else ""
+                qd = (f"{ts[:4]}-{ts[4:6]}-{ts[6:8]}"
+                      if len(ts) >= 8 and ts[:8].isdigit() else None)
+                row = row + (qd,)
+            out[sym] = row
         _emit(progress, done=min(i + _QT_BATCH, total), total=total,
               log=f"快照 [{min(i + _QT_BATCH, total)}/{total}]")
         if cancel and cancel():

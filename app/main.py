@@ -20,7 +20,7 @@ from . import __version__
 from .config import settings
 from .errors import ApiError
 from .foundation.db import DataSourceMissing
-from .routers.v1 import ai, auth, corepicks, data, mainforce, market, me, sectors
+from .routers.v1 import ai, auth, corepicks, data, etf, mainforce, market, me, sectors
 from .stream.sse import router as stream_router
 from .neo.router import router as neo_router
 
@@ -114,6 +114,7 @@ app.include_router(mainforce.router, prefix=v1)
 app.include_router(sectors.router, prefix=v1)
 app.include_router(corepicks.router, prefix=v1)
 app.include_router(data.router, prefix=v1)
+app.include_router(etf.router, prefix=v1)
 app.include_router(ai.router, prefix=v1)
 app.include_router(stream_router, prefix=v1)
 

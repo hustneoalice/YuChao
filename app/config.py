@@ -18,6 +18,8 @@ class Settings(BaseSettings):
     api_embedded_updater: bool = True       # 更新内核内置 API 进程（策影模式：编排器+调度+自愈并入 uvicorn）
     control_poll_s: float = 2.0             # 控制请求轮询间隔
     selfheal_ledger_path: Path = Path(__file__).resolve().parent.parent / "data" / "selfheal_ledger.json"
+    # ETF 涨跌逻辑页缓存（饭钱/菜钱/酒钱三组 ETF 的日线与波段统计，非数据库表）
+    etf_updown_path: Path = Path(__file__).resolve().parent.parent / "data" / "etf_updown.json"
 
     # M3 用户态 / license（SQLite，按账户隔离，与行情底座分库）
     userdb_path: Path = Path(__file__).resolve().parent.parent / "data" / "users.sqlite3"

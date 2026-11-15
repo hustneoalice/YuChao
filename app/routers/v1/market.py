@@ -13,6 +13,7 @@ from ...contracts.market import (Depth, FundFlowRange, Kline, Quote, QuotesOut, 
 from ...errors import not_found, vip_required, invalid_param, data_not_ready
 from ...contracts.market import ShareholdersOut
 from ...foundation import shareholders
+from ...foundation import etf_updown
 from ...foundation import repo, screening
 from ...foundation.db import get_conn
 from ...foundation import live
@@ -463,6 +464,12 @@ def kline(
 ):
     if with_param == WithParam.vip:
         raise vip_required("VIP 通道未授权：短线/中线操盘通道数据不返回（M1 桩）")
+    etf = etf_updown.etf_code(symbol)
+    if etf:
+        # ETF 不在 DuckDB：用 ETF 页缓存的后复权日线（重定基到实时价）兜底，
+        # 让「ETF 逻辑」页单击行可直接跳到行情页看 K 线。
+        return TypeAdapter(Kline).validate_python(
+            etf_updown.chart_kline(etf, adjust.value, limit))
     if freq in _MINUTE_FREQS:
         tag, want = _MINUTE_FREQS[freq]
 
@@ -546,6 +553,9 @@ def _apply_rt(q: dict, rt: dict) -> None:
 
 @router.get("/market/quote", response_model=Quote, summary="个股快照（最新日线+估值+资金流，盘中叠实时价）")
 def quote(symbol: str, conn=Depends(get_conn)):
+    etf = etf_updown.etf_code(symbol)
+    if etf:
+        return TypeAdapter(Quote).validate_python(etf_updown.chart_quote(etf))
     q = repo.market.get_quote(conn, symbol)
     try:                                    # 实时兜底：成功则带 rt_* 字段，失败静默降级
         rt = live.realtime_quote(symbol)

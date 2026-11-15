@@ -13,6 +13,7 @@ import { initPanorama, loadPanorama } from "./pages/panview";
 import { initMainforce, loadMainforce } from "./pages/mainforce";
 import { loadMotion } from "./pages/motion";
 import { loadChase } from "./pages/chase";
+import { loadEtfUpdown } from "./pages/etf";
 import { initWatchlist, renderWatchlist } from "./pages/watchlist";
 import { initTargets, loadTargets } from "./pages/targets";
 import { initSectors, jumpSector, loadSectors } from "./pages/sectors";
@@ -27,7 +28,7 @@ import { initWatchPanel } from "./watch";
 
 const loaded = { watchlist: false, sectors: false, corepicks: false };
 /** 手机底栏「更多」抽屉里的页面：当前页在其中时，更多按钮保持高亮 */
-const MORE_PAGES = ["mainforce", "motion", "chase", "sectors", "corepicks", "ai", "cards", "settings"];
+const MORE_PAGES = ["mainforce", "motion", "chase", "sectors", "corepicks", "etfupdown", "ai", "cards", "settings"];
 
 /** 手机搜索页的来路：返回时回到这一页（搜索页本身不记入） */
 let searchFrom = "market";
@@ -50,6 +51,7 @@ function goPage(p: string): void {
   if (p === "targets") loadTargets();
   if (p === "sectors" && !loaded.sectors) { loaded.sectors = true; void loadSectors(); }
   if (p === "corepicks" && !loaded.corepicks) { loaded.corepicks = true; initCorepicks(); }
+  if (p === "etfupdown") void loadEtfUpdown();
   if (p === "cards") renderCards();
   if (p === "mcards") renderRight();      // 手机版卡片页：进入时重画右侧卡片
 }
